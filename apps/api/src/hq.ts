@@ -53,6 +53,30 @@ export class HqController {
   }
   return {period:{from,to,toExclusive:true},byLocation:[...grouped.values()].map(x=>({...x,gross:x.gross.toFixed(2),cash:x.cash.toFixed(2),card:x.card.toFixed(2)})),returned:sales.length,truncated:sales.length===5000,note:'Accepted POS gross totals only; refunds, tax and card settlement are not netted. Maximum 5000 sales per query; narrow the period if truncated.'};
  }
+ @Get('refund-liabilities')
+ async refundLiabilities(@Query('locationId') locationId?:string){
+  if(locationId&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locationId))throw new BadRequestException('Invalid locationId');
+  // Compute each return's lifetime liability before aggregating. Payouts from any date count.
+  // Group in SQL to avoid the 5,000-row truncation of the activity report.
+  const location=locationId?Prisma.sql`AND r."locationId" = ${locationId}::uuid`:Prisma.empty;
+  const onlineLocation=locationId?Prisma.sql`AND o."warehouseId" = ${locationId}::uuid`:Prisma.empty;
+  type Liability={channel:string;returnId:string;approved:Prisma.Decimal;paid:Prisma.Decimal;outstanding:Prisma.Decimal;approvedAt:Date};
+  const rows=await this.db.$queryRaw<Liability[]>`
+   WITH approved AS (
+    SELECT 'POS'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",COALESCE((SELECT SUM(l."refundAmount") FROM "PosReturnLine" l WHERE l."returnId"=r.id),0)::numeric AS approved,
+      COALESCE((SELECT SUM(s.amount) FROM "PosRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+    FROM "PosReturn" r WHERE r.status='APPROVED' ${location}
+    UNION ALL
+    SELECT 'ONLINE'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",r."merchandiseAmount"::numeric AS approved,
+      COALESCE((SELECT SUM(s.amount) FROM "OnlineRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+    FROM "OnlineReturn" r JOIN "OnlineOrder" o ON o.id=r."orderId" WHERE TRUE ${onlineLocation}
+   )
+   SELECT channel,"returnId",approved,paid,(approved-paid) AS outstanding,"approvedAt"
+   FROM approved WHERE approved>paid ORDER BY "approvedAt" ASC,"returnId" ASC
+  `;
+  const summary=(channel:string)=>{const relevant=rows.filter(x=>x.channel===channel);return {unpaidReturns:relevant.length,outstanding:relevant.reduce((n,x)=>n.plus(x.outstanding),new Prisma.Decimal(0)).toString()};};
+  return {currency:'PKR',asOf:new Date().toISOString(),pos:summary('POS'),online:summary('ONLINE'),totalOutstanding:rows.reduce((n,x)=>n.plus(x.outstanding),new Prisma.Decimal(0)).toString(),oldestUnpaid:rows.slice(0,100).map(x=>({channel:x.channel,returnId:x.returnId,approved:x.approved.toString(),paid:x.paid.toString(),outstanding:x.outstanding.toString(),approvedAt:x.approvedAt})),totalUnpaidReturns:rows.length,note:'Lifetime outstanding merchandise refund liability across all approved returns, net of recorded payouts through now. These are staff-entered settlements, not bank-verified disbursements. Oldest 100 items shown.'};
+ }
  @Get('refund-reconciliation')
  async refundReconciliation(@Query() q:PeriodQuery){
   const {from,to}=this.period(q);
