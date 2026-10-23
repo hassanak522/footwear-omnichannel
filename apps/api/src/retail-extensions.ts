@@ -29,12 +29,15 @@ export class ReplenishmentController {
  }
  @Post('requests/:id/reject') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async reject(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
+  const changed=await this.db.replenishmentRequest.updateMany({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}});
+  if(changed.count!==1)throw new ConflictException('Request already reviewed');
+  return this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});
  }
  // Approval records intent only. Physical stock must move through the existing audited transfer workflow.
  @Post('requests/:id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async approve(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  if(r.status!=='REQUESTED')throw new ConflictException('Already reviewed');
-  return this.db.replenishmentRequest.update({where:{id},data:{status:'APPROVED',reviewedAt:new Date()}});
+  const changed=await this.db.replenishmentRequest.updateMany({where:{id,status:'REQUESTED'},data:{status:'APPROVED',reviewedAt:new Date()}});
+  if(changed.count!==1)throw new ConflictException('Request already reviewed');
+  return this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});
  }
 }
