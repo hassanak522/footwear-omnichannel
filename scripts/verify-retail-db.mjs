@@ -35,6 +35,9 @@ try {
  for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId'],['OnlineReturn','idempotencyKey'],['OnlineRefundSettlement','idempotencyKey'],['LoyaltyRedemption','idempotencyKey']]){
   assert(indexes.some(x=>x.tablename===table&&x.indexdef.includes('UNIQUE')&&x.indexdef.includes('"'+column+'"')),`Missing unique index on ${table}.${column}`);
  }
+ const guards=await db.$queryRawUnsafe(`SELECT tgname,relname FROM pg_trigger JOIN pg_class ON pg_class.oid=tgrelid WHERE NOT tgisinternal AND tgname IN ('OnlineRefundSettlement_balance_guard','PosRefundSettlement_balance_guard')`);
+ assert(guards.some(x=>x.tgname==='OnlineRefundSettlement_balance_guard'&&x.relname==='OnlineRefundSettlement'),'Online refund cap trigger missing');
+ assert(guards.some(x=>x.tgname==='PosRefundSettlement_balance_guard'&&x.relname==='PosRefundSettlement'),'POS refund cap trigger missing');
  const shiftColumn=await db.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='PosRefundSettlement' AND column_name='payoutShiftId'`);
  assert.equal(shiftColumn.length,1,'Refund payout shift column missing');
 
