@@ -512,6 +512,7 @@ model RetailCustomer {
  name String
  email String?
  consentMarketing Boolean @default(false)
+ loyaltyEntries LoyaltyEntry[]
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
 }
@@ -548,4 +549,15 @@ model ReplenishmentRequest {
  createdAt DateTime @default(now())
  reviewedAt DateTime?
  @@index([destinationId,status])
+}
+
+model LoyaltyEntry {
+ id String @id @default(uuid()) @db.Uuid
+ customerId String @db.Uuid
+ customer RetailCustomer @relation(fields:[customerId],references:[id])
+ orderId String @unique @db.Uuid
+ points Int
+ amount Decimal @db.Decimal(12,2)
+ createdAt DateTime @default(now())
+ @@index([customerId,createdAt])
 }
