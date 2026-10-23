@@ -47,7 +47,7 @@ try {
  const probe=async(statement,params,expected)=>{
   await assert.rejects(
    db.$transaction(async tx=>{await tx.$executeRawUnsafe(statement,...params);}),
-   e=>{const msg=String(e.message??e);assert(msg.toLowerCase().includes(expected),`Expected PostgreSQL ${expected} violation, received: ${msg}`);return true;}
+   e=>{const msg=String(e.message??e);assert(msg.toLowerCase().includes(expected.toLowerCase()),`Expected PostgreSQL ${expected} violation, received: ${msg}`);return true;}
   );
  };
  const uid='00000000-0000-4000-8000-000000000001';
