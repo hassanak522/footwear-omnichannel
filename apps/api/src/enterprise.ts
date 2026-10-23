@@ -118,6 +118,7 @@ export class RetailController {
  }
  @Post('customers/:id/loyalty-reversals') @Roles('SUPER_ADMIN') async reverseLoyalty(@Param('id') id:string,@Body() dto:LoyaltyReversalDto,@CurrentUser() u:Principal){
   return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-customer:'+id}))`;
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-entry:'+dto.sourceEntryId}))`;
    const previous=await tx.loyaltyAdjustment.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
    if(previous){if(previous.customerId!==id||previous.sourceEntryId!==dto.sourceEntryId||previous.points!==-dto.points||previous.reason!==dto.reason)throw new ConflictException('Loyalty reversal key reused with different request');return previous;}
