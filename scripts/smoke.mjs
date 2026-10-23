@@ -33,6 +33,12 @@ await check('Public shipping quote shape', async () => {
  if(typeof r.body?.available!=='boolean'||r.body?.currency!=='PKR')throw new Error('invalid shipping quote');
  if(r.body.available&&(!/^([0-9]+)([.][0-9]{1,2})?$/.test(r.body.shippingFee)||Number(r.body.shippingFee)<0))throw new Error('invalid configured shipping charge');
 });
+await check('POS shift closure requires authentication', async () => {
+ const r=await request('/pos/shifts/00000000-0000-4000-8000-000000000000/close',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({closingCash:0})});expectStatus(r,401);
+});
+await check('POS shift summary requires authentication', async () => {
+ const r=await request('/pos/shifts/00000000-0000-4000-8000-000000000000/summary');expectStatus(r,401);
+});
 await check('POS return mutations require authentication', async () => {
  const r=await request('/pos/returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
 });
