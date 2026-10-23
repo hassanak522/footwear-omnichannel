@@ -431,6 +431,7 @@ model OnlineOrder {
  shippingFee Decimal @db.Decimal(12,2) @default(0)
  total Decimal @db.Decimal(12,2)
  lines OnlineOrderLine[]
+ returns OnlineReturn[]
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
  dispatchedAt DateTime?
@@ -607,4 +608,27 @@ model PosExchange {
  idempotencyKey String @unique
  approvedById String @db.Uuid
  createdAt DateTime @default(now())
+}
+
+model OnlineReturn {
+ id String @id @default(uuid()) @db.Uuid
+ orderId String @db.Uuid
+ order OnlineOrder @relation(fields:[orderId],references:[id])
+ idempotencyKey String @unique
+ reason String
+ approvedById String @db.Uuid
+ merchandiseAmount Decimal @db.Decimal(12,2)
+ createdAt DateTime @default(now())
+ lines OnlineReturnLine[]
+ @@index([orderId,createdAt])
+}
+model OnlineReturnLine {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return OnlineReturn @relation(fields:[returnId],references:[id])
+ variantId String @db.Uuid
+ quantity Int
+ quarantined Boolean @default(false)
+ unitPrice Decimal @db.Decimal(12,2)
+ @@unique([returnId,variantId])
 }
