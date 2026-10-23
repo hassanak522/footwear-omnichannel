@@ -72,6 +72,19 @@ export class OnlineService {
      if(kind==='DISPATCHED')await tx.stockMovement.create({data:{locationId:order.warehouseId,variantId:line.variantId,type:'SALE',quantityDelta:-line.quantity,referenceType:'ONLINE_ORDER',referenceId:id,idempotencyKey:`online-dispatch:${id}:${line.variantId}`,actorId:u.id}});
     }
    }
+   // Loyalty accrues only when explicitly enabled and only for existing customer records.
+   // No automatic redemption, cash value, or refund adjustments are implied.
+   if(kind==='DELIVERED'&&process.env.LOYALTY_PKR_PER_POINT){
+    const raw=process.env.LOYALTY_PKR_PER_POINT;
+    if(!/^[1-9][0-9]*$/.test(raw))throw new ConflictException('Invalid loyalty earning configuration');
+    const customer=await tx.retailCustomer.findUnique({where:{phone:order.phone}});
+    if(customer){
+     const points=Number(order.total.div(new Prisma.Decimal(raw)).floor().toString());
+     if(!Number.isSafeInteger(points)||points<0)throw new ConflictException('Loyalty points exceed supported range');
+     await tx.loyaltyEntry.create({data:{customerId:customer.id,orderId:order.id,points,amount:order.total}});
+     await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_EARNED',entityType:'LoyaltyEntry',entityId:order.id,after:{customerId:customer.id,points,source:'DELIVERED_ONLINE_ORDER'}}});
+    }
+   }
    const updated=await tx.onlineOrder.update({where:{id},data:{status:kind,...(kind==='DISPATCHED'?{dispatchedAt:new Date(),courierName:dto.courierName,trackingNumber:dto.trackingNumber}:{})}});
    await tx.integrationEvent.create({data:{source:`ONLINE_${kind}`,eventType:id,idempotencyKey:dto.idempotencyKey,payload:{orderId:id,kind},processedAt:new Date()}});
    await tx.auditLog.create({data:{actorId:u.id,action:`ONLINE_${kind}`,entityType:'OnlineOrder',entityId:id,before:{status:order.status},after:{status:kind}}});
