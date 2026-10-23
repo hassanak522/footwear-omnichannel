@@ -10,6 +10,9 @@ export default function Store(){
  const [customer,setCustomer]=useState({customerName:'',phone:'',email:'',address:'',city:'Karachi'});
  // Preserve the same idempotency key across retries of an identical checkout.
  const pendingCheckout=useRef<{fingerprint:string;key:string}|null>(null);
+ useEffect(()=>{try{const raw=localStorage.getItem('royal-step-cart-v1');if(raw){const saved=JSON.parse(raw);if(saved&&typeof saved==='object'&&!Array.isArray(saved)){const valid=Object.fromEntries(Object.entries(saved).filter(([k,v])=>/^[0-9a-f-]{36}$/i.test(k)&&typeof v==='number'&&Number.isSafeInteger(v)&&v>0&&v<=100));setCart(valid as Record<string,number>)}}}catch{localStorage.removeItem('royal-step-cart-v1')}},[]);
+ useEffect(()=>{if(products.length){setCart(old=>Object.fromEntries(Object.entries(old).filter(([id,q])=>products.some(p=>p.variants.some(v=>v.id===id&&v.available>0))&&q>0).map(([id,q])=>[id,Math.min(q,products.flatMap(p=>p.variants).find(v=>v.id===id)!.available)])))}},[products]);
+ useEffect(()=>{if(products.length)localStorage.setItem('royal-step-cart-v1',JSON.stringify(cart))},[cart,products]);
  useEffect(()=>{fetch(`${API}/store/shipping`).then(r=>r.json()).then(setShipping).catch(()=>setShipping({available:false,shippingFee:null}))},[]);
  useEffect(()=>{fetch(`${API}/store/products`).then(r=>{if(!r.ok)throw Error('Catalog API unavailable');return r.json()}).then(setProducts).catch(e=>setErr(e.message))},[]);
  const variants=products.flatMap(p=>p.variants), selected=Object.entries(cart).filter(([,q])=>q>0).map(([id,quantity])=>({variantId:id,quantity}));
