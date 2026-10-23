@@ -18,6 +18,13 @@ class CheckoutDto {
 }
 class OnlineReturnLineDto { @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsOptional() @IsBoolean() quarantined?:boolean; }
 class OnlineReturnDto { @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string; @IsString() @MinLength(3) @MaxLength(500) reason!:string; @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>OnlineReturnLineDto) lines!:OnlineReturnLineDto[]; }
+class OnlineRefundDto {
+ @IsUUID() returnId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsString() @MinLength(3) @MaxLength(30) method!:string;
+ @IsString() @MinLength(3) @MaxLength(100) reference!:string;
+ @IsInt() @Min(1) amountPaisa!:number;
+}
 class DispatchDto { @IsString() @MinLength(8) idempotencyKey!:string; @IsString() @MinLength(2) courierName!:string; @IsString() @MinLength(2) trackingNumber!:string; }
 class ActionDto { @IsString() @MinLength(8) idempotencyKey!:string; }
 @Injectable()
@@ -54,6 +61,30 @@ export class OnlineService {
    await tx.auditLog.create({data:{action:'ONLINE_ORDER_PLACED',entityType:'OnlineOrder',entityId:order.id,after:{total:subtotal.plus(shippingFee).toString(),shippingFee:shippingFee.toString(),itemCount:lines.length}}});
    return order;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+ }
+ async settleOnlineRefund(dto:OnlineRefundDto,u:Principal){
+  const methods=['CASH','BANK_TRANSFER','CARD','EASYPAISA','JAZZCASH','OTHER'];
+  if(!methods.includes(dto.method)||dto.reference.trim()!==dto.reference)throw new BadRequestException('Valid refund method and external payment reference required');
+  if(!Number.isSafeInteger(dto.amountPaisa))throw new BadRequestException('Refund amount must be a safe integer in paisa');
+  const amount=new Prisma.Decimal(dto.amountPaisa).div(100);
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT id FROM "OnlineReturn" WHERE id = ${dto.returnId}::uuid FOR UPDATE`;
+   const prior=await tx.onlineRefundSettlement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(prior){if(prior.returnId!==dto.returnId||prior.method!==dto.method||prior.reference!==dto.reference||!prior.amount.equals(amount))throw new ConflictException('Refund key reused with different details');return prior;}
+   const ret=await tx.onlineReturn.findUnique({where:{id:dto.returnId}});
+   if(!ret)throw new BadRequestException('Approved online return required');
+   const sum=await tx.onlineRefundSettlement.aggregate({where:{returnId:ret.id},_sum:{amount:true}});
+   if(amount.greaterThan(ret.merchandiseAmount.minus(sum._sum.amount??new Prisma.Decimal(0))))throw new ConflictException('Refund exceeds remaining merchandise amount');
+   const result=await tx.onlineRefundSettlement.create({data:{returnId:ret.id,idempotencyKey:dto.idempotencyKey,method:dto.method,reference:dto.reference,amount,settledById:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'ONLINE_REFUND_SETTLEMENT_RECORDED',entityType:'OnlineRefundSettlement',entityId:result.id,after:{returnId:ret.id,method:dto.method,amount:amount.toString(),reference:dto.reference}}});
+   return {...result,note:'Recorded an externally completed refund; this API does not transfer money.'};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async onlineRefundStatus(returnId:string){
+  const ret=await this.db.onlineReturn.findUnique({where:{id:returnId},include:{settlements:{orderBy:{settledAt:'desc'}}}});
+  if(!ret)throw new BadRequestException('Approved online return not found');
+  const paid=ret.settlements.reduce((n,s)=>n.plus(s.amount),new Prisma.Decimal(0));
+  return {returnId:ret.id,approvedAmount:ret.merchandiseAmount.toString(),recordedAmount:paid.toString(),remainingAmount:ret.merchandiseAmount.minus(paid).toString(),settlements:ret.settlements,note:'Recorded payments only. No payment provider integration or disbursement is performed.'};
  }
  async returnDeliveredOrder(id:string,dto:OnlineReturnDto,u:Principal){
   if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate return variants');
@@ -145,6 +176,8 @@ export class OnlineService {
 export class OrdersController {
  constructor(private db:Db,private svc:OnlineService){}
  @Get() list(@Query('status') status?:string){return this.db.onlineOrder.findMany({where:status&&['PLACED','CONFIRMED','DISPATCHED','DELIVERED','CANCELLED'].includes(status)?{status:status as any}:{},include:{lines:{include:{variant:{select:{sku:true}}}}},orderBy:{createdAt:'desc'},take:200});}
+ @Post('refunds/settle') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') settleRefund(@Body() dto:OnlineRefundDto,@CurrentUser() u:Principal){return this.svc.settleOnlineRefund(dto,u);}
+ @Get('refunds/:returnId') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') refundStatus(@Param('returnId') id:string){return this.svc.onlineRefundStatus(id);}
  @Get(':id/returns') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') async listReturns(@Param('id') id:string){const order=await this.db.onlineOrder.findUnique({where:{id},select:{id:true}});if(!order)throw new BadRequestException('Order not found');return this.db.onlineReturn.findMany({where:{orderId:id},include:{lines:true},orderBy:{createdAt:'desc'}});}
  @Post(':id/returns') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') returnOrder(@Param('id') id:string,@Body() dto:OnlineReturnDto,@CurrentUser() u:Principal){return this.svc.returnDeliveredOrder(id,dto,u);}
  @Post(':id/confirm') confirm(@Param('id') id:string,@Body() d:ActionDto,@CurrentUser() u:Principal){return this.svc.action(id,'CONFIRMED',d,u);}
