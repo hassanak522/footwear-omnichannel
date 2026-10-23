@@ -3,7 +3,7 @@ import {PrismaClient} from '@prisma/client';
 
 const db=new PrismaClient();
 try {
- const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift'];
+ const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift','PosExchange'];
  const tables=await db.$queryRawUnsafe('SELECT tablename FROM pg_tables WHERE schemaname = $1','public');
  const actual=new Set(tables.map(x=>x.tablename));
  for(const table of requiredTables)assert(actual.has(table),`Missing table: ${table}`);
@@ -22,9 +22,9 @@ try {
 
  const indexes=await db.$queryRawUnsafe(`
  SELECT tablename,indexdef FROM pg_indexes WHERE schemaname='public'
- AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry')
+ AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange')
  `);
- for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId']]){
+ for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId']]){
   assert(indexes.some(x=>x.tablename===table&&x.indexdef.includes('UNIQUE')&&x.indexdef.includes('"'+column+'"')),`Missing unique index on ${table}.${column}`);
  }
  const shiftColumn=await db.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='PosRefundSettlement' AND column_name='payoutShiftId'`);
