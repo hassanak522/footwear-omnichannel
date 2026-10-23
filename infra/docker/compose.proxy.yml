@@ -1,0 +1,27 @@
+# Optional HTTPS proxy overlay. Requires public DNS for WEB_DOMAIN and API_DOMAIN.
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      WEB_DOMAIN: ${WEB_DOMAIN:?Set WEB_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        printf '%s\\n' "$$WEB_DOMAIN { reverse_proxy web:3000 }" "$$API_DOMAIN { reverse_proxy api:3001 }" > /etc/caddy/Caddyfile
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [edge]
+volumes:
+  caddy_data:
+  caddy_config:
