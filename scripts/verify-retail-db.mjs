@@ -52,6 +52,30 @@ try {
  await probe('INSERT INTO "OnlineReturnLine" ("id","returnId","variantId","quantity","unitPrice") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3)',[uid,0,1],'check constraint');
  await probe('INSERT INTO "LoyaltyAdjustment" ("id","customerId","sourceEntryId","idempotencyKey","points","reason","actorId") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3,$4,$1::uuid)',[uid,'probe-positive-loyalty-adjustment',1,'probe'],'check constraint');
  await probe('INSERT INTO "LoyaltyRedemption" ("id","customerId","idempotencyKey","points","reference","reason","actorId") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-zero-point-redemption',0,'probe','probe reason'],'check constraint');
+ // Verify concurrent transactions contend on the same customer advisory lock.
+ // The second transaction must not enter its critical section before the first commits.
+ const lockKey='retail-ci-loyalty-customer';
+ let releaseFirst;
+ let firstEntered;
+ const firstReady=new Promise(resolve=>{firstEntered=resolve;});
+ const firstRelease=new Promise(resolve=>{releaseFirst=resolve;});
+ const events=[];
+ const first=db.$transaction(async tx=>{
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+  events.push('first-acquired');firstEntered();await firstRelease;
+  events.push('first-released');
+ },{timeout:10000});
+ await firstReady;
+ const second=db.$transaction(async tx=>{
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+  events.push('second-acquired');
+ },{timeout:10000});
+ // Give PostgreSQL a chance to schedule the competing transaction.
+ await db.$queryRawUnsafe('SELECT pg_sleep(0.15)');
+ assert.deepEqual(events,['first-acquired'],'Concurrent transaction entered locked loyalty section');
+ releaseFirst();
+ await Promise.all([first,second]);
+ assert.deepEqual(events,['first-acquired','first-released','second-acquired'],'Advisory lock failed to serialize concurrent transactions');
  // Compile the liability report's SQL against migrated PostgreSQL tables, even with an empty database.
  const liabilityPlan=await db.$queryRawUnsafe(`EXPLAIN
  WITH approved AS (
