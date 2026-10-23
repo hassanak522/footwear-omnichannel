@@ -98,6 +98,12 @@ class CustomerDto { @IsString() @MinLength(5) phone!:string; @IsString() @MinLen
 export class RetailController {
  constructor(private db:Db){}
  @Get('customers') customers(@Query('phone') phone?:string){if(!phone||phone.length<5)throw new BadRequestException('Phone search of 5+ characters required');return this.db.retailCustomer.findMany({where:{phone:{contains:phone}},take:25});}
+ @Get('customers/:id/insights') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async insights(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone},select:{id:true,orderNumber:true,status:true,total:true,createdAt:true},orderBy:{createdAt:'desc'},take:100});
+  const delivered=orders.filter(o=>o.status==='DELIVERED');
+  return {customer:{id:customer.id,name:customer.name,phone:customer.phone,consentMarketing:customer.consentMarketing},online:{orders:orders.length,deliveredOrders:delivered.length,deliveredValue:delivered.reduce((n,o)=>n+o.total.toNumber(),0).toFixed(2),recentOrders:orders.slice(0,10).map(o=>({...o,total:o.total.toString()})),truncated:orders.length===100},note:'Online orders matched by exact phone. POS sales are not linked to customer records; this is not an omnichannel lifetime value or loyalty points balance.'};
+ }
  @Post('customers') customer(@Body() dto:CustomerDto){return this.db.retailCustomer.create({data:dto});}
 }
 class PriceDto { @IsUUID() variantId!:string; @IsNumber({maxDecimalPlaces:2}) @Min(0) proposedPrice!:number; @IsString() @MinLength(5) @MaxLength(500) reason!:string; }
