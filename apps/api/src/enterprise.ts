@@ -104,6 +104,15 @@ export class RetailController {
   const delivered=orders.filter(o=>o.status==='DELIVERED');
   return {customer:{id:customer.id,name:customer.name,phone:customer.phone,consentMarketing:customer.consentMarketing},online:{orders:orders.length,deliveredOrders:delivered.length,deliveredValue:delivered.reduce((n,o)=>n+o.total.toNumber(),0).toFixed(2),recentOrders:orders.slice(0,10).map(o=>({...o,total:o.total.toString()})),truncated:orders.length===100},note:'Online orders matched by exact phone. POS sales are not linked to customer records; this is not an omnichannel lifetime value or loyalty points balance.'};
  }
+ @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone,status:'DELIVERED'},select:{id:true,orderNumber:true,total:true,createdAt:true},orderBy:{createdAt:'desc'},take:501});
+  const capped=orders.slice(0,500);
+  const total=capped.reduce((sum,o)=>sum.plus(o.total),new Prisma.Decimal(0));
+  const rate=100;
+  const points=capped.reduce((sum,o)=>sum+Math.floor(o.total.toNumber()/rate),0);
+  return {customerId:customer.id,program:'PREVIEW_ONLY',eligibleOrderCount:capped.length,deliveredOrderValue:total.toString(),hypotheticalPoints:points,earningRule:'1 illustrative point per PKR 100 per delivered online order, rounded down per order',truncated:orders.length>500,redeemable:false,note:'This is a non-redeemable simulation, not an actual loyalty balance. No POS purchases, refunds or redemptions are incorporated; configure an approved rewards policy and durable ledger before launch.'};
+ }
  @Post('customers') customer(@Body() dto:CustomerDto){return this.db.retailCustomer.create({data:dto});}
 }
 class PriceDto { @IsUUID() variantId!:string; @IsNumber({maxDecimalPlaces:2}) @Min(0) proposedPrice!:number; @IsString() @MinLength(5) @MaxLength(500) reason!:string; }
