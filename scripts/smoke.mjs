@@ -39,6 +39,9 @@ await check('POS shift closure requires authentication', async () => {
 await check('POS shift summary requires authentication', async () => {
  const r=await request('/pos/shifts/00000000-0000-4000-8000-000000000000/summary');expectStatus(r,401);
 });
+await check('Refund liability reporting requires authentication', async () => {
+ const r=await request('/hq/refund-liabilities');expectStatus(r,401);
+});
 await check('Online refund settlement requires authentication', async () => {
  const r=await request('/orders/refunds/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
 });
