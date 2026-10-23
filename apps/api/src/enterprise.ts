@@ -126,6 +126,12 @@ export class RetailController {
    if(!earned||earned.customerId!==id)throw new BadRequestException('Loyalty earning entry not found for customer');
    const prior=await tx.loyaltyAdjustment.aggregate({where:{sourceEntryId:earned.id},_sum:{points:true}});
    if(dto.points>earned.points+(prior._sum.points??0))throw new ConflictException('Reversal exceeds unreversed earned points');
+   const [totalEarned,totalReversed,totalRedeemed]=await Promise.all([
+    tx.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}})
+   ]);
+   if((totalEarned._sum.points??0)+(totalReversed._sum.points??0)-(totalRedeemed._sum.points??0)<dto.points)throw new ConflictException('Reversal would make already redeemed loyalty balance negative; reconcile the redemption first');
    const adjustment=await tx.loyaltyAdjustment.create({data:{customerId:id,sourceEntryId:earned.id,idempotencyKey:dto.idempotencyKey,points:-dto.points,reason:dto.reason,actorId:u.id}});
    await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REVERSED',entityType:'LoyaltyAdjustment',entityId:adjustment.id,after:{sourceEntryId:earned.id,points:-dto.points,reason:dto.reason}}});
    return adjustment;
