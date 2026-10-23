@@ -94,13 +94,13 @@ export class StockCountsController {
  }
 }
 class CustomerDto { @IsString() @MinLength(5) phone!:string; @IsString() @MinLength(2) name!:string; @IsOptional() @IsEmail() email?:string; @IsOptional() @IsBoolean() consentMarketing?:boolean; }
-@Controller('retail') @UseGuards(...guards) @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
 class LoyaltyReversalDto {
  @IsUUID() sourceEntryId!:string;
  @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
  @IsInt() @Min(1) points!:number;
  @IsString() @MinLength(10) @MaxLength(500) reason!:string;
 }
+@Controller('retail') @UseGuards(...guards) @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
 export class RetailController {
  constructor(private db:Db){}
  @Get('customers') customers(@Query('phone') phone?:string){if(!phone||phone.length<5)throw new BadRequestException('Phone search of 5+ characters required');return this.db.retailCustomer.findMany({where:{phone:{contains:phone}},take:25});}
