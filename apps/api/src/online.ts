@@ -79,9 +79,9 @@ export class OnlineService {
     if(!/^[1-9][0-9]*$/.test(raw))throw new ConflictException('Invalid loyalty earning configuration');
     const customer=await tx.retailCustomer.findUnique({where:{phone:order.phone}});
     if(customer){
-     const points=Number(order.total.div(new Prisma.Decimal(raw)).floor().toString());
+     const points=Number(order.subtotal.div(new Prisma.Decimal(raw)).floor().toString());
      if(!Number.isSafeInteger(points)||points<0)throw new ConflictException('Loyalty points exceed supported range');
-     await tx.loyaltyEntry.create({data:{customerId:customer.id,orderId:order.id,points,amount:order.total}});
+     await tx.loyaltyEntry.create({data:{customerId:customer.id,orderId:order.id,points,amount:order.subtotal}});
      await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_EARNED',entityType:'LoyaltyEntry',entityId:order.id,after:{customerId:customer.id,points,source:'DELIVERED_ONLINE_ORDER'}}});
     }
    }
