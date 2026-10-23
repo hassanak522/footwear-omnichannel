@@ -52,3 +52,14 @@ jobs:
         run: npm run build -w @footwear/web
       - name: Build Electron POS frontend
         run: npm run build -w @footwear/pos-desktop
+      - name: Validate Docker Compose production configuration
+        env:
+          POSTGRES_DB: royal_step
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          DATABASE_URL: postgresql://ci:ci@postgres:5432/royal_step?schema=public
+          JWT_SECRET: ci-only-placeholder-at-least-32-characters
+          CORS_ORIGIN: https://shop.example.com
+          NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
+          ONLINE_COD_SHIPPING_PKR: '250.00'
+        run: docker compose -f infra/docker/compose.production.yml config --quiet
