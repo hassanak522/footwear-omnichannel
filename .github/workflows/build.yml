@@ -9,7 +9,21 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: royal_step
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d royal_step"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5433/royal_step?schema=public
       JWT_SECRET: ci-only-not-for-production
@@ -28,6 +42,10 @@ jobs:
         run: npm exec --workspace=@footwear/database -- prisma validate
       - name: Generate Prisma client
         run: npm run db:generate
+      - name: Apply all migrations on clean PostgreSQL
+        run: npm exec --workspace=@footwear/database -- prisma migrate deploy
+      - name: Verify retail finance database constraints
+        run: node scripts/verify-retail-db.mjs
       - name: Build API
         run: npm run build -w @footwear/api
       - name: Build web app
