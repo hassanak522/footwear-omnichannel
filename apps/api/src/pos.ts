@@ -38,6 +38,13 @@ class ReturnDto {
  @IsString() @MinLength(3) @MaxLength(500) reason!: string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
 }
+class RefundSettlementDto {
+ @IsUUID() returnId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsEnum(PosTenderType) method!:PosTenderType;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0.01) amount!:number;
+ @IsOptional() @IsString() @MaxLength(100) reference?:string;
+}
 class SyncSaleDto {
  @IsUUID() deviceId!: string;
  @IsUUID() localSaleId!: string;
@@ -164,6 +171,36 @@ export class PosService {
    return ret;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
+ async settleRefund(dto:RefundSettlementDto,u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
+   const previous=await tx.posRefundSettlement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){
+    const original=await tx.posReturn.findUniqueOrThrow({where:{id:previous.returnId}});
+    this.branchAccess(u,original.locationId);
+    if(previous.returnId!==dto.returnId||previous.method!==dto.method||!previous.amount.equals(money(dto.amount))||(previous.reference??null)!==(dto.reference??null))throw new ConflictException('Refund key reused with different details');
+    return previous;
+   }
+   const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true}});
+   if(!ret||ret.status!=='APPROVED')throw new BadRequestException('Approved return required');
+   this.branchAccess(u,ret.locationId);
+   if(dto.method!=='CASH'&&!dto.reference?.trim())throw new BadRequestException('Non-cash refund requires a payment reference');
+   const due=ret.lines.reduce((sum,line)=>sum.plus(line.refundAmount),new Prisma.Decimal(0));
+   const paid=await tx.posRefundSettlement.aggregate({where:{returnId:ret.id},_sum:{amount:true}});
+   const remaining=due.minus(paid._sum.amount??new Prisma.Decimal(0));
+   if(money(dto.amount).greaterThan(remaining))throw new ConflictException('Refund exceeds outstanding approved return amount');
+   const entry=await tx.posRefundSettlement.create({data:{returnId:ret.id,idempotencyKey:dto.idempotencyKey,method:dto.method,amount:money(dto.amount),reference:dto.reference,settledById:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_REFUND_SETTLEMENT_RECORDED',entityType:'PosRefundSettlement',entityId:entry.id,after:{returnId:ret.id,amount:entry.amount.toString(),method:entry.method,reference:entry.reference}}});
+   return entry;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async refundStatus(returnId:string,u:Principal){
+  const ret=await this.db.posReturn.findUniqueOrThrow({where:{id:returnId},include:{lines:true,settlements:{orderBy:{settledAt:'desc'}}}});
+  this.branchAccess(u,ret.locationId);
+  const approved=ret.lines.reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
+  const recorded=ret.settlements.reduce((sum,l)=>sum.plus(l.amount),new Prisma.Decimal(0));
+  return {returnId:ret.id,approvedAmount:approved.toString(),recordedAmount:recorded.toString(),remainingAmount:approved.minus(recorded).toString(),settlements:ret.settlements.map(s=>({...s,amount:s.amount.toString()})),note:'Records staff-confirmed payouts only. Card or wallet gateway transfers are not initiated or verified by this API.'};
+ }
  async shiftSummary(id:string,u:Principal){
   const shift=await this.db.posShift.findUniqueOrThrow({where:{id},include:{sales:{include:{tenders:true}}}});
   this.branchAccess(u,shift.locationId);
@@ -191,6 +228,8 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+ @Post('refunds/settle') @Roles('SUPER_ADMIN','BRANCH_MANAGER') settleRefund(@Body() dto:RefundSettlementDto,@CurrentUser() u:Principal){return this.pos.settleRefund(dto,u);}
+ @Get('refunds/:returnId') @Roles('SUPER_ADMIN','BRANCH_MANAGER') refundStatus(@Param('returnId') id:string,@CurrentUser() u:Principal){return this.pos.refundStatus(id,u);}
  @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
  @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
 }
