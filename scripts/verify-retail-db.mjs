@@ -39,14 +39,10 @@ try {
  // Exercise real PostgreSQL CHECK and UNIQUE constraints inside a rolled-back transaction.
  // No customer, order, or financial records are persisted by these probes.
  const probe=async(statement,params,expected)=>{
-  await db.$executeRawUnsafe('BEGIN');
-  try {
-   await db.$executeRawUnsafe(statement,...params);
-   throw new Error('Constraint unexpectedly accepted invalid data: '+expected);
-  } catch(e) {
-   const msg=String(e.message??e);
-   assert(msg.includes(expected),`Expected PostgreSQL ${expected} violation, received: ${msg}`);
-  } finally {await db.$executeRawUnsafe('ROLLBACK');}
+  await assert.rejects(
+   db.$transaction(async tx=>{await tx.$executeRawUnsafe(statement,...params);}),
+   e=>{const msg=String(e.message??e);assert(msg.toLowerCase().includes(expected),`Expected PostgreSQL ${expected} violation, received: ${msg}`);return true;}
+  );
  };
  const uid='00000000-0000-4000-8000-000000000001';
  await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-negative-online-refund','CASH',-1,'probe'],'check constraint');
