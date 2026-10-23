@@ -28,7 +28,7 @@ try {
 
  const indexes=await db.$queryRawUnsafe(`
  SELECT tablename,indexdef FROM pg_indexes WHERE schemaname='public'
- AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange','OnlineReturn','OnlineReturnLine')
+ AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement')
  `);
  for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId'],['OnlineReturn','idempotencyKey'],['OnlineRefundSettlement','idempotencyKey']]){
   assert(indexes.some(x=>x.tablename===table&&x.indexdef.includes('UNIQUE')&&x.indexdef.includes('"'+column+'"')),`Missing unique index on ${table}.${column}`);
