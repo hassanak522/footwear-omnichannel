@@ -519,6 +519,7 @@ model RetailCustomer {
  consentMarketing Boolean @default(false)
  loyaltyEntries LoyaltyEntry[]
  loyaltyAdjustments LoyaltyAdjustment[]
+ loyaltyRedemptions LoyaltyRedemption[]
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
 }
@@ -597,6 +598,19 @@ model LoyaltyAdjustment {
  createdAt DateTime @default(now())
  @@index([customerId,createdAt])
  @@index([sourceEntryId,createdAt])
+}
+
+model LoyaltyRedemption {
+ id String @id @default(uuid()) @db.Uuid
+ customerId String @db.Uuid
+ customer RetailCustomer @relation(fields:[customerId],references:[id])
+ idempotencyKey String @unique
+ points Int
+ reference String
+ reason String
+ actorId String @db.Uuid
+ createdAt DateTime @default(now())
+ @@index([customerId,createdAt])
 }
 
 model PosExchange {
