@@ -181,6 +181,7 @@ export class PosService {
  async linkExchange(dto:ExchangeDto,u:Principal){
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-exchange:'+dto.returnId}))`;
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
    const existing=await tx.posExchange.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
    if(existing){const ret=await tx.posReturn.findUniqueOrThrow({where:{id:existing.returnId}});this.branchAccess(u,ret.locationId);if(existing.returnId!==dto.returnId||existing.replacementSaleId!==dto.replacementSaleId)throw new ConflictException('Exchange key reused with different details');return existing;}
    const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true,settlements:true}});
