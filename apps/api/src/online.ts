@@ -145,6 +145,7 @@ export class OnlineService {
 export class OrdersController {
  constructor(private db:Db,private svc:OnlineService){}
  @Get() list(@Query('status') status?:string){return this.db.onlineOrder.findMany({where:status&&['PLACED','CONFIRMED','DISPATCHED','DELIVERED','CANCELLED'].includes(status)?{status:status as any}:{},include:{lines:{include:{variant:{select:{sku:true}}}}},orderBy:{createdAt:'desc'},take:200});}
+ @Get(':id/returns') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') async listReturns(@Param('id') id:string){const order=await this.db.onlineOrder.findUnique({where:{id},select:{id:true}});if(!order)throw new BadRequestException('Order not found');return this.db.onlineReturn.findMany({where:{orderId:id},include:{lines:true},orderBy:{createdAt:'desc'}});}
  @Post(':id/returns') @Roles('SUPER_ADMIN','ECOMMERCE_MANAGER') returnOrder(@Param('id') id:string,@Body() dto:OnlineReturnDto,@CurrentUser() u:Principal){return this.svc.returnDeliveredOrder(id,dto,u);}
  @Post(':id/confirm') confirm(@Param('id') id:string,@Body() d:ActionDto,@CurrentUser() u:Principal){return this.svc.action(id,'CONFIRMED',d,u);}
  @Post(':id/dispatch') dispatch(@Param('id') id:string,@Body() d:DispatchDto,@CurrentUser() u:Principal){return this.svc.action(id,'DISPATCHED',d,u);}
