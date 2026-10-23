@@ -9,11 +9,10 @@ services:
     environment:
       WEB_DOMAIN: ${WEB_DOMAIN:?Set WEB_DOMAIN}
       API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN}
+    entrypoint: ["/bin/sh", "-ec"]
     command:
-      - /bin/sh
-      - -ec
       - |
-        printf '%s\\n' "$$WEB_DOMAIN { reverse_proxy web:3000 }" "$$API_DOMAIN { reverse_proxy api:3001 }" > /etc/caddy/Caddyfile
+        printf '%s\\n' "$WEB_DOMAIN { reverse_proxy web:3000 }" "$API_DOMAIN { reverse_proxy api:3001 }" > /etc/caddy/Caddyfile
         exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     volumes:
       - caddy_data:/data
