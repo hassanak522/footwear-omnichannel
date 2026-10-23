@@ -28,6 +28,14 @@ await check('Health endpoint', async () => {
  const r=await request('/health'); expectStatus(r,200);
  if(r.body?.status!=='ok')throw new Error('health payload missing status ok');
 });
+await check('Public shipping quote shape', async () => {
+ const r=await request('/store/shipping');expectStatus(r,200);
+ if(typeof r.body?.available!=='boolean'||r.body?.currency!=='PKR')throw new Error('invalid shipping quote');
+ if(r.body.available&&(!/^([0-9]+)([.][0-9]{1,2})?$/.test(r.body.shippingFee)||Number(r.body.shippingFee)<0))throw new Error('invalid configured shipping charge');
+});
+await check('POS return mutations require authentication', async () => {
+ const r=await request('/pos/returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
 await check('Public catalog response', async () => {
  const r=await request('/store/products'); expectStatus(r,200);
  if(!Array.isArray(r.body))throw new Error('expected product array');
