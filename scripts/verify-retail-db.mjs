@@ -12,13 +12,15 @@ try {
   SELECT c.conname, t.relname AS table_name, pg_get_constraintdef(c.oid) AS definition
   FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
   JOIN pg_namespace n ON n.oid=t.relnamespace
-  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment')
+  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment','PosExchange')
  `);
  const has=(table,fragment)=>constraints.some(x=>x.table_name===table&&x.definition.includes(fragment));
  assert(constraints.some(x=>x.table_name==='PosRefundSettlement'&&/CHECK\s*\(/i.test(x.definition)&&/amount/i.test(x.definition)&&/>/.test(x.definition)),'Refund amount must be positive');
  assert(has('PosRefundSettlement','FOREIGN KEY ("payoutShiftId")'),'Payout shift FK missing');
  assert(constraints.some(x=>x.table_name==='LoyaltyAdjustment'&&/CHECK\s*\(/i.test(x.definition)&&/points/i.test(x.definition)&&/</.test(x.definition)),'Loyalty reversal must be negative');
  assert(has('LoyaltyAdjustment','FOREIGN KEY ("sourceEntryId")'),'Loyalty source FK missing');
+ assert(has('PosExchange','FOREIGN KEY ("returnId")'),'Exchange return FK missing');
+ assert(has('PosExchange','FOREIGN KEY ("replacementSaleId")'),'Exchange replacement sale FK missing');
 
  const indexes=await db.$queryRawUnsafe(`
  SELECT tablename,indexdef FROM pg_indexes WHERE schemaname='public'
