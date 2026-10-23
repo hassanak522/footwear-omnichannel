@@ -68,7 +68,8 @@ export class OnlineService {
   if(!Number.isSafeInteger(dto.amountPaisa))throw new BadRequestException('Refund amount must be a safe integer in paisa');
   const amount=new Prisma.Decimal(dto.amountPaisa).div(100);
   return this.db.$transaction(async tx=>{
-   await tx.$executeRaw`SELECT id FROM "OnlineReturn" WHERE id = ${dto.returnId}::uuid FOR UPDATE`;
+   const locked=await tx.$queryRaw<{id:string}[]>`SELECT id FROM "OnlineReturn" WHERE id = ${dto.returnId}::uuid FOR UPDATE`;
+   if(!locked.length)throw new BadRequestException('Approved online return required');
    const prior=await tx.onlineRefundSettlement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
    if(prior){if(prior.returnId!==dto.returnId||prior.method!==dto.method||prior.reference!==dto.reference||!prior.amount.equals(amount))throw new ConflictException('Refund key reused with different details');return prior;}
    const ret=await tx.onlineReturn.findUnique({where:{id:dto.returnId}});
