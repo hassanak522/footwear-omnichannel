@@ -1,0 +1,24 @@
+{
+  "name": "footwear-omnichannel",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "db:generate": "npm run db:generate -w @footwear/database",
+    "db:migrate": "npm run db:migrate -w @footwear/database",
+    "db:seed": "npm run db:seed -w @footwear/database",
+    "db:studio": "npm run db:studio -w @footwear/database",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.0.0"
+  }
+}

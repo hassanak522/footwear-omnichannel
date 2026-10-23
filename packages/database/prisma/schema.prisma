@@ -1,0 +1,551 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LocationType {
+  WAREHOUSE
+  BRANCH
+  ONLINE
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum StockMovementType {
+  OPENING_BALANCE
+  SUPPLIER_RECEIPT
+  SALE
+  SALE_RETURN
+  RESERVATION
+  RESERVATION_RELEASE
+  TRANSFER_DISPATCH
+  TRANSFER_RECEIPT
+  ADJUSTMENT
+  QUARANTINE
+  QUARANTINE_RELEASE
+}
+
+enum ReservationPurpose {
+  ONLINE_ORDER
+  BRANCH_REPLENISHMENT
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum TransferStatus {
+  REQUESTED
+  APPROVED
+  PICKING
+  DISPATCHED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model Location {
+  id            String         @id @default(uuid()) @db.Uuid
+  code          String         @unique
+  name          String
+  type          LocationType
+  address       String?
+  active        Boolean        @default(true)
+  posDevices PosDevice[]
+  posShifts PosShift[]
+  posSales PosSale[]
+  posReturns PosReturn[]
+  onlineOrders OnlineOrder[]
+  balances      StockBalance[]
+  movements     StockMovement[]
+  reservations  StockReservation[]
+  users         UserLocation[]
+  transfersFrom StockTransfer[] @relation("TransferSource")
+  transfersTo   StockTransfer[] @relation("TransferDestination")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model User {
+  id           String          @id @default(uuid()) @db.Uuid
+  email        String          @unique
+  name         String
+  passwordHash String
+  status       UserStatus      @default(ACTIVE)
+  posShifts PosShift[]
+  posSales PosSale[]
+  roles        UserRole[]
+  locations    UserLocation[]
+  movements    StockMovement[] @relation("MovementActor")
+  auditLogs    AuditLog[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model Role {
+  id        String     @id @default(uuid()) @db.Uuid
+  code      String     @unique
+  name      String
+  users     UserRole[]
+  createdAt DateTime   @default(now())
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+  role   Role   @relation(fields: [roleId], references: [id])
+  @@id([userId, roleId])
+}
+
+model UserLocation {
+  userId     String   @db.Uuid
+  locationId String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id])
+  location   Location @relation(fields: [locationId], references: [id])
+  @@id([userId, locationId])
+}
+
+model Category {
+  id       String    @id @default(uuid()) @db.Uuid
+  name     String
+  slug     String    @unique
+  products Product[]
+}
+
+model Brand {
+  id       String    @id @default(uuid()) @db.Uuid
+  name     String
+  slug     String    @unique
+  products Product[]
+}
+
+model Product {
+  id          String           @id @default(uuid()) @db.Uuid
+  title       String
+  slug        String           @unique
+  description String?
+  active      Boolean          @default(true)
+  categoryId  String           @db.Uuid
+  brandId     String?          @db.Uuid
+  category    Category         @relation(fields: [categoryId], references: [id])
+  brand       Brand?           @relation(fields: [brandId], references: [id])
+  variants    ProductVariant[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model ProductVariant {
+  id           String             @id @default(uuid()) @db.Uuid
+  productId    String             @db.Uuid
+  sku          String             @unique
+  barcode      String             @unique
+  size         String
+  color        String
+  price        Decimal            @db.Decimal(12, 2)
+  cost         Decimal?           @db.Decimal(12, 2)
+  active       Boolean            @default(true)
+  product      Product            @relation(fields: [productId], references: [id])
+  posSaleLines PosSaleLine[]
+  onlineOrderLines OnlineOrderLine[]
+  balances     StockBalance[]
+  movements    StockMovement[]
+  reservations StockReservation[]
+  transferItems StockTransferItem[]
+  @@unique([productId, size, color])
+}
+
+model StockBalance {
+  id                  String         @id @default(uuid()) @db.Uuid
+  locationId          String         @db.Uuid
+  variantId           String         @db.Uuid
+  onHand              Int            @default(0)
+  reservedOnline      Int            @default(0)
+  reservedReplenish   Int            @default(0)
+  quarantined         Int            @default(0)
+  safetyBuffer        Int            @default(0)
+  version             Int            @default(0)
+  location            Location       @relation(fields: [locationId], references: [id])
+  variant             ProductVariant @relation(fields: [variantId], references: [id])
+  updatedAt           DateTime       @updatedAt
+  @@unique([locationId, variantId])
+  @@index([variantId])
+}
+
+model StockMovement {
+  id              String            @id @default(uuid()) @db.Uuid
+  locationId      String            @db.Uuid
+  variantId       String            @db.Uuid
+  type            StockMovementType
+  quantityDelta   Int
+  referenceType   String?
+  referenceId     String?
+  idempotencyKey  String            @unique
+  actorId         String?           @db.Uuid
+  notes           String?
+  metadata        Json?
+  location        Location          @relation(fields: [locationId], references: [id])
+  variant         ProductVariant    @relation(fields: [variantId], references: [id])
+  actor           User?             @relation("MovementActor", fields: [actorId], references: [id])
+  createdAt       DateTime          @default(now())
+  @@index([locationId, variantId, createdAt])
+}
+
+model StockReservation {
+  id          String             @id @default(uuid()) @db.Uuid
+  locationId  String             @db.Uuid
+  variantId   String             @db.Uuid
+  purpose     ReservationPurpose
+  status      ReservationStatus  @default(ACTIVE)
+  quantity    Int
+  referenceId String
+  expiresAt   DateTime?
+  location    Location           @relation(fields: [locationId], references: [id])
+  variant     ProductVariant     @relation(fields: [variantId], references: [id])
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  @@index([referenceId, status])
+}
+
+model StockTransfer {
+  id                 String              @id @default(uuid()) @db.Uuid
+  transferNumber     String              @unique
+  sourceId           String              @db.Uuid
+  destinationId      String              @db.Uuid
+  status             TransferStatus      @default(REQUESTED)
+  source             Location            @relation("TransferSource", fields: [sourceId], references: [id])
+  destination        Location            @relation("TransferDestination", fields: [destinationId], references: [id])
+  items              StockTransferItem[]
+  dispatchedAt       DateTime?
+  receivedAt         DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  @@index([sourceId, status])
+  @@index([destinationId, status])
+}
+
+model StockTransferItem {
+  id              String         @id @default(uuid()) @db.Uuid
+  transferId      String         @db.Uuid
+  variantId       String         @db.Uuid
+  requestedQty    Int
+  dispatchedQty   Int            @default(0)
+  receivedQty     Int            @default(0)
+  damagedQty      Int            @default(0)
+  transfer        StockTransfer  @relation(fields: [transferId], references: [id])
+  variant         ProductVariant @relation(fields: [variantId], references: [id])
+  @@unique([transferId, variantId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  createdAt  DateTime @default(now())
+  @@index([entityType, entityId, createdAt])
+}
+
+model IntegrationEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  source         String
+  eventType      String
+  idempotencyKey String   @unique
+  payload        Json
+  processedAt    DateTime?
+  createdAt      DateTime @default(now())
+}
+
+
+// POS synchronization: local sale IDs are globally unique per registered device.
+enum PosShiftStatus { 
+  OPEN 
+  CLOSED 
+}
+enum PosSaleStatus { 
+  ACCEPTED 
+  STOCK_CONFLICT 
+}
+enum PosTenderType { 
+  CASH 
+  CARD 
+  OTHER 
+}
+
+model PosDevice {
+  id String @id @default(uuid()) @db.Uuid
+  code String @unique
+  locationId String @db.Uuid
+  active Boolean @default(true)
+  location Location @relation(fields:[locationId], references:[id])
+  shifts PosShift[]
+  sales PosSale[]
+  createdAt DateTime @default(now())
+}
+
+model PosShift {
+  id String @id @default(uuid()) @db.Uuid
+  deviceId String @db.Uuid
+  locationId String @db.Uuid
+  cashierId String @db.Uuid
+  status PosShiftStatus @default(OPEN)
+  openingCash Decimal @db.Decimal(12,2)
+  closingCash Decimal? @db.Decimal(12,2)
+  openedAt DateTime @default(now())
+  closedAt DateTime?
+  device PosDevice @relation(fields:[deviceId], references:[id])
+  location Location @relation(fields:[locationId], references:[id])
+  cashier User @relation(fields:[cashierId], references:[id])
+  sales PosSale[]
+  @@index([deviceId,status])
+}
+
+model PosSale {
+  id String @id @default(uuid()) @db.Uuid
+  deviceId String @db.Uuid
+  localSaleId String
+  payloadHash String
+  locationId String @db.Uuid
+  shiftId String @db.Uuid
+  cashierId String @db.Uuid
+  status PosSaleStatus
+  soldAt DateTime
+  syncedAt DateTime @default(now())
+  total Decimal @db.Decimal(12,2)
+  conflictReason String?
+  device PosDevice @relation(fields:[deviceId],references:[id])
+  location Location @relation(fields:[locationId],references:[id])
+  shift PosShift @relation(fields:[shiftId],references:[id])
+  cashier User @relation(fields:[cashierId],references:[id])
+  lines PosSaleLine[]
+  tenders PosSaleTender[]
+  returns PosReturn[]
+  @@unique([deviceId,localSaleId])
+  @@index([locationId,soldAt])
+}
+
+model PosSaleLine {
+  id String @id @default(uuid()) @db.Uuid
+  saleId String @db.Uuid
+  variantId String @db.Uuid
+  quantity Int
+  unitPrice Decimal @db.Decimal(12,2)
+  sale PosSale @relation(fields:[saleId],references:[id])
+  variant ProductVariant @relation(fields:[variantId],references:[id])
+}
+
+model PosSaleTender {
+  id String @id @default(uuid()) @db.Uuid
+  saleId String @db.Uuid
+  type PosTenderType
+  amount Decimal @db.Decimal(12,2)
+  reference String?
+  sale PosSale @relation(fields:[saleId],references:[id])
+}
+
+// POS returns require a centrally accepted original sale and manager approval.
+enum PosReturnStatus { 
+  APPROVED 
+}
+model PosReturn {
+  id String @id @default(uuid()) @db.Uuid
+  saleId String @db.Uuid
+  locationId String @db.Uuid
+  idempotencyKey String @unique
+  status PosReturnStatus @default(APPROVED)
+  reason String
+  approvedById String @db.Uuid
+  createdAt DateTime @default(now())
+  sale PosSale @relation(fields:[saleId],references:[id])
+  location Location @relation(fields:[locationId],references:[id])
+  lines PosReturnLine[]
+  @@index([saleId,createdAt])
+}
+model PosReturnLine {
+  id String @id @default(uuid()) @db.Uuid
+  returnId String @db.Uuid
+  variantId String @db.Uuid
+  quantity Int
+  quarantined Boolean @default(false)
+  refundAmount Decimal @db.Decimal(12,2)
+  return PosReturn @relation(fields:[returnId],references:[id])
+  @@unique([returnId,variantId])
+}
+
+// Online order lifecycle: warehouse stock is reserved on checkout, deducted only on dispatch.
+enum OnlineOrderStatus { 
+  PLACED 
+  CONFIRMED 
+  DISPATCHED 
+  DELIVERED 
+  CANCELLED 
+}
+enum OnlinePaymentMethod { 
+  COD 
+  CARD 
+  EASYPAISA 
+  JAZZCASH 
+}
+enum OnlinePaymentStatus { 
+  PENDING 
+  PAID 
+  FAILED 
+  REFUNDED 
+}
+model OnlineOrder {
+ id String @id @default(uuid()) @db.Uuid
+ orderNumber String @unique
+ idempotencyKey String @unique
+ requestHash String
+ warehouseId String @db.Uuid
+ warehouse Location @relation(fields:[warehouseId],references:[id])
+ customerName String
+ phone String
+ email String?
+ address String
+ city String
+ paymentMethod OnlinePaymentMethod
+ paymentStatus OnlinePaymentStatus @default(PENDING)
+ status OnlineOrderStatus @default(PLACED)
+ courierName String?
+ trackingNumber String?
+ subtotal Decimal @db.Decimal(12,2)
+ shippingFee Decimal @db.Decimal(12,2) @default(0)
+ total Decimal @db.Decimal(12,2)
+ lines OnlineOrderLine[]
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ dispatchedAt DateTime?
+ @@index([status,createdAt])
+}
+model OnlineOrderLine {
+ id String @id @default(uuid()) @db.Uuid
+ orderId String @db.Uuid
+ variantId String @db.Uuid
+ quantity Int
+ unitPrice Decimal @db.Decimal(12,2)
+ order OnlineOrder @relation(fields:[orderId],references:[id])
+ variant ProductVariant @relation(fields:[variantId],references:[id])
+ @@unique([orderId,variantId])
+}
+
+// M12 purchasing and controlled cycle counts
+model Supplier {
+ id String @id @default(uuid()) @db.Uuid
+ code String @unique
+ name String
+ phone String?
+ email String?
+ active Boolean @default(true)
+ orders PurchaseOrder[]
+ createdAt DateTime @default(now())
+}
+enum PurchaseStatus { 
+  DRAFT 
+  SUBMITTED 
+  RECEIVED 
+  CANCELLED 
+}
+model PurchaseOrder {
+ id String @id @default(uuid()) @db.Uuid
+ supplierId String @db.Uuid
+ warehouseId String @db.Uuid
+ status PurchaseStatus @default(DRAFT)
+ reference String @unique
+ notes String?
+ supplier Supplier @relation(fields:[supplierId],references:[id])
+ lines PurchaseOrderLine[]
+ createdAt DateTime @default(now())
+ receivedAt DateTime?
+}
+model PurchaseOrderLine {
+ id String @id @default(uuid()) @db.Uuid
+ orderId String @db.Uuid
+ variantId String @db.Uuid
+ orderedQty Int
+ receivedQty Int @default(0)
+ unitCost Decimal @db.Decimal(12,2)
+ order PurchaseOrder @relation(fields:[orderId],references:[id])
+ @@unique([orderId,variantId])
+}
+enum CountStatus { 
+  OPEN 
+  POSTED 
+  CANCELLED 
+}
+model StockCount {
+ id String @id @default(uuid()) @db.Uuid
+ locationId String @db.Uuid
+ reference String @unique
+ status CountStatus @default(OPEN)
+ lines StockCountLine[]
+ createdAt DateTime @default(now())
+ postedAt DateTime?
+}
+model StockCountLine {
+ id String @id @default(uuid()) @db.Uuid
+ countId String @db.Uuid
+ variantId String @db.Uuid
+ expectedQty Int
+ countedQty Int
+ count StockCount @relation(fields:[countId],references:[id])
+ @@unique([countId,variantId])
+}
+// M13 customer directory (no payment-card data stored)
+model RetailCustomer {
+ id String @id @default(uuid()) @db.Uuid
+ phone String @unique
+ name String
+ email String?
+ consentMarketing Boolean @default(false)
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+}
+// M14 explicit approvals and price governance
+model PriceChangeRequest {
+ id String @id @default(uuid()) @db.Uuid
+ variantId String @db.Uuid
+ proposedPrice Decimal @db.Decimal(12,2)
+ reason String
+ requestedById String @db.Uuid
+ reviewedById String? @db.Uuid
+ status String @default("PENDING")
+ createdAt DateTime @default(now())
+ reviewedAt DateTime?
+}
+
+
+enum ReplenishmentStatus { 
+  REQUESTED 
+  APPROVED 
+  REJECTED 
+  FULFILLED 
+}
+model ReplenishmentRequest {
+ id String @id @default(uuid()) @db.Uuid
+ sourceId String @db.Uuid
+ destinationId String @db.Uuid
+ variantId String @db.Uuid
+ quantity Int
+ status ReplenishmentStatus @default(REQUESTED)
+ note String?
+ requestedById String @db.Uuid
+ transferId String? @db.Uuid
+ createdAt DateTime @default(now())
+ reviewedAt DateTime?
+ @@index([destinationId,status])
+}

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: footwear-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: footwear
+      POSTGRES_PASSWORD: footwear_local_only
+      POSTGRES_DB: footwear_omnichannel
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - footwear_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U footwear -d footwear_omnichannel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  footwear_postgres_data:
