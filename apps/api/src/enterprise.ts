@@ -95,6 +95,12 @@ export class StockCountsController {
 }
 class CustomerDto { @IsString() @MinLength(5) phone!:string; @IsString() @MinLength(2) name!:string; @IsOptional() @IsEmail() email?:string; @IsOptional() @IsBoolean() consentMarketing?:boolean; }
 @Controller('retail') @UseGuards(...guards) @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+class LoyaltyReversalDto {
+ @IsUUID() sourceEntryId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsInt() @Min(1) points!:number;
+ @IsString() @MinLength(10) @MaxLength(500) reason!:string;
+}
 export class RetailController {
  constructor(private db:Db){}
  @Get('customers') customers(@Query('phone') phone?:string){if(!phone||phone.length<5)throw new BadRequestException('Phone search of 5+ characters required');return this.db.retailCustomer.findMany({where:{phone:{contains:phone}},take:25});}
@@ -104,13 +110,29 @@ export class RetailController {
   const delivered=orders.filter(o=>o.status==='DELIVERED');
   return {customer:{id:customer.id,name:customer.name,phone:customer.phone,consentMarketing:customer.consentMarketing},online:{orders:orders.length,deliveredOrders:delivered.length,deliveredValue:delivered.reduce((n,o)=>n+o.total.toNumber(),0).toFixed(2),recentOrders:orders.slice(0,10).map(o=>({...o,total:o.total.toString()})),truncated:orders.length===100},note:'Online orders matched by exact phone. POS sales are not linked to customer records; this is not an omnichannel lifetime value or loyalty points balance.'};
  }
+ @Post('customers/:id/loyalty-reversals') @Roles('SUPER_ADMIN') async reverseLoyalty(@Param('id') id:string,@Body() dto:LoyaltyReversalDto,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-entry:'+dto.sourceEntryId}))`;
+   const previous=await tx.loyaltyAdjustment.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){if(previous.customerId!==id||previous.sourceEntryId!==dto.sourceEntryId||previous.points!==-dto.points||previous.reason!==dto.reason)throw new ConflictException('Loyalty reversal key reused with different request');return previous;}
+   const earned=await tx.loyaltyEntry.findUnique({where:{id:dto.sourceEntryId}});
+   if(!earned||earned.customerId!==id)throw new BadRequestException('Loyalty earning entry not found for customer');
+   const prior=await tx.loyaltyAdjustment.aggregate({where:{sourceEntryId:earned.id},_sum:{points:true}});
+   if(dto.points>earned.points+(prior._sum.points??0))throw new ConflictException('Reversal exceeds unreversed earned points');
+   const adjustment=await tx.loyaltyAdjustment.create({data:{customerId:id,sourceEntryId:earned.id,idempotencyKey:dto.idempotencyKey,points:-dto.points,reason:dto.reason,actorId:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REVERSED',entityType:'LoyaltyAdjustment',entityId:adjustment.id,after:{sourceEntryId:earned.id,points:-dto.points,reason:dto.reason}}});
+   return adjustment;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
  @Get('customers/:id/loyalty-ledger') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async loyaltyLedger(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
-  const [summary,entries]=await Promise.all([
+  const [summary,entries,adjustments,adjustmentTotal]=await Promise.all([
    this.db.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true},_count:{_all:true}}),
-   this.db.loyaltyEntry.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50,select:{id:true,orderId:true,points:true,amount:true,createdAt:true}})
+   this.db.loyaltyEntry.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50,select:{id:true,orderId:true,points:true,amount:true,createdAt:true}}),
+   this.db.loyaltyAdjustment.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50}),
+   this.db.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}})
   ]);
-  return {customerId:customer.id,earnedPoints:summary._sum.points??0,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:false,rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Earn-only ledger; no redemption, reversal or exchange credits implemented. Existing delivered orders are not automatically backfilled.'};
+  return {customerId:customer.id,earnedPoints:summary._sum.points??0,reversedPoints:-(adjustmentTotal._sum.points??0),netPoints:(summary._sum.points??0)+(adjustmentTotal._sum.points??0),adjustments,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:false,rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Earning and admin-recorded reversals only; no redemption, automatic return linkage or exchange credits. Existing delivered orders are not automatically backfilled.'};
  }
  @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
