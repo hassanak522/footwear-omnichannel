@@ -311,6 +311,7 @@ model PosShift {
   location Location @relation(fields:[locationId], references:[id])
   cashier User @relation(fields:[cashierId], references:[id])
   sales PosSale[]
+  refundPayouts PosRefundSettlement[]
   @@index([deviceId,status])
 }
 
@@ -567,6 +568,8 @@ model PosRefundSettlement {
  id String @id @default(uuid()) @db.Uuid
  returnId String @db.Uuid
  return PosReturn @relation(fields:[returnId],references:[id])
+ payoutShiftId String? @db.Uuid
+ payoutShift PosShift? @relation(fields:[payoutShiftId],references:[id])
  idempotencyKey String @unique
  method PosTenderType
  amount Decimal @db.Decimal(12,2)
