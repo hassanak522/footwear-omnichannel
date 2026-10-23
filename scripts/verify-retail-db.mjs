@@ -3,7 +3,7 @@ import {PrismaClient} from '@prisma/client';
 
 const db=new PrismaClient();
 try {
- const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement'];
+ const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement','LoyaltyRedemption'];
  const tables=await db.$queryRawUnsafe('SELECT tablename FROM pg_tables WHERE schemaname = $1','public');
  const actual=new Set(tables.map(x=>x.tablename));
  for(const table of requiredTables)assert(actual.has(table),`Missing table: ${table}`);
@@ -12,12 +12,14 @@ try {
   SELECT c.conname, t.relname AS table_name, pg_get_constraintdef(c.oid) AS definition
   FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
   JOIN pg_namespace n ON n.oid=t.relnamespace
-  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement')
+  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement','LoyaltyRedemption')
  `);
  const has=(table,fragment)=>constraints.some(x=>x.table_name===table&&x.definition.includes(fragment));
  assert(constraints.some(x=>x.table_name==='PosRefundSettlement'&&/CHECK\s*\(/i.test(x.definition)&&/amount/i.test(x.definition)&&/>/.test(x.definition)),'Refund amount must be positive');
  assert(has('PosRefundSettlement','FOREIGN KEY ("payoutShiftId")'),'Payout shift FK missing');
  assert(constraints.some(x=>x.table_name==='LoyaltyAdjustment'&&/CHECK\s*\(/i.test(x.definition)&&/points/i.test(x.definition)&&/</.test(x.definition)),'Loyalty reversal must be negative');
+ assert(has('LoyaltyRedemption','FOREIGN KEY ("customerId")'),'Redemption customer FK missing');
+ assert(constraints.some(x=>x.table_name==='LoyaltyRedemption'&&/CHECK\\s*\\(/i.test(x.definition)&&/points/i.test(x.definition)&&/>/.test(x.definition)),'Redemption points must be positive');
  assert(has('LoyaltyAdjustment','FOREIGN KEY ("sourceEntryId")'),'Loyalty source FK missing');
  assert(has('PosExchange','FOREIGN KEY ("returnId")'),'Exchange return FK missing');
  assert(has('PosExchange','FOREIGN KEY ("replacementSaleId")'),'Exchange replacement sale FK missing');
@@ -30,7 +32,7 @@ try {
  SELECT tablename,indexdef FROM pg_indexes WHERE schemaname='public'
  AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange','OnlineReturn','OnlineReturnLine','OnlineRefundSettlement')
  `);
- for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId'],['OnlineReturn','idempotencyKey'],['OnlineRefundSettlement','idempotencyKey']]){
+ for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId'],['OnlineReturn','idempotencyKey'],['OnlineRefundSettlement','idempotencyKey'],['LoyaltyRedemption','idempotencyKey']]){
   assert(indexes.some(x=>x.tablename===table&&x.indexdef.includes('UNIQUE')&&x.indexdef.includes('"'+column+'"')),`Missing unique index on ${table}.${column}`);
  }
  const shiftColumn=await db.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='PosRefundSettlement' AND column_name='payoutShiftId'`);
@@ -49,6 +51,7 @@ try {
  await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-invalid-refund-method','INVALID',1,'probe'],'check constraint');
  await probe('INSERT INTO "OnlineReturnLine" ("id","returnId","variantId","quantity","unitPrice") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3)',[uid,0,1],'check constraint');
  await probe('INSERT INTO "LoyaltyAdjustment" ("id","customerId","sourceEntryId","idempotencyKey","points","reason","actorId") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3,$4,$1::uuid)',[uid,'probe-positive-loyalty-adjustment',1,'probe'],'check constraint');
+ await probe('INSERT INTO "LoyaltyRedemption" ("id","customerId","idempotencyKey","points","reference","reason","actorId") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-zero-point-redemption',0,'probe','probe reason'],'check constraint');
  // Compile the liability report's SQL against migrated PostgreSQL tables, even with an empty database.
  const liabilityPlan=await db.$queryRawUnsafe(`EXPLAIN
  WITH approved AS (
