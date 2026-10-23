@@ -51,8 +51,8 @@ try {
   );
  };
  const uid='00000000-0000-4000-8000-000000000001';
- await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-negative-online-refund','CASH',-1,'probe'],'check constraint');
- await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-invalid-refund-method','INVALID',1,'probe'],'check constraint');
+ await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-negative-online-refund','CASH',-1,'probe'],'Online refund return does not exist');
+ await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-invalid-refund-method','INVALID',1,'probe'],'Online refund return does not exist');
  await probe('INSERT INTO "OnlineReturnLine" ("id","returnId","variantId","quantity","unitPrice") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3)',[uid,0,1],'check constraint');
  await probe('INSERT INTO "LoyaltyAdjustment" ("id","customerId","sourceEntryId","idempotencyKey","points","reason","actorId") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3,$4,$1::uuid)',[uid,'probe-positive-loyalty-adjustment',1,'probe'],'check constraint');
  await probe('INSERT INTO "LoyaltyRedemption" ("id","customerId","idempotencyKey","points","reference","reason","actorId") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-zero-point-redemption',0,'probe','probe reason'],'check constraint');
