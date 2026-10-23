@@ -1,0 +1,36 @@
+name: Royal Step build checks
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/m16-m20-experience-operations]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5433/royal_step?schema=public
+      JWT_SECRET: ci-only-not-for-production
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate Prisma schema
+        run: npm exec --workspace=@footwear/database -- prisma validate
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Build API
+        run: npm run build -w @footwear/api
+      - name: Build web app
+        run: npm run build -w @footwear/web
+      - name: Build Electron POS frontend
+        run: npm run build -w @footwear/pos-desktop
