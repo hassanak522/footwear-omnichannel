@@ -111,6 +111,7 @@ export class OnlineService {
    }
    const earning=await tx.loyaltyEntry.findUnique({where:{orderId:id}});
    if(earning&&earning.points>0&&order.subtotal.greaterThan(0)){
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-customer:'+earning.customerId}))`;
     // Serialize with manual loyalty reversals for the same earning entry.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-entry:'+earning.id}))`;
     const previousReturned=order.returns.reduce((sum,r)=>sum.plus(r.lines.reduce((n,l)=>n.plus(l.unitPrice.mul(l.quantity)),new Prisma.Decimal(0))),new Prisma.Decimal(0));
