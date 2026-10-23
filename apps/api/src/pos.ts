@@ -170,7 +170,9 @@ export class PosService {
   const accepted=shift.sales.filter(s=>s.status==='ACCEPTED');
   const cash=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CASH').reduce((sum,t)=>sum+t.amount.toNumber(),0);
   const card=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CARD').reduce((sum,t)=>sum+t.amount.toNumber(),0);
-  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,expectedCash:shift.openingCash.toNumber()+cash,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-shift.openingCash.toNumber()-cash};
+  const returns=await this.db.posReturn.findMany({where:{sale:{shiftId:id}},include:{lines:true}});
+  const returnAmount=returns.flatMap(r=>r.lines).reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
+  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),expectedCash:shift.openingCash.toNumber()+cash,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-shift.openingCash.toNumber()-cash,note:'Return value is recorded against original sales. Cash refunds are not disbursed or deducted from expected cash by this system; shift reconciliation requires separate refund payout records.'};
  }
  async deviceStatus(deviceId:string,u:Principal){
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
