@@ -71,9 +71,10 @@ try {
   events.push('second-acquired');
  },{timeout:10000});
  // Give PostgreSQL a chance to schedule the competing transaction.
- await db.$queryRawUnsafe('SELECT pg_sleep(0.15)');
- assert.deepEqual(events,['first-acquired'],'Concurrent transaction entered locked loyalty section');
- releaseFirst();
+ try {
+  await db.$queryRawUnsafe('SELECT pg_sleep(0.15)');
+  assert.deepEqual(events,['first-acquired'],'Concurrent transaction entered locked loyalty section');
+ } finally {releaseFirst();}
  await Promise.all([first,second]);
  assert.deepEqual(events,['first-acquired','first-released','second-acquired'],'Advisory lock failed to serialize concurrent transactions');
  // Compile the liability report's SQL against migrated PostgreSQL tables, even with an empty database.
