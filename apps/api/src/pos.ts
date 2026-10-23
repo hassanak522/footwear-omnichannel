@@ -38,6 +38,19 @@ class ReturnDto {
  @IsString() @MinLength(3) @MaxLength(500) reason!: string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
 }
+class ExchangeDto {
+ @IsUUID() returnId!:string;
+ @IsUUID() replacementSaleId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+}
+class RefundSettlementDto {
+ @IsUUID() returnId!:string;
+ @IsOptional() @IsUUID() payoutShiftId?:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsEnum(PosTenderType) method!:PosTenderType;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0.01) amount!:number;
+ @IsOptional() @IsString() @MaxLength(100) reference?:string;
+}
 class SyncSaleDto {
  @IsUUID() deviceId!: string;
  @IsUUID() localSaleId!: string;
@@ -73,12 +86,15 @@ export class PosService {
  async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${id}`}))`;
+   await tx.$executeRaw`SELECT id FROM "PosShift" WHERE id = ${id}::uuid FOR UPDATE`;
    const shift=await tx.posShift.findUniqueOrThrow({where:{id}});
    this.branchAccess(u,shift.locationId);
    if(shift.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
    if(shift.status!=='OPEN')throw new ConflictException('Shift already closed');
-   // The desktop must sync all its pending sales before calling close.
-   // This cannot be independently proven without a local sequence/checkpoint protocol.
+   // Reject known server-side conflicts; the desktop must also sync local sales first.
+   // Unsynced local sales cannot be proven absent without a device checkpoint protocol.
+   const conflicted=await tx.posSale.count({where:{shiftId:id,status:'STOCK_CONFLICT'}});
+   if(conflicted>0)throw new ConflictException(`Cannot close shift with ${conflicted} unresolved stock-conflict sale(s)`);
    return tx.posShift.update({where:{id},data:{status:'CLOSED',closedAt:new Date(),closingCash:money(dto.closingCash)}});
   });
  }
@@ -134,7 +150,13 @@ export class PosService {
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${dto.saleId}`}))`;
    const existing=await tx.posReturn.findUnique({where:{idempotencyKey:dto.idempotencyKey},include:{lines:true}});
-   if(existing){if(existing.saleId!==dto.saleId)throw new ConflictException('Return key already used');return existing;}
+   if(existing){
+    const requested=[...dto.lines].map(l=>({variantId:l.variantId,quantity:l.quantity,quarantined:l.quarantined===true})).sort((a,b)=>a.variantId.localeCompare(b.variantId));
+    const recorded=existing.lines.map(l=>({variantId:l.variantId,quantity:l.quantity,quarantined:l.quarantined})).sort((a,b)=>a.variantId.localeCompare(b.variantId));
+    if(existing.saleId!==dto.saleId||existing.reason!==dto.reason||JSON.stringify(requested)!==JSON.stringify(recorded))throw new ConflictException('Return idempotency key reused with different request');
+    this.branchAccess(u,existing.locationId);
+    return existing;
+   }
    const sale=await tx.posSale.findUnique({where:{id:dto.saleId},include:{lines:true,returns:{include:{lines:true}}}});
    if(!sale||sale.status!=='ACCEPTED')throw new BadRequestException('Accepted original sale required');
    this.branchAccess(u,sale.locationId);
@@ -156,13 +178,80 @@ export class PosService {
    return ret;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
+ async linkExchange(dto:ExchangeDto,u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-exchange:'+dto.returnId}))`;
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
+   const existing=await tx.posExchange.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(existing){const ret=await tx.posReturn.findUniqueOrThrow({where:{id:existing.returnId}});this.branchAccess(u,ret.locationId);if(existing.returnId!==dto.returnId||existing.replacementSaleId!==dto.replacementSaleId)throw new ConflictException('Exchange key reused with different details');return existing;}
+   const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true,settlements:true}});
+   const replacement=await tx.posSale.findUnique({where:{id:dto.replacementSaleId}});
+   if(!ret||!replacement||replacement.status!=='ACCEPTED'||ret.status!=='APPROVED')throw new BadRequestException('Approved return and accepted replacement sale required');
+   this.branchAccess(u,ret.locationId);
+   if(ret.locationId!==replacement.locationId||ret.saleId===replacement.id)throw new ConflictException('Replacement must be a different sale at the same branch');
+   const refundDue=ret.lines.reduce((n,l)=>n.plus(l.refundAmount),new Prisma.Decimal(0));
+   const settled=ret.settlements.reduce((n,l)=>n.plus(l.amount),new Prisma.Decimal(0));
+   if(!settled.equals(refundDue))throw new ConflictException('Original return refund must be fully settled before linking independently paid replacement sale');
+   if(await tx.posExchange.findFirst({where:{OR:[{returnId:ret.id},{replacementSaleId:replacement.id}]}}))throw new ConflictException('Return or replacement sale already linked to an exchange');
+   const exchange=await tx.posExchange.create({data:{returnId:ret.id,replacementSaleId:replacement.id,idempotencyKey:dto.idempotencyKey,approvedById:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_EXCHANGE_LINKED',entityType:'PosExchange',entityId:exchange.id,after:{returnId:ret.id,replacementSaleId:replacement.id,refundSettled:refundDue.toString(),replacementSaleTotal:replacement.total.toString()}}});
+   return {...exchange,note:'Record linkage only: the original return was fully refunded and the replacement was independently paid. No price netting or payment collection was performed.'};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async settleRefund(dto:RefundSettlementDto,u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
+   // Lock the payout shift before reading its status so a concurrent close cannot race a payout.
+   if(dto.method==='CASH'&&dto.payoutShiftId){
+    await tx.$executeRaw`SELECT id FROM "PosShift" WHERE id = ${dto.payoutShiftId}::uuid FOR UPDATE`;
+   }
+   const previous=await tx.posRefundSettlement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){
+    const original=await tx.posReturn.findUniqueOrThrow({where:{id:previous.returnId}});
+    this.branchAccess(u,original.locationId);
+    if(previous.returnId!==dto.returnId||previous.method!==dto.method||!previous.amount.equals(money(dto.amount))||(previous.reference??null)!==(dto.reference??null)||(previous.payoutShiftId??null)!==(dto.payoutShiftId??null))throw new ConflictException('Refund key reused with different details');
+    return previous;
+   }
+   if(dto.reference!==undefined&&dto.reference.trim()!==dto.reference)throw new BadRequestException('Refund reference must not have leading or trailing whitespace');
+   const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true}});
+   if(!ret||ret.status!=='APPROVED')throw new BadRequestException('Approved return required');
+   this.branchAccess(u,ret.locationId);
+   if(dto.method!=='CASH'&&!dto.reference?.trim())throw new BadRequestException('Non-cash refund requires a payment reference');
+   if(dto.method==='CASH'){
+    if(!dto.payoutShiftId)throw new BadRequestException('Cash payout requires an open payout shift');
+    const shift=await tx.posShift.findUnique({where:{id:dto.payoutShiftId}});
+    if(!shift||shift.status!=='OPEN'||shift.locationId!==ret.locationId)throw new ConflictException('Cash payout shift must be open and belong to the return branch');
+    this.branchAccess(u,shift.locationId);
+   }else if(dto.payoutShiftId)throw new BadRequestException('Payout shift is only applicable to cash refunds');
+   const due=ret.lines.reduce((sum,line)=>sum.plus(line.refundAmount),new Prisma.Decimal(0));
+   if(await tx.posExchange.findUnique({where:{returnId:ret.id}}))throw new ConflictException('Exchange already finalized; no additional refund payouts permitted');
+   const paid=await tx.posRefundSettlement.aggregate({where:{returnId:ret.id},_sum:{amount:true}});
+   const remaining=due.minus(paid._sum.amount??new Prisma.Decimal(0));
+   if(money(dto.amount).greaterThan(remaining))throw new ConflictException('Refund exceeds outstanding approved return amount');
+   const entry=await tx.posRefundSettlement.create({data:{returnId:ret.id,idempotencyKey:dto.idempotencyKey,method:dto.method,amount:money(dto.amount),reference:dto.reference,payoutShiftId:dto.payoutShiftId,settledById:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_REFUND_SETTLEMENT_RECORDED',entityType:'PosRefundSettlement',entityId:entry.id,after:{returnId:ret.id,amount:entry.amount.toString(),method:entry.method,reference:entry.reference}}});
+   return entry;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async refundStatus(returnId:string,u:Principal){
+  const ret=await this.db.posReturn.findUniqueOrThrow({where:{id:returnId},include:{lines:true,settlements:{orderBy:{settledAt:'desc'}}}});
+  this.branchAccess(u,ret.locationId);
+  const approved=ret.lines.reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
+  const recorded=ret.settlements.reduce((sum,l)=>sum.plus(l.amount),new Prisma.Decimal(0));
+  return {returnId:ret.id,approvedAmount:approved.toString(),recordedAmount:recorded.toString(),remainingAmount:approved.minus(recorded).toString(),settlements:ret.settlements.map(s=>({...s,amount:s.amount.toString()})),note:'Records staff-confirmed payouts only. Card or wallet gateway transfers are not initiated or verified by this API.'};
+ }
  async shiftSummary(id:string,u:Principal){
   const shift=await this.db.posShift.findUniqueOrThrow({where:{id},include:{sales:{include:{tenders:true}}}});
   this.branchAccess(u,shift.locationId);
   const accepted=shift.sales.filter(s=>s.status==='ACCEPTED');
   const cash=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CASH').reduce((sum,t)=>sum+t.amount.toNumber(),0);
   const card=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CARD').reduce((sum,t)=>sum+t.amount.toNumber(),0);
-  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,expectedCash:shift.openingCash.toNumber()+cash,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-shift.openingCash.toNumber()-cash};
+  const returns=await this.db.posReturn.findMany({where:{sale:{shiftId:id}},include:{lines:true}});
+  const returnAmount=returns.flatMap(r=>r.lines).reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
+  const settlementRecords=await this.db.posRefundSettlement.findMany({where:{payoutShiftId:id,method:'CASH'},select:{amount:true}});
+  const cashRefunds=settlementRecords.reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
+  const cashExpected=shift.openingCash.toNumber()+cash-cashRefunds.toNumber();
+  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),recordedCashRefunds:cashRefunds.toString(),expectedCash:cashExpected,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-cashExpected,note:'Cash refunds are deducted only when explicitly recorded against this payout shift. Refunds without a payout shift are excluded; ensure all local sales have synced before closing.'};
  }
  async deviceStatus(deviceId:string,u:Principal){
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
@@ -181,6 +270,9 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+ @Post('exchanges/link') @Roles('SUPER_ADMIN','BRANCH_MANAGER') linkExchange(@Body() dto:ExchangeDto,@CurrentUser() u:Principal){return this.pos.linkExchange(dto,u);}
+ @Post('refunds/settle') @Roles('SUPER_ADMIN','BRANCH_MANAGER') settleRefund(@Body() dto:RefundSettlementDto,@CurrentUser() u:Principal){return this.pos.settleRefund(dto,u);}
+ @Get('refunds/:returnId') @Roles('SUPER_ADMIN','BRANCH_MANAGER') refundStatus(@Param('returnId') id:string,@CurrentUser() u:Principal){return this.pos.refundStatus(id,u);}
  @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
  @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
 }

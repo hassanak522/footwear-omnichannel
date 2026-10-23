@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { Db } from './db';
+import { Prisma } from '@prisma/client';
 import { JwtAuthGuard, Roles, RolesGuard } from './auth';
 
 class PeriodQuery {
@@ -51,6 +52,45 @@ export class HqController {
    grouped.set(sale.locationId,row);
   }
   return {period:{from,to,toExclusive:true},byLocation:[...grouped.values()].map(x=>({...x,gross:x.gross.toFixed(2),cash:x.cash.toFixed(2),card:x.card.toFixed(2)})),returned:sales.length,truncated:sales.length===5000,note:'Accepted POS gross totals only; refunds, tax and card settlement are not netted. Maximum 5000 sales per query; narrow the period if truncated.'};
+ }
+ @Get('refund-liabilities')
+ async refundLiabilities(@Query('locationId') locationId?:string){
+  if(locationId&&!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locationId))throw new BadRequestException('Invalid locationId');
+  // Compute each return's lifetime liability before aggregating. Payouts from any date count.
+  // Group in SQL to avoid the 5,000-row truncation of the activity report.
+  const location=locationId?Prisma.sql`AND r."locationId" = ${locationId}::uuid`:Prisma.empty;
+  const onlineLocation=locationId?Prisma.sql`AND o."warehouseId" = ${locationId}::uuid`:Prisma.empty;
+  type Liability={channel:string;returnId:string;approved:Prisma.Decimal;paid:Prisma.Decimal;outstanding:Prisma.Decimal;approvedAt:Date};
+  const rows=await this.db.$queryRaw<Liability[]>`
+   WITH approved AS (
+    SELECT 'POS'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",COALESCE((SELECT SUM(l."refundAmount") FROM "PosReturnLine" l WHERE l."returnId"=r.id),0)::numeric AS approved,
+      COALESCE((SELECT SUM(s.amount) FROM "PosRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+    FROM "PosReturn" r WHERE r.status='APPROVED' ${location}
+    UNION ALL
+    SELECT 'ONLINE'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",r."merchandiseAmount"::numeric AS approved,
+      COALESCE((SELECT SUM(s.amount) FROM "OnlineRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+    FROM "OnlineReturn" r JOIN "OnlineOrder" o ON o.id=r."orderId" WHERE TRUE ${onlineLocation}
+   )
+   SELECT channel,"returnId",approved,paid,(approved-paid) AS outstanding,"approvedAt"
+   FROM approved WHERE approved>paid ORDER BY "approvedAt" ASC,"returnId" ASC
+  `;
+  const summary=(channel:string)=>{const relevant=rows.filter(x=>x.channel===channel);return {unpaidReturns:relevant.length,outstanding:relevant.reduce((n,x)=>n.plus(x.outstanding),new Prisma.Decimal(0)).toString()};};
+  return {currency:'PKR',asOf:new Date().toISOString(),pos:summary('POS'),online:summary('ONLINE'),totalOutstanding:rows.reduce((n,x)=>n.plus(x.outstanding),new Prisma.Decimal(0)).toString(),oldestUnpaid:rows.slice(0,100).map(x=>({channel:x.channel,returnId:x.returnId,approved:x.approved.toString(),paid:x.paid.toString(),outstanding:x.outstanding.toString(),approvedAt:x.approvedAt})),totalUnpaidReturns:rows.length,note:'Lifetime outstanding merchandise refund liability across all approved returns, net of recorded payouts through now. These are staff-entered settlements, not bank-verified disbursements. Oldest 100 items shown.'};
+ }
+ @Get('refund-reconciliation')
+ async refundReconciliation(@Query() q:PeriodQuery){
+  const {from,to}=this.period(q);
+  const range={gte:from,lt:to};
+  const [posReturns,onlineReturns,posPayouts,onlinePayouts]=await Promise.all([
+   this.db.posReturn.findMany({where:{createdAt:range,...(q.locationId?{locationId:q.locationId}:{})},select:{id:true,locationId:true,createdAt:true,lines:{select:{refundAmount:true}}},take:5001,orderBy:{createdAt:'desc'}}),
+   this.db.onlineReturn.findMany({where:{createdAt:range,...(q.locationId?{order:{warehouseId:q.locationId}}:{})},select:{id:true,createdAt:true,merchandiseAmount:true,order:{select:{warehouseId:true}}},take:5001,orderBy:{createdAt:'desc'}}),
+   this.db.posRefundSettlement.findMany({where:{settledAt:range,...(q.locationId?{return:{locationId:q.locationId}}:{})},select:{id:true,returnId:true,amount:true,method:true,settledAt:true},take:5001,orderBy:{settledAt:'desc'}}),
+   this.db.onlineRefundSettlement.findMany({where:{settledAt:range,...(q.locationId?{return:{order:{warehouseId:q.locationId}}}:{})},select:{id:true,returnId:true,amount:true,method:true,settledAt:true},take:5001,orderBy:{settledAt:'desc'}})
+  ]);
+  const amount=(items:{amount:Prisma.Decimal}[])=>items.reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0)).toString();
+  const posApproved=posReturns.reduce((sum,r)=>sum.plus(r.lines.reduce((n,l)=>n.plus(l.refundAmount),new Prisma.Decimal(0))),new Prisma.Decimal(0));
+  const onlineApproved=onlineReturns.reduce((sum,r)=>sum.plus(r.merchandiseAmount),new Prisma.Decimal(0));
+  return {period:{from:from.toISOString(),to:to.toISOString()},currency:'PKR',pos:{returns:posReturns.length,approvedMerchandise:posApproved.toString(),payouts:posPayouts.length,paidInPeriod:amount(posPayouts)},online:{returns:onlineReturns.length,approvedMerchandise:onlineApproved.toString(),payouts:onlinePayouts.length,paidInPeriod:amount(onlinePayouts)},byMethod:Object.entries([...posPayouts,...onlinePayouts].reduce((acc,p)=>{const k=p.method;acc[k]=(acc[k]??new Prisma.Decimal(0)).plus(p.amount);return acc;},{} as Record<string,Prisma.Decimal>)).map(([method,total])=>({method,paid:total.toString()})),truncated:[posReturns,onlineReturns,posPayouts,onlinePayouts].some(x=>x.length>5000),note:'Approved return amounts use approval dates; paid amounts use settlement dates. They are different cohorts and must not be subtracted to calculate outstanding balances. No money movement is initiated.'};
  }
  @Get('stock-by-location')
  async stockByLocation(@Query('locationId') locationId?:string){

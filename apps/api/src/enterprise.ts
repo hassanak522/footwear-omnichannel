@@ -94,10 +94,93 @@ export class StockCountsController {
  }
 }
 class CustomerDto { @IsString() @MinLength(5) phone!:string; @IsString() @MinLength(2) name!:string; @IsOptional() @IsEmail() email?:string; @IsOptional() @IsBoolean() consentMarketing?:boolean; }
+class LoyaltyReversalDto {
+ @IsUUID() sourceEntryId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsInt() @Min(1) points!:number;
+ @IsString() @MinLength(10) @MaxLength(500) reason!:string;
+}
+class LoyaltyRedemptionDto {
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsInt() @Min(1) points!:number;
+ @IsString() @MinLength(3) @MaxLength(100) reference!:string;
+ @IsString() @MinLength(10) @MaxLength(500) reason!:string;
+}
 @Controller('retail') @UseGuards(...guards) @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
 export class RetailController {
  constructor(private db:Db){}
  @Get('customers') customers(@Query('phone') phone?:string){if(!phone||phone.length<5)throw new BadRequestException('Phone search of 5+ characters required');return this.db.retailCustomer.findMany({where:{phone:{contains:phone}},take:25});}
+ @Get('customers/:id/insights') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async insights(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone},select:{id:true,orderNumber:true,status:true,total:true,createdAt:true},orderBy:{createdAt:'desc'},take:100});
+  const delivered=orders.filter(o=>o.status==='DELIVERED');
+  return {customer:{id:customer.id,name:customer.name,phone:customer.phone,consentMarketing:customer.consentMarketing},online:{orders:orders.length,deliveredOrders:delivered.length,deliveredValue:delivered.reduce((n,o)=>n+o.total.toNumber(),0).toFixed(2),recentOrders:orders.slice(0,10).map(o=>({...o,total:o.total.toString()})),truncated:orders.length===100},note:'Online orders matched by exact phone. POS sales are not linked to customer records; this is not an omnichannel lifetime value or loyalty points balance.'};
+ }
+ @Post('customers/:id/loyalty-reversals') @Roles('SUPER_ADMIN') async reverseLoyalty(@Param('id') id:string,@Body() dto:LoyaltyReversalDto,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-customer:'+id}))`;
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-entry:'+dto.sourceEntryId}))`;
+   const previous=await tx.loyaltyAdjustment.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){if(previous.customerId!==id||previous.sourceEntryId!==dto.sourceEntryId||previous.points!==-dto.points||previous.reason!==dto.reason)throw new ConflictException('Loyalty reversal key reused with different request');return previous;}
+   const earned=await tx.loyaltyEntry.findUnique({where:{id:dto.sourceEntryId}});
+   if(!earned||earned.customerId!==id)throw new BadRequestException('Loyalty earning entry not found for customer');
+   const prior=await tx.loyaltyAdjustment.aggregate({where:{sourceEntryId:earned.id},_sum:{points:true}});
+   if(dto.points>earned.points+(prior._sum.points??0))throw new ConflictException('Reversal exceeds unreversed earned points');
+   const [totalEarned,totalReversed,totalRedeemed]=await Promise.all([
+    tx.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}})
+   ]);
+   if((totalEarned._sum.points??0)+(totalReversed._sum.points??0)-(totalRedeemed._sum.points??0)<dto.points)throw new ConflictException('Reversal would make already redeemed loyalty balance negative; reconcile the redemption first');
+   const adjustment=await tx.loyaltyAdjustment.create({data:{customerId:id,sourceEntryId:earned.id,idempotencyKey:dto.idempotencyKey,points:-dto.points,reason:dto.reason,actorId:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REVERSED',entityType:'LoyaltyAdjustment',entityId:adjustment.id,after:{sourceEntryId:earned.id,points:-dto.points,reason:dto.reason}}});
+   return adjustment;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ @Post('customers/:id/loyalty-redemptions') @Roles('SUPER_ADMIN')
+ async redeemLoyalty(@Param('id') id:string,@Body() dto:LoyaltyRedemptionDto,@CurrentUser() u:Principal){
+  if(process.env.LOYALTY_REDEMPTION_ENABLED!=='true')throw new ConflictException('Loyalty redemption is disabled; configure LOYALTY_REDEMPTION_ENABLED=true only after financial approval');
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-customer:'+id}))`;
+   const previous=await tx.loyaltyRedemption.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){if(previous.customerId!==id||previous.points!==dto.points||previous.reference!==dto.reference||previous.reason!==dto.reason)throw new ConflictException('Redemption key reused with different request');return previous;}
+   const customer=await tx.retailCustomer.findUnique({where:{id}});
+   if(!customer)throw new BadRequestException('Customer not found');
+   const [earned,reversed,redeemed]=await Promise.all([
+    tx.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}})
+   ]);
+   const available=(earned._sum.points??0)+(reversed._sum.points??0)-(redeemed._sum.points??0);
+   if(dto.points>available)throw new ConflictException('Insufficient available loyalty points');
+   // Redemption is a point-ledger entry, not a payment. Require a traceable reference.
+   if(!/^[A-Za-z0-9][A-Za-z0-9:_\\/.-]{2,99}$/.test(dto.reference))throw new BadRequestException('Reference must be a traceable order or receipt identifier');
+   const redemption=await tx.loyaltyRedemption.create({data:{customerId:id,idempotencyKey:dto.idempotencyKey,points:dto.points,reference:dto.reference,reason:dto.reason,actorId:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REDEEMED',entityType:'LoyaltyRedemption',entityId:redemption.id,after:{customerId:id,points:dto.points,reference:dto.reference}}});
+   return redemption;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ @Get('customers/:id/loyalty-ledger') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async loyaltyLedger(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const [summary,entries,adjustments,adjustmentTotal,redemptionTotal,redemptions]=await Promise.all([
+   this.db.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true},_count:{_all:true}}),
+   this.db.loyaltyEntry.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50,select:{id:true,orderId:true,points:true,amount:true,createdAt:true}}),
+   this.db.loyaltyAdjustment.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50}),
+   this.db.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+   this.db.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}}),
+   this.db.loyaltyRedemption.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50})
+  ]);
+  return {customerId:customer.id,earnedPoints:summary._sum.points??0,reversedPoints:-(adjustmentTotal._sum.points??0),netPoints:(summary._sum.points??0)+(adjustmentTotal._sum.points??0)-(redemptionTotal._sum.points??0),redeemedPoints:redemptionTotal._sum.points??0,redemptions,adjustments,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:process.env.LOYALTY_REDEMPTION_ENABLED==='true',rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Admin-recorded point redemption is disabled by default and does not apply payment discounts or issue refunds. Returns can reduce the balance after prior redemption. Existing delivered orders are not automatically backfilled.'};
+ }
+ @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone,status:'DELIVERED'},select:{id:true,orderNumber:true,subtotal:true,createdAt:true},orderBy:{createdAt:'desc'},take:501});
+  const capped=orders.slice(0,500);
+  const total=capped.reduce((sum,o)=>sum.plus(o.subtotal),new Prisma.Decimal(0));
+  const rate=100;
+  const points=capped.reduce((sum,o)=>sum+Math.floor(o.subtotal.toNumber()/rate),0);
+  return {customerId:customer.id,program:'PREVIEW_ONLY',eligibleOrderCount:capped.length,eligibleMerchandiseSubtotal:total.toString(),hypotheticalPoints:points,earningRule:'1 illustrative point per PKR 100 of merchandise subtotal per delivered online order, rounded down per order',truncated:orders.length>500,redeemable:false,note:'This is a non-redeemable simulation, not an actual loyalty balance. No POS purchases, refunds or redemptions are incorporated; configure an approved rewards policy and durable ledger before launch.'};
+ }
  @Post('customers') customer(@Body() dto:CustomerDto){return this.db.retailCustomer.create({data:dto});}
 }
 class PriceDto { @IsUUID() variantId!:string; @IsNumber({maxDecimalPlaces:2}) @Min(0) proposedPrice!:number; @IsString() @MinLength(5) @MaxLength(500) reason!:string; }

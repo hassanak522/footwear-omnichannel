@@ -1,0 +1,29 @@
+name: Royal Step container build validation
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/m16-m20-experience-operations]
+permissions:
+  contents: read
+jobs:
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate production Compose
+        env:
+          POSTGRES_DB: royal_step
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          DATABASE_URL: postgresql://ci:ci@postgres:5432/royal_step?schema=public
+          JWT_SECRET: ci-only-secret-at-least-32-characters
+          CORS_ORIGIN: https://shop.example.com
+          NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
+          ONLINE_COD_SHIPPING_PKR: '250.00'
+        run: docker compose -f infra/docker/compose.production.yml config --quiet
+      - name: Build API image
+        run: docker build -f infra/docker/Dockerfile.api -t royal-step-api:ci .
+      - name: Build web image
+        run: docker build -f infra/docker/Dockerfile.web --build-arg NEXT_PUBLIC_API_URL=https://api.example.com/api/v1 -t royal-step-web:ci .

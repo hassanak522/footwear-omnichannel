@@ -28,6 +28,44 @@ await check('Health endpoint', async () => {
  const r=await request('/health'); expectStatus(r,200);
  if(r.body?.status!=='ok')throw new Error('health payload missing status ok');
 });
+await check('Public shipping quote shape', async () => {
+ const r=await request('/store/shipping');expectStatus(r,200);
+ if(typeof r.body?.available!=='boolean'||r.body?.currency!=='PKR')throw new Error('invalid shipping quote');
+ if(r.body.available&&(!/^([0-9]+)([.][0-9]{1,2})?$/.test(r.body.shippingFee)||Number(r.body.shippingFee)<0))throw new Error('invalid configured shipping charge');
+});
+await check('POS shift closure requires authentication', async () => {
+ const r=await request('/pos/shifts/00000000-0000-4000-8000-000000000000/close',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({closingCash:0})});expectStatus(r,401);
+});
+await check('POS shift summary requires authentication', async () => {
+ const r=await request('/pos/shifts/00000000-0000-4000-8000-000000000000/summary');expectStatus(r,401);
+});
+await check('Loyalty redemption requires authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000001/loyalty-redemptions',{method:'POST',body:JSON.stringify({idempotencyKey:'unauth-redemption',points:1,reference:'test',reason:'Unauthorized smoke probe'})});expectStatus(r,401);
+});
+await check('Refund liability reporting requires authentication', async () => {
+ const r=await request('/hq/refund-liabilities');expectStatus(r,401);
+});
+await check('Online refund settlement requires authentication', async () => {
+ const r=await request('/orders/refunds/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
+await check('Online order return requires authentication', async () => {
+ const r=await request('/orders/00000000-0000-4000-8000-000000000000/returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
+await check('POS exchange linkage requires authentication', async () => {
+ const r=await request('/pos/exchanges/link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
+await check('Loyalty reversal requires authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/loyalty-reversals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
+await check('Refund settlement requires authentication', async () => {
+ const r=await request('/pos/refunds/settle',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
+await check('Refund status requires authentication', async () => {
+ const r=await request('/pos/refunds/00000000-0000-4000-8000-000000000000');expectStatus(r,401);
+});
+await check('POS return mutations require authentication', async () => {
+ const r=await request('/pos/returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})});expectStatus(r,401);
+});
 await check('Public catalog response', async () => {
  const r=await request('/store/products'); expectStatus(r,200);
  if(!Array.isArray(r.body))throw new Error('expected product array');
@@ -35,6 +73,21 @@ await check('Public catalog response', async () => {
 });
 await check('HQ endpoint requires authentication', async () => {
  const r=await request('/hq/overview'); expectStatus(r,401);
+});
+await check('Loyalty ledger requires authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/loyalty-ledger');expectStatus(r,401);
+});
+await check('Loyalty preview requires authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/rewards-preview');expectStatus(r,401);
+});
+await check('Customer insights require authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/insights');expectStatus(r,401);
+});
+await check('POS sales require authentication', async () => {
+ const r=await request('/pos/sales/00000000-0000-4000-8000-000000000000');expectStatus(r,401);
+});
+await check('HQ sales analytics require authentication', async () => {
+ const r=await request('/hq/sales-analytics');expectStatus(r,401);
 });
 await check('Orders endpoint requires authentication', async () => {
  const r=await request('/orders'); expectStatus(r,401);
@@ -54,6 +107,7 @@ if (process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD) {
   const headers={authorization:`Bearer ${token}`};
   await check('HQ overview (admin)', async () => {const r=await request('/hq/overview',{headers});expectStatus(r,200);if(!r.body?.stock)throw new Error('missing stock');});
   await check('HQ stock-by-location (admin)', async () => {const r=await request('/hq/stock-by-location',{headers});expectStatus(r,200);if(!Array.isArray(r.body))throw new Error('expected array');});
+  await check('HQ sales analytics (admin)', async () => {const r=await request('/hq/sales-analytics',{headers});expectStatus(r,200);if(!Array.isArray(r.body?.byLocation))throw new Error('expected byLocation array');});
   await check('HQ attention (admin)', async () => {const r=await request('/hq/attention',{headers});expectStatus(r,200);if(!r.body?.lowAvailability)throw new Error('missing lowAvailability');});
  }
 } else console.log('SKIP authenticated HQ checks (set SMOKE_EMAIL and SMOKE_PASSWORD)');

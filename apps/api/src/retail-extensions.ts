@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuar
 import { IsEmail, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
 import { Db } from './db';
+import { TransfersService } from './transfers';
 import { CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard, assertLocation } from './auth';
 class StaffDto { @IsEmail() email!:string; @IsString() @MinLength(2) name!:string; @IsString() @MinLength(10) password!:string; @IsUUID() locationId!:string; }
 @Controller('staff') @UseGuards(JwtAuthGuard,RolesGuard) @Roles('SUPER_ADMIN')
@@ -18,7 +19,7 @@ export class StaffController {
 class RequestDto { @IsUUID() sourceId!:string; @IsUUID() destinationId!:string; @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsOptional() @IsString() note?:string; }
 @Controller('replenishment') @UseGuards(JwtAuthGuard,RolesGuard)
 export class ReplenishmentController {
- constructor(private db:Db){}
+ constructor(private db:Db,private transfers:TransfersService){}
  @Get('sources') async sources(@CurrentUser() u:Principal){return this.db.location.findMany({where:{active:true,type:{in:['WAREHOUSE','BRANCH']},...(u.roles.includes('SUPER_ADMIN')?{}:{id:{notIn:u.locations}})},select:{id:true,name:true,type:true}});}
  @Get('requests') list(@CurrentUser() u:Principal){return this.db.replenishmentRequest.findMany({where:u.roles.includes('SUPER_ADMIN')?{}:{OR:[{destinationId:{in:u.locations}},{sourceId:{in:u.locations}}]},orderBy:{createdAt:'desc'},take:200});}
  @Post('requests') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async create(@Body() d:RequestDto,@CurrentUser() u:Principal){
@@ -27,14 +28,24 @@ export class ReplenishmentController {
   if(!src.active||!dst.active||dst.type!=='BRANCH'||!['BRANCH','WAREHOUSE'].includes(src.type))throw new BadRequestException('Invalid locations');
   return this.db.replenishmentRequest.create({data:{...d,requestedById:u.id}});
  }
+ // One stable transfer key per request makes retries safe and prevents duplicate transfer creation.
+ @Post('requests/:id/create-transfer') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async createTransfer(@Param('id') id:string,@CurrentUser() u:Principal){
+  const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});
+  assertLocation(u,r.sourceId);
+  if(r.status!=='APPROVED')throw new ConflictException('Approve the request before creating a transfer');
+  return this.transfers.create({sourceId:r.sourceId,destinationId:r.destinationId,items:[{variantId:r.variantId,quantity:r.quantity}],idempotencyKey:`replenishment:${r.id}:transfer`},u);
+ }
  @Post('requests/:id/reject') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async reject(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
+  const changed=await this.db.replenishmentRequest.updateMany({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}});
+  if(changed.count!==1)throw new ConflictException('Request already reviewed');
+  return this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});
  }
  // Approval records intent only. Physical stock must move through the existing audited transfer workflow.
  @Post('requests/:id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async approve(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  if(r.status!=='REQUESTED')throw new ConflictException('Already reviewed');
-  return this.db.replenishmentRequest.update({where:{id},data:{status:'APPROVED',reviewedAt:new Date()}});
+  const changed=await this.db.replenishmentRequest.updateMany({where:{id,status:'REQUESTED'},data:{status:'APPROVED',reviewedAt:new Date()}});
+  if(changed.count!==1)throw new ConflictException('Request already reviewed');
+  return this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});
  }
 }

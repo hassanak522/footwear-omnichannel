@@ -311,6 +311,7 @@ model PosShift {
   location Location @relation(fields:[locationId], references:[id])
   cashier User @relation(fields:[cashierId], references:[id])
   sales PosSale[]
+  refundPayouts PosRefundSettlement[]
   @@index([deviceId,status])
 }
 
@@ -334,6 +335,7 @@ model PosSale {
   lines PosSaleLine[]
   tenders PosSaleTender[]
   returns PosReturn[]
+  replacementForExchange PosExchange?
   @@unique([deviceId,localSaleId])
   @@index([locationId,soldAt])
 }
@@ -373,6 +375,8 @@ model PosReturn {
   sale PosSale @relation(fields:[saleId],references:[id])
   location Location @relation(fields:[locationId],references:[id])
   lines PosReturnLine[]
+  settlements PosRefundSettlement[]
+  exchange PosExchange?
   @@index([saleId,createdAt])
 }
 model PosReturnLine {
@@ -427,6 +431,7 @@ model OnlineOrder {
  shippingFee Decimal @db.Decimal(12,2) @default(0)
  total Decimal @db.Decimal(12,2)
  lines OnlineOrderLine[]
+ returns OnlineReturn[]
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
  dispatchedAt DateTime?
@@ -512,6 +517,9 @@ model RetailCustomer {
  name String
  email String?
  consentMarketing Boolean @default(false)
+ loyaltyEntries LoyaltyEntry[]
+ loyaltyAdjustments LoyaltyAdjustment[]
+ loyaltyRedemptions LoyaltyRedemption[]
  createdAt DateTime @default(now())
  updatedAt DateTime @updatedAt
 }
@@ -548,4 +556,107 @@ model ReplenishmentRequest {
  createdAt DateTime @default(now())
  reviewedAt DateTime?
  @@index([destinationId,status])
+}
+
+model LoyaltyEntry {
+ id String @id @default(uuid()) @db.Uuid
+ customerId String @db.Uuid
+ customer RetailCustomer @relation(fields:[customerId],references:[id])
+ orderId String @unique @db.Uuid
+ points Int
+ amount Decimal @db.Decimal(12,2)
+ adjustments LoyaltyAdjustment[]
+ createdAt DateTime @default(now())
+ @@index([customerId,createdAt])
+}
+
+model PosRefundSettlement {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return PosReturn @relation(fields:[returnId],references:[id])
+ payoutShiftId String? @db.Uuid
+ payoutShift PosShift? @relation(fields:[payoutShiftId],references:[id])
+ idempotencyKey String @unique
+ method PosTenderType
+ amount Decimal @db.Decimal(12,2)
+ reference String?
+ settledById String @db.Uuid
+ settledAt DateTime @default(now())
+ @@index([returnId,settledAt])
+}
+
+model LoyaltyAdjustment {
+ id String @id @default(uuid()) @db.Uuid
+ customerId String @db.Uuid
+ customer RetailCustomer @relation(fields:[customerId],references:[id])
+ sourceEntryId String @db.Uuid
+ sourceEntry LoyaltyEntry @relation(fields:[sourceEntryId],references:[id])
+ idempotencyKey String @unique
+ points Int
+ reason String
+ actorId String @db.Uuid
+ createdAt DateTime @default(now())
+ @@index([customerId,createdAt])
+ @@index([sourceEntryId,createdAt])
+}
+
+model LoyaltyRedemption {
+ id String @id @default(uuid()) @db.Uuid
+ customerId String @db.Uuid
+ customer RetailCustomer @relation(fields:[customerId],references:[id])
+ idempotencyKey String @unique
+ points Int
+ reference String
+ reason String
+ actorId String @db.Uuid
+ createdAt DateTime @default(now())
+ @@index([customerId,createdAt])
+}
+
+model PosExchange {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @unique @db.Uuid
+ return PosReturn @relation(fields:[returnId],references:[id])
+ replacementSaleId String @unique @db.Uuid
+ replacementSale PosSale @relation(fields:[replacementSaleId],references:[id])
+ idempotencyKey String @unique
+ approvedById String @db.Uuid
+ createdAt DateTime @default(now())
+}
+
+model OnlineReturn {
+ id String @id @default(uuid()) @db.Uuid
+ orderId String @db.Uuid
+ order OnlineOrder @relation(fields:[orderId],references:[id])
+ idempotencyKey String @unique
+ reason String
+ approvedById String @db.Uuid
+ merchandiseAmount Decimal @db.Decimal(12,2)
+ createdAt DateTime @default(now())
+ lines OnlineReturnLine[]
+ settlements OnlineRefundSettlement[]
+ @@index([orderId,createdAt])
+}
+model OnlineReturnLine {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return OnlineReturn @relation(fields:[returnId],references:[id])
+ variantId String @db.Uuid
+ quantity Int
+ quarantined Boolean @default(false)
+ unitPrice Decimal @db.Decimal(12,2)
+ @@unique([returnId,variantId])
+}
+
+model OnlineRefundSettlement {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return OnlineReturn @relation(fields:[returnId],references:[id])
+ idempotencyKey String @unique
+ method String
+ amount Decimal @db.Decimal(12,2)
+ reference String
+ settledById String @db.Uuid
+ settledAt DateTime @default(now())
+ @@index([returnId,settledAt])
 }

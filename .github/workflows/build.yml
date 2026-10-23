@@ -1,0 +1,65 @@
+name: Royal Step build checks
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/m16-m20-experience-operations]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: royal_step
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d royal_step"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5433/royal_step?schema=public
+      JWT_SECRET: ci-only-not-for-production
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Validate Prisma schema
+        run: npm exec --workspace=@footwear/database -- prisma validate
+      - name: Generate Prisma client
+        run: npm run db:generate
+      - name: Apply all migrations on clean PostgreSQL
+        run: npm exec --workspace=@footwear/database -- prisma migrate deploy
+      - name: Verify retail finance database constraints
+        run: node scripts/verify-retail-db.mjs
+      - name: Build API
+        run: npm run build -w @footwear/api
+      - name: Build web app
+        run: npm run build -w @footwear/web
+      - name: Build Electron POS frontend
+        run: npm run build -w @footwear/pos-desktop
+      - name: Validate Docker Compose production configuration
+        env:
+          POSTGRES_DB: royal_step
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          DATABASE_URL: postgresql://ci:ci@postgres:5432/royal_step?schema=public
+          JWT_SECRET: ci-only-placeholder-at-least-32-characters
+          CORS_ORIGIN: https://shop.example.com
+          NEXT_PUBLIC_API_URL: https://api.example.com/api/v1
+          ONLINE_COD_SHIPPING_PKR: '250.00'
+        run: docker compose -f infra/docker/compose.production.yml config --quiet
