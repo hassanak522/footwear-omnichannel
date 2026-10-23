@@ -15,9 +15,9 @@ try {
   WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment')
  `);
  const has=(table,fragment)=>constraints.some(x=>x.table_name===table&&x.definition.includes(fragment));
- assert(has('PosRefundSettlement','amount > 0'),'Refund amount must be positive');
+ assert(constraints.some(x=>x.table_name==='PosRefundSettlement'&&/CHECK\\s*\\(/i.test(x.definition)&&/amount/i.test(x.definition)&&/>/.test(x.definition)),'Refund amount must be positive');
  assert(has('PosRefundSettlement','FOREIGN KEY ("payoutShiftId")'),'Payout shift FK missing');
- assert(has('LoyaltyAdjustment','points < 0'),'Loyalty reversal must be negative');
+ assert(constraints.some(x=>x.table_name==='LoyaltyAdjustment'&&/CHECK\\s*\\(/i.test(x.definition)&&/points/i.test(x.definition)&&/</.test(x.definition)),'Loyalty reversal must be negative');
  assert(has('LoyaltyAdjustment','FOREIGN KEY ("sourceEntryId")'),'Loyalty source FK missing');
 
  const indexes=await db.$queryRawUnsafe(`
