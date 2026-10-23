@@ -114,12 +114,12 @@ export class RetailController {
  }
  @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
-  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone,status:'DELIVERED'},select:{id:true,orderNumber:true,total:true,createdAt:true},orderBy:{createdAt:'desc'},take:501});
+  const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone,status:'DELIVERED'},select:{id:true,orderNumber:true,subtotal:true,createdAt:true},orderBy:{createdAt:'desc'},take:501});
   const capped=orders.slice(0,500);
-  const total=capped.reduce((sum,o)=>sum.plus(o.total),new Prisma.Decimal(0));
+  const total=capped.reduce((sum,o)=>sum.plus(o.subtotal),new Prisma.Decimal(0));
   const rate=100;
-  const points=capped.reduce((sum,o)=>sum+Math.floor(o.total.toNumber()/rate),0);
-  return {customerId:customer.id,program:'PREVIEW_ONLY',eligibleOrderCount:capped.length,deliveredOrderValue:total.toString(),hypotheticalPoints:points,earningRule:'1 illustrative point per PKR 100 per delivered online order, rounded down per order',truncated:orders.length>500,redeemable:false,note:'This is a non-redeemable simulation, not an actual loyalty balance. No POS purchases, refunds or redemptions are incorporated; configure an approved rewards policy and durable ledger before launch.'};
+  const points=capped.reduce((sum,o)=>sum+Math.floor(o.subtotal.toNumber()/rate),0);
+  return {customerId:customer.id,program:'PREVIEW_ONLY',eligibleOrderCount:capped.length,eligibleMerchandiseSubtotal:total.toString(),hypotheticalPoints:points,earningRule:'1 illustrative point per PKR 100 of merchandise subtotal per delivered online order, rounded down per order',truncated:orders.length>500,redeemable:false,note:'This is a non-redeemable simulation, not an actual loyalty balance. No POS purchases, refunds or redemptions are incorporated; configure an approved rewards policy and durable ledger before launch.'};
  }
  @Post('customers') customer(@Body() dto:CustomerDto){return this.db.retailCustomer.create({data:dto});}
 }
