@@ -44,6 +44,9 @@ await check('Public catalog response', async () => {
 await check('HQ endpoint requires authentication', async () => {
  const r=await request('/hq/overview'); expectStatus(r,401);
 });
+await check('Loyalty preview requires authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/rewards-preview');expectStatus(r,401);
+});
 await check('Customer insights require authentication', async () => {
  const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/insights');expectStatus(r,401);
 });
