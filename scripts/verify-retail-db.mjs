@@ -35,5 +35,23 @@ try {
  }
  const shiftColumn=await db.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='PosRefundSettlement' AND column_name='payoutShiftId'`);
  assert.equal(shiftColumn.length,1,'Refund payout shift column missing');
- console.log('Retail finance database migrations and structural constraints verified.');
+
+ // Exercise real PostgreSQL CHECK and UNIQUE constraints inside a rolled-back transaction.
+ // No customer, order, or financial records are persisted by these probes.
+ const probe=async(statement,params,expected)=>{
+  await db.$executeRawUnsafe('BEGIN');
+  try {
+   await db.$executeRawUnsafe(statement,...params);
+   throw new Error('Constraint unexpectedly accepted invalid data: '+expected);
+  } catch(e) {
+   const msg=String(e.message??e);
+   assert(msg.includes(expected),`Expected PostgreSQL ${expected} violation, received: ${msg}`);
+  } finally {await db.$executeRawUnsafe('ROLLBACK');}
+ };
+ const uid='00000000-0000-4000-8000-000000000001';
+ await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-negative-online-refund','CASH',-1,'probe'],'check constraint');
+ await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-invalid-refund-method','INVALID',1,'probe'],'check constraint');
+ await probe('INSERT INTO "OnlineReturnLine" ("id","returnId","variantId","quantity","unitPrice") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3)',[uid,0,1],'check constraint');
+ await probe('INSERT INTO "LoyaltyAdjustment" ("id","customerId","sourceEntryId","idempotencyKey","points","reason","actorId") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3,$4,$1::uuid)',[uid,'probe-positive-loyalty-adjustment',1,'probe'],'check constraint');
+ console.log('Retail finance database migrations, constraints, and rollback-only negative probes verified.');
 } finally {await db.$disconnect();}
