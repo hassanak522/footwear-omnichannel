@@ -153,6 +153,8 @@ export class RetailController {
    ]);
    const available=(earned._sum.points??0)+(reversed._sum.points??0)-(redeemed._sum.points??0);
    if(dto.points>available)throw new ConflictException('Insufficient available loyalty points');
+   // Redemption is a point-ledger entry, not a payment. Require a traceable reference.
+   if(!/^[A-Za-z0-9][A-Za-z0-9:_\\/.-]{2,99}$/.test(dto.reference))throw new BadRequestException('Reference must be a traceable order or receipt identifier');
    const redemption=await tx.loyaltyRedemption.create({data:{customerId:id,idempotencyKey:dto.idempotencyKey,points:dto.points,reference:dto.reference,reason:dto.reason,actorId:u.id}});
    await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REDEEMED',entityType:'LoyaltyRedemption',entityId:redemption.id,after:{customerId:id,points:dto.points,reference:dto.reference}}});
    return redemption;
