@@ -22,6 +22,9 @@ The one-shot `migrate` service must exit successfully before the API starts. Use
 ## Optional built-in HTTPS reverse proxy
 Set WEB_DOMAIN and API_DOMAIN to real DNS names pointing at your server. If ports 80/443 are available, start the Caddy overlay using `docker compose --env-file infra/docker/.env.production -f infra/docker/compose.production.yml -f infra/docker/compose.proxy.yml up -d --build`. Caddy can obtain certificates automatically once DNS and firewall routing are correct. Do not run this alongside an existing proxy on the same ports.
 
+## Database backup operations
+The repository includes `infra/docker/backup-postgres.sh` to produce a PostgreSQL custom-format archive. Run it within the database container with `BACKUP_DIR` set to a securely mounted backup directory. Backups must be encrypted, copied off-host, scheduled, and periodically restored to a disposable staging database. An archive listing check is not a substitute for restore testing.
+
 ## Release acceptance
 - CI must pass for the **exact commit** deployed; no unreviewed migrations or failed checks.
 - Run `API_BASE_URL=https://api.example.com/api/v1 node scripts/smoke.mjs` from a trusted machine. Supply staging-only read-only credentials for authenticated tests.
