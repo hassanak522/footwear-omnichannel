@@ -175,6 +175,10 @@ export class PosService {
  async settleRefund(dto:RefundSettlementDto,u:Principal){
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
+   // Lock the payout shift before reading its status so a concurrent close cannot race a payout.
+   if(dto.method==='CASH'&&dto.payoutShiftId){
+    await tx.$executeRaw`SELECT id FROM "PosShift" WHERE id = ${dto.payoutShiftId}::uuid FOR UPDATE`;
+   }
    const previous=await tx.posRefundSettlement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
    if(previous){
     const original=await tx.posReturn.findUniqueOrThrow({where:{id:previous.returnId}});
