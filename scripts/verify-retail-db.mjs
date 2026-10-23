@@ -49,5 +49,19 @@ try {
  await probe('INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES ($1::uuid,$1::uuid,$2,$3,$4,$5,$1::uuid)',[uid,'probe-invalid-refund-method','INVALID',1,'probe'],'check constraint');
  await probe('INSERT INTO "OnlineReturnLine" ("id","returnId","variantId","quantity","unitPrice") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3)',[uid,0,1],'check constraint');
  await probe('INSERT INTO "LoyaltyAdjustment" ("id","customerId","sourceEntryId","idempotencyKey","points","reason","actorId") VALUES ($1::uuid,$1::uuid,$1::uuid,$2,$3,$4,$1::uuid)',[uid,'probe-positive-loyalty-adjustment',1,'probe'],'check constraint');
+ // Compile the liability report's SQL against migrated PostgreSQL tables, even with an empty database.
+ const liabilityPlan=await db.$queryRawUnsafe(`EXPLAIN
+ WITH approved AS (
+ SELECT 'POS'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",
+ COALESCE((SELECT SUM(l."refundAmount") FROM "PosReturnLine" l WHERE l."returnId"=r.id),0)::numeric AS approved,
+ COALESCE((SELECT SUM(s.amount) FROM "PosRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+ FROM "PosReturn" r WHERE r.status='APPROVED'
+ UNION ALL
+ SELECT 'ONLINE'::text AS channel,r.id AS "returnId",r."createdAt" AS "approvedAt",r."merchandiseAmount"::numeric AS approved,
+ COALESCE((SELECT SUM(s.amount) FROM "OnlineRefundSettlement" s WHERE s."returnId"=r.id),0)::numeric AS paid
+ FROM "OnlineReturn" r JOIN "OnlineOrder" o ON o.id=r."orderId"
+ ) SELECT channel,"returnId",approved,paid,approved-paid AS outstanding,"approvedAt"
+ FROM approved WHERE approved>paid ORDER BY "approvedAt" ASC,"returnId" ASC`);
+ assert(liabilityPlan.length>0,'Refund liability report SQL must compile');
  console.log('Retail finance database migrations, constraints, and rollback-only negative probes verified.');
 } finally {await db.$disconnect();}
