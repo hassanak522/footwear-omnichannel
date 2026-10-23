@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import {PrismaClient} from '@prisma/client';
 
 const db=new PrismaClient();
@@ -80,6 +81,17 @@ try {
  } finally {releaseFirst();}
  await Promise.all([first,second]);
  assert.deepEqual(events,['first-acquired','first-released','second-acquired'],'Advisory lock failed to serialize concurrent transactions');
+ // Real migrated-table financial fixture: two settlements totaling more than one approved return.
+ // The deliberately rejected transaction rolls back the location, order, return, and payout.
+ const fixtureId=randomUUID(),orderId=randomUUID(),returnId=randomUUID(),actorId=randomUUID();
+ await assert.rejects(db.$transaction(async tx=>{
+  await tx.$executeRaw`INSERT INTO "Location" ("id","code","name","type") VALUES (${fixtureId}::uuid,${'ci-'+fixtureId},'CI temporary location','ONLINE'::"LocationType")`;
+  await tx.$executeRaw`INSERT INTO "OnlineOrder" ("id","orderNumber","idempotencyKey","requestHash","warehouseId","customerName","phone","address","city","paymentMethod","status","subtotal","total") VALUES (${orderId}::uuid,${'ci-'+orderId},${'ci-'+orderId},'ci',${fixtureId}::uuid,'CI Customer','0000000000','CI','CI','COD'::"OnlinePaymentMethod",'DELIVERED'::"OnlineOrderStatus",100,100)`;
+  await tx.$executeRaw`INSERT INTO "OnlineReturn" ("id","orderId","idempotencyKey","reason","approvedById","merchandiseAmount") VALUES (${returnId}::uuid,${orderId}::uuid,${'ci-'+returnId},'CI financial fixture',${actorId}::uuid,100)`;
+  await tx.$executeRaw`INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES (${randomUUID()}::uuid,${returnId}::uuid,${'ci-first-'+returnId},'CASH',60,'CI-REF-1',${actorId}::uuid)`;
+  await tx.$executeRaw`INSERT INTO "OnlineRefundSettlement" ("id","returnId","idempotencyKey","method","amount","reference","settledById") VALUES (${randomUUID()}::uuid,${returnId}::uuid,${'ci-second-'+returnId},'CASH',50,'CI-REF-2',${actorId}::uuid)`;
+ }),e=>{assert(String(e.message).includes('Online refund exceeds approved merchandise amount'),'Online refund cap must reject cumulative overpayment');return true;});
+ assert.equal(await db.onlineReturn.count({where:{id:returnId}}),0,'Financial fixture must roll back completely');
  // Compile the liability report's SQL against migrated PostgreSQL tables, even with an empty database.
  const liabilityPlan=await db.$queryRawUnsafe(`EXPLAIN
  WITH approved AS (
