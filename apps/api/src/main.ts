@@ -7,8 +7,8 @@ async function bootstrap() {
   if(!process.env.JWT_SECRET||process.env.JWT_SECRET.length<32||process.env.JWT_SECRET.includes('REPLACE_WITH'))throw Error('Production JWT_SECRET must be a unique secret of at least 32 characters');
   if(!process.env.DATABASE_URL)throw Error('Production DATABASE_URL is required');
   if(!process.env.CORS_ORIGIN)throw Error('Production CORS_ORIGIN must explicitly allow the storefront and HQ origins');
-  if(!/^postgres(ql)?:\\/\\//.test(process.env.DATABASE_URL))throw Error('Production DATABASE_URL must use PostgreSQL');
-  if(process.env.CORS_ORIGIN.split(',').some(x=>!/^https:\\/\\/[^\\s/*]+$/.test(x.trim())))throw Error('Production CORS_ORIGIN must contain HTTPS origins only, without wildcards or paths');
+  if(!process.env.DATABASE_URL.startsWith('postgresql://')&&!process.env.DATABASE_URL.startsWith('postgres://'))throw Error('Production DATABASE_URL must use PostgreSQL');
+  if(process.env.CORS_ORIGIN.split(',').some(x=>!x.trim().startsWith('https://')||x.includes('*')||x.trim().slice(8).includes('/')))throw Error('Production CORS_ORIGIN must contain HTTPS origins only, without wildcards or paths');
  }
  const app = await NestFactory.create(AppModule,{bodyParser:true});
  app.enableShutdownHooks();
