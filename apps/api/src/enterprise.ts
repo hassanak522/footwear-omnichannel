@@ -104,6 +104,14 @@ export class RetailController {
   const delivered=orders.filter(o=>o.status==='DELIVERED');
   return {customer:{id:customer.id,name:customer.name,phone:customer.phone,consentMarketing:customer.consentMarketing},online:{orders:orders.length,deliveredOrders:delivered.length,deliveredValue:delivered.reduce((n,o)=>n+o.total.toNumber(),0).toFixed(2),recentOrders:orders.slice(0,10).map(o=>({...o,total:o.total.toString()})),truncated:orders.length===100},note:'Online orders matched by exact phone. POS sales are not linked to customer records; this is not an omnichannel lifetime value or loyalty points balance.'};
  }
+ @Get('customers/:id/loyalty-ledger') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async loyaltyLedger(@Param('id') id:string){
+  const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
+  const [summary,entries]=await Promise.all([
+   this.db.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true},_count:{_all:true}}),
+   this.db.loyaltyEntry.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50,select:{id:true,orderId:true,points:true,amount:true,createdAt:true}})
+  ]);
+  return {customerId:customer.id,earnedPoints:summary._sum.points??0,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:false,rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Earn-only ledger; no redemption, reversal or exchange credits implemented. Existing delivered orders are not automatically backfilled.'};
+ }
  @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
   const orders=await this.db.onlineOrder.findMany({where:{phone:customer.phone,status:'DELIVERED'},select:{id:true,orderNumber:true,total:true,createdAt:true},orderBy:{createdAt:'desc'},take:501});
