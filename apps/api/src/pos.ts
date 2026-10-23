@@ -81,8 +81,8 @@ export class PosService {
  async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${id}`}))`;
-   const shift=await tx.posShift.findUniqueOrThrow({where:{id}});
    await tx.$executeRaw`SELECT id FROM "PosShift" WHERE id = ${id}::uuid FOR UPDATE`;
+   const shift=await tx.posShift.findUniqueOrThrow({where:{id}});
    this.branchAccess(u,shift.locationId);
    if(shift.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
    if(shift.status!=='OPEN')throw new ConflictException('Shift already closed');
