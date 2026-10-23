@@ -3,7 +3,7 @@ import {PrismaClient} from '@prisma/client';
 
 const db=new PrismaClient();
 try {
- const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift','PosExchange'];
+ const requiredTables=['PosRefundSettlement','LoyaltyEntry','LoyaltyAdjustment','PosReturn','PosShift','PosExchange','OnlineReturn','OnlineReturnLine'];
  const tables=await db.$queryRawUnsafe('SELECT tablename FROM pg_tables WHERE schemaname = $1','public');
  const actual=new Set(tables.map(x=>x.tablename));
  for(const table of requiredTables)assert(actual.has(table),`Missing table: ${table}`);
@@ -12,7 +12,7 @@ try {
   SELECT c.conname, t.relname AS table_name, pg_get_constraintdef(c.oid) AS definition
   FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
   JOIN pg_namespace n ON n.oid=t.relnamespace
-  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment','PosExchange')
+  WHERE n.nspname='public' AND t.relname IN ('PosRefundSettlement','LoyaltyAdjustment','PosExchange','OnlineReturn','OnlineReturnLine')
  `);
  const has=(table,fragment)=>constraints.some(x=>x.table_name===table&&x.definition.includes(fragment));
  assert(constraints.some(x=>x.table_name==='PosRefundSettlement'&&/CHECK\s*\(/i.test(x.definition)&&/amount/i.test(x.definition)&&/>/.test(x.definition)),'Refund amount must be positive');
@@ -21,12 +21,14 @@ try {
  assert(has('LoyaltyAdjustment','FOREIGN KEY ("sourceEntryId")'),'Loyalty source FK missing');
  assert(has('PosExchange','FOREIGN KEY ("returnId")'),'Exchange return FK missing');
  assert(has('PosExchange','FOREIGN KEY ("replacementSaleId")'),'Exchange replacement sale FK missing');
+ assert(has('OnlineReturn','FOREIGN KEY ("orderId")'),'Online return order FK missing');
+ assert(has('OnlineReturnLine','FOREIGN KEY ("returnId")'),'Online return line FK missing');
 
  const indexes=await db.$queryRawUnsafe(`
  SELECT tablename,indexdef FROM pg_indexes WHERE schemaname='public'
- AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange')
+ AND tablename IN ('PosRefundSettlement','LoyaltyAdjustment','LoyaltyEntry','PosExchange','OnlineReturn','OnlineReturnLine')
  `);
- for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId']]){
+ for(const [table,column] of [['PosRefundSettlement','idempotencyKey'],['LoyaltyAdjustment','idempotencyKey'],['LoyaltyEntry','orderId'],['PosExchange','idempotencyKey'],['PosExchange','returnId'],['PosExchange','replacementSaleId'],['OnlineReturn','idempotencyKey']]){
   assert(indexes.some(x=>x.tablename===table&&x.indexdef.includes('UNIQUE')&&x.indexdef.includes('"'+column+'"')),`Missing unique index on ${table}.${column}`);
  }
  const shiftColumn=await db.$queryRawUnsafe(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='PosRefundSettlement' AND column_name='payoutShiftId'`);
