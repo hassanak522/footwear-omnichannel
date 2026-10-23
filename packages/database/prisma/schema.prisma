@@ -335,6 +335,7 @@ model PosSale {
   lines PosSaleLine[]
   tenders PosSaleTender[]
   returns PosReturn[]
+  replacementForExchange PosExchange?
   @@unique([deviceId,localSaleId])
   @@index([locationId,soldAt])
 }
