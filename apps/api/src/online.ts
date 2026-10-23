@@ -22,7 +22,7 @@ class ActionDto { @IsString() @MinLength(8) idempotencyKey!:string; }
 export class OnlineService {
  constructor(private db:Db){}
  private digest(v:unknown){return createHash('sha256').update(JSON.stringify(v)).digest('hex');}
- private shippingFee(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;if(raw===undefined)throw new ConflictException('COD shipping fee is not configured');if(!/^(0|[1-9]\\d*)(\\.\\d{1,2})?$/.test(raw))throw new ConflictException('Invalid ONLINE_COD_SHIPPING_PKR configuration');return new Prisma.Decimal(raw);}
+ private shippingFee(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;if(raw===undefined)throw new ConflictException('COD shipping fee is not configured');if(!/^(0|[1-9][0-9]*)([.][0-9]{1,2})?$/.test(raw))throw new ConflictException('Invalid ONLINE_COD_SHIPPING_PKR configuration');return new Prisma.Decimal(raw);}
  async checkout(d:CheckoutDto){
   if(new Set(d.items.map(x=>x.variantId)).size!==d.items.length)throw new BadRequestException('Duplicate variants');
   // Card/wallet payment is not yet integrated. Do not collect or claim to charge these methods.
@@ -81,7 +81,7 @@ export class OnlineService {
 }
 @Controller('store') export class StoreController {
  constructor(private db:Db,private svc:OnlineService){}
- @Get('shipping') shipping(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;const valid=raw!==undefined&&/^(0|[1-9]\\d*)(\\.\\d{1,2})?$/.test(raw);return {available:valid,shippingFee:valid?raw:null,currency:'PKR',paymentMethod:'COD'};}
+ @Get('shipping') shipping(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;const valid=raw!==undefined&&/^(0|[1-9][0-9]*)([.][0-9]{1,2})?$/.test(raw);return {available:valid,shippingFee:valid?raw:null,currency:'PKR',paymentMethod:'COD'};}
  @Get('products') async products(){
   const warehouse=await this.db.location.findFirst({where:{type:'ONLINE',active:true},orderBy:{code:'asc'}});
   const products=await this.db.product.findMany({where:{active:true},include:{category:true,brand:true,variants:{where:{active:true},include:{balances:{where:{locationId:warehouse?.id??'00000000-0000-0000-0000-000000000000'}}}}},orderBy:{createdAt:'desc'},take:200});
