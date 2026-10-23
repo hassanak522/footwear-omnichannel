@@ -224,6 +224,7 @@ export class PosService {
     this.branchAccess(u,shift.locationId);
    }else if(dto.payoutShiftId)throw new BadRequestException('Payout shift is only applicable to cash refunds');
    const due=ret.lines.reduce((sum,line)=>sum.plus(line.refundAmount),new Prisma.Decimal(0));
+   if(await tx.posExchange.findUnique({where:{returnId:ret.id}}))throw new ConflictException('Exchange already finalized; no additional refund payouts permitted');
    const paid=await tx.posRefundSettlement.aggregate({where:{returnId:ret.id},_sum:{amount:true}});
    const remaining=due.minus(paid._sum.amount??new Prisma.Decimal(0));
    if(money(dto.amount).greaterThan(remaining))throw new ConflictException('Refund exceeds outstanding approved return amount');
