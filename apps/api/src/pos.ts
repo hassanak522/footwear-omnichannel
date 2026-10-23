@@ -77,8 +77,10 @@ export class PosService {
    this.branchAccess(u,shift.locationId);
    if(shift.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
    if(shift.status!=='OPEN')throw new ConflictException('Shift already closed');
-   // The desktop must sync all its pending sales before calling close.
-   // This cannot be independently proven without a local sequence/checkpoint protocol.
+   // Reject known server-side conflicts; the desktop must also sync local sales first.
+   // Unsynced local sales cannot be proven absent without a device checkpoint protocol.
+   const conflicted=await tx.posSale.count({where:{shiftId:id,status:'STOCK_CONFLICT'}});
+   if(conflicted>0)throw new ConflictException(`Cannot close shift with ${conflicted} unresolved stock-conflict sale(s)`);
    return tx.posShift.update({where:{id},data:{status:'CLOSED',closedAt:new Date(),closingCash:money(dto.closingCash)}});
   });
  }
