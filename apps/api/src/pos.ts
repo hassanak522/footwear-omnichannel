@@ -134,7 +134,13 @@ export class PosService {
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${dto.saleId}`}))`;
    const existing=await tx.posReturn.findUnique({where:{idempotencyKey:dto.idempotencyKey},include:{lines:true}});
-   if(existing){if(existing.saleId!==dto.saleId)throw new ConflictException('Return key already used');return existing;}
+   if(existing){
+    const requested=[...dto.lines].map(l=>({variantId:l.variantId,quantity:l.quantity,quarantined:l.quarantined===true})).sort((a,b)=>a.variantId.localeCompare(b.variantId));
+    const recorded=existing.lines.map(l=>({variantId:l.variantId,quantity:l.quantity,quarantined:l.quarantined})).sort((a,b)=>a.variantId.localeCompare(b.variantId));
+    if(existing.saleId!==dto.saleId||existing.reason!==dto.reason||JSON.stringify(requested)!==JSON.stringify(recorded))throw new ConflictException('Return idempotency key reused with different request');
+    this.branchAccess(u,existing.locationId);
+    return existing;
+   }
    const sale=await tx.posSale.findUnique({where:{id:dto.saleId},include:{lines:true,returns:{include:{lines:true}}}});
    if(!sale||sale.status!=='ACCEPTED')throw new BadRequestException('Accepted original sale required');
    this.branchAccess(u,sale.locationId);
