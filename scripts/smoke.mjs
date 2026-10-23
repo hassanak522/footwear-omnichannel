@@ -36,6 +36,15 @@ await check('Public catalog response', async () => {
 await check('HQ endpoint requires authentication', async () => {
  const r=await request('/hq/overview'); expectStatus(r,401);
 });
+await check('Customer insights require authentication', async () => {
+ const r=await request('/retail/customers/00000000-0000-4000-8000-000000000000/insights');expectStatus(r,401);
+});
+await check('POS sales require authentication', async () => {
+ const r=await request('/pos/sales/00000000-0000-4000-8000-000000000000');expectStatus(r,401);
+});
+await check('HQ sales analytics require authentication', async () => {
+ const r=await request('/hq/sales-analytics');expectStatus(r,401);
+});
 await check('Orders endpoint requires authentication', async () => {
  const r=await request('/orders'); expectStatus(r,401);
 });
@@ -54,6 +63,7 @@ if (process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD) {
   const headers={authorization:`Bearer ${token}`};
   await check('HQ overview (admin)', async () => {const r=await request('/hq/overview',{headers});expectStatus(r,200);if(!r.body?.stock)throw new Error('missing stock');});
   await check('HQ stock-by-location (admin)', async () => {const r=await request('/hq/stock-by-location',{headers});expectStatus(r,200);if(!Array.isArray(r.body))throw new Error('expected array');});
+  await check('HQ sales analytics (admin)', async () => {const r=await request('/hq/sales-analytics',{headers});expectStatus(r,200);if(!Array.isArray(r.body?.byLocation))throw new Error('expected byLocation array');});
   await check('HQ attention (admin)', async () => {const r=await request('/hq/attention',{headers});expectStatus(r,200);if(!r.body?.lowAvailability)throw new Error('missing lowAvailability');});
  }
 } else console.log('SKIP authenticated HQ checks (set SMOKE_EMAIL and SMOKE_PASSWORD)');
