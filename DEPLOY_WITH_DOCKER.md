@@ -19,6 +19,9 @@ docker compose --env-file infra/docker/.env.production -f infra/docker/compose.p
 
 The one-shot `migrate` service must exit successfully before the API starts. Use `docker compose ... ps -a` and `docker compose ... logs migrate api web` to investigate errors. Test `https://api.example.com/api/v1/health` through your actual TLS proxy.
 
+## Optional built-in HTTPS reverse proxy
+Set WEB_DOMAIN and API_DOMAIN to real DNS names pointing at your server. If ports 80/443 are available, start the Caddy overlay using `docker compose --env-file infra/docker/.env.production -f infra/docker/compose.production.yml -f infra/docker/compose.proxy.yml up -d --build`. Caddy can obtain certificates automatically once DNS and firewall routing are correct. Do not run this alongside an existing proxy on the same ports.
+
 ## Release acceptance
 - CI must pass for the **exact commit** deployed; no unreviewed migrations or failed checks.
 - Run `API_BASE_URL=https://api.example.com/api/v1 node scripts/smoke.mjs` from a trusted machine. Supply staging-only read-only credentials for authenticated tests.
