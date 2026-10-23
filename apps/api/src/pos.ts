@@ -209,7 +209,11 @@ export class PosService {
   const card=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CARD').reduce((sum,t)=>sum+t.amount.toNumber(),0);
   const returns=await this.db.posReturn.findMany({where:{sale:{shiftId:id}},include:{lines:true}});
   const returnAmount=returns.flatMap(r=>r.lines).reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
-  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),expectedCash:shift.openingCash.toNumber()+cash,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-shift.openingCash.toNumber()-cash,note:'Return value is recorded against original sales. Cash refunds are not disbursed or deducted from expected cash by this system; shift reconciliation requires separate refund payout records.'};
+  const settlementRecords=await this.db.posRefundSettlement.findMany({where:{return:{sale:{shiftId:id}}},select:{method:true,amount:true,settledAt:true}});
+  const cashRefunds=settlementRecords.filter(x=>x.method==='CASH').reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
+  const nonCashRefunds=settlementRecords.filter(x=>x.method!=='CASH').reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
+  const cashExpected=shift.openingCash.toNumber()+cash-cashRefunds.toNumber();
+  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),recordedCashRefunds:cashRefunds.toString(),recordedNonCashRefunds:nonCashRefunds.toString(),expectedCash:cashExpected,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-cashExpected,note:'Cash refund payouts linked to original sales in this shift are deducted from expected cash regardless of payout date. This is an original-sale cohort report, not a chronological cash-drawer reconciliation; use payout dates and shift IDs for actual drawer reconciliation.'};
  }
  async deviceStatus(deviceId:string,u:Principal){
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
