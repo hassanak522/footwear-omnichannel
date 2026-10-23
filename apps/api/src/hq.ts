@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { Db } from './db';
+import { Prisma } from '@prisma/client';
 import { JwtAuthGuard, Roles, RolesGuard } from './auth';
 
 class PeriodQuery {
@@ -51,6 +52,21 @@ export class HqController {
    grouped.set(sale.locationId,row);
   }
   return {period:{from,to,toExclusive:true},byLocation:[...grouped.values()].map(x=>({...x,gross:x.gross.toFixed(2),cash:x.cash.toFixed(2),card:x.card.toFixed(2)})),returned:sales.length,truncated:sales.length===5000,note:'Accepted POS gross totals only; refunds, tax and card settlement are not netted. Maximum 5000 sales per query; narrow the period if truncated.'};
+ }
+ @Get('refund-reconciliation')
+ async refundReconciliation(@Query() q:PeriodQuery){
+  const {from,to}=this.period(q);
+  const range={gte:from,lt:to};
+  const [posReturns,onlineReturns,posPayouts,onlinePayouts]=await Promise.all([
+   this.db.posReturn.findMany({where:{createdAt:range,...(q.locationId?{locationId:q.locationId}:{})},select:{id:true,locationId:true,createdAt:true,lines:{select:{refundAmount:true}}},take:5001,orderBy:{createdAt:'desc'}}),
+   this.db.onlineReturn.findMany({where:{createdAt:range,...(q.locationId?{order:{warehouseId:q.locationId}}:{})},select:{id:true,createdAt:true,merchandiseAmount:true,order:{select:{warehouseId:true}}},take:5001,orderBy:{createdAt:'desc'}}),
+   this.db.posRefundSettlement.findMany({where:{settledAt:range,...(q.locationId?{return:{locationId:q.locationId}}:{})},select:{id:true,returnId:true,amount:true,method:true,settledAt:true},take:5001,orderBy:{settledAt:'desc'}}),
+   this.db.onlineRefundSettlement.findMany({where:{settledAt:range,...(q.locationId?{return:{order:{warehouseId:q.locationId}}}:{})},select:{id:true,returnId:true,amount:true,method:true,settledAt:true},take:5001,orderBy:{settledAt:'desc'}})
+  ]);
+  const amount=(items:{amount:Prisma.Decimal}[])=>items.reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0)).toString();
+  const posApproved=posReturns.reduce((sum,r)=>sum.plus(r.lines.reduce((n,l)=>n.plus(l.refundAmount),new Prisma.Decimal(0))),new Prisma.Decimal(0));
+  const onlineApproved=onlineReturns.reduce((sum,r)=>sum.plus(r.merchandiseAmount),new Prisma.Decimal(0));
+  return {period:{from:from.toISOString(),to:to.toISOString()},currency:'PKR',pos:{returns:posReturns.length,approvedMerchandise:posApproved.toString(),payouts:posPayouts.length,paidInPeriod:amount(posPayouts)},online:{returns:onlineReturns.length,approvedMerchandise:onlineApproved.toString(),payouts:onlinePayouts.length,paidInPeriod:amount(onlinePayouts)},byMethod:Object.entries([...posPayouts,...onlinePayouts].reduce((acc,p)=>{const k=p.method;acc[k]=(acc[k]??new Prisma.Decimal(0)).plus(p.amount);return acc;},{} as Record<string,Prisma.Decimal>)).map(([method,total])=>({method,paid:total.toString()})),truncated:[posReturns,onlineReturns,posPayouts,onlinePayouts].some(x=>x.length>5000),note:'Approved return amounts use approval dates; paid amounts use settlement dates. They are different cohorts and must not be subtracted to calculate outstanding balances. No money movement is initiated.'};
  }
  @Get('stock-by-location')
  async stockByLocation(@Query('locationId') locationId?:string){
