@@ -38,6 +38,11 @@ class ReturnDto {
  @IsString() @MinLength(3) @MaxLength(500) reason!: string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
 }
+class ExchangeDto {
+ @IsUUID() returnId!:string;
+ @IsUUID() replacementSaleId!:string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+}
 class RefundSettlementDto {
  @IsUUID() returnId!:string;
  @IsOptional() @IsUUID() payoutShiftId?:string;
@@ -173,6 +178,25 @@ export class PosService {
    return ret;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
+ async linkExchange(dto:ExchangeDto,u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-exchange:'+dto.returnId}))`;
+   const existing=await tx.posExchange.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(existing){const ret=await tx.posReturn.findUniqueOrThrow({where:{id:existing.returnId}});this.branchAccess(u,ret.locationId);if(existing.returnId!==dto.returnId||existing.replacementSaleId!==dto.replacementSaleId)throw new ConflictException('Exchange key reused with different details');return existing;}
+   const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true,settlements:true}});
+   const replacement=await tx.posSale.findUnique({where:{id:dto.replacementSaleId}});
+   if(!ret||!replacement||replacement.status!=='ACCEPTED'||ret.status!=='APPROVED')throw new BadRequestException('Approved return and accepted replacement sale required');
+   this.branchAccess(u,ret.locationId);
+   if(ret.locationId!==replacement.locationId||ret.saleId===replacement.id)throw new ConflictException('Replacement must be a different sale at the same branch');
+   const refundDue=ret.lines.reduce((n,l)=>n.plus(l.refundAmount),new Prisma.Decimal(0));
+   const settled=ret.settlements.reduce((n,l)=>n.plus(l.amount),new Prisma.Decimal(0));
+   if(!settled.equals(refundDue))throw new ConflictException('Original return refund must be fully settled before linking independently paid replacement sale');
+   if(await tx.posExchange.findFirst({where:{OR:[{returnId:ret.id},{replacementSaleId:replacement.id}]}}))throw new ConflictException('Return or replacement sale already linked to an exchange');
+   const exchange=await tx.posExchange.create({data:{returnId:ret.id,replacementSaleId:replacement.id,idempotencyKey:dto.idempotencyKey,approvedById:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_EXCHANGE_LINKED',entityType:'PosExchange',entityId:exchange.id,after:{returnId:ret.id,replacementSaleId:replacement.id,refundSettled:refundDue.toString(),replacementSaleTotal:replacement.total.toString()}}});
+   return {...exchange,note:'Record linkage only: the original return was fully refunded and the replacement was independently paid. No price netting or payment collection was performed.'};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
  async settleRefund(dto:RefundSettlementDto,u:Principal){
   return this.db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'pos-refund:'+dto.returnId}))`;
@@ -244,6 +268,7 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+ @Post('exchanges/link') @Roles('SUPER_ADMIN','BRANCH_MANAGER') linkExchange(@Body() dto:ExchangeDto,@CurrentUser() u:Principal){return this.pos.linkExchange(dto,u);}
  @Post('refunds/settle') @Roles('SUPER_ADMIN','BRANCH_MANAGER') settleRefund(@Body() dto:RefundSettlementDto,@CurrentUser() u:Principal){return this.pos.settleRefund(dto,u);}
  @Get('refunds/:returnId') @Roles('SUPER_ADMIN','BRANCH_MANAGER') refundStatus(@Param('returnId') id:string,@CurrentUser() u:Principal){return this.pos.refundStatus(id,u);}
  @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
