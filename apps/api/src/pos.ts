@@ -181,6 +181,7 @@ export class PosService {
     if(previous.returnId!==dto.returnId||previous.method!==dto.method||!previous.amount.equals(money(dto.amount))||(previous.reference??null)!==(dto.reference??null))throw new ConflictException('Refund key reused with different details');
     return previous;
    }
+   if(dto.reference!==undefined&&dto.reference.trim()!==dto.reference)throw new BadRequestException('Refund reference must not have leading or trailing whitespace');
    const ret=await tx.posReturn.findUnique({where:{id:dto.returnId},include:{lines:true}});
    if(!ret||ret.status!=='APPROVED')throw new BadRequestException('Approved return required');
    this.branchAccess(u,ret.locationId);
