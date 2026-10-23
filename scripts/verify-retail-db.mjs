@@ -19,7 +19,7 @@ try {
  assert(has('PosRefundSettlement','FOREIGN KEY ("payoutShiftId")'),'Payout shift FK missing');
  assert(constraints.some(x=>x.table_name==='LoyaltyAdjustment'&&/CHECK\s*\(/i.test(x.definition)&&/points/i.test(x.definition)&&/</.test(x.definition)),'Loyalty reversal must be negative');
  assert(has('LoyaltyRedemption','FOREIGN KEY ("customerId")'),'Redemption customer FK missing');
- assert(constraints.some(x=>x.table_name==='LoyaltyRedemption'&&/CHECK\\s*\\(/i.test(x.definition)&&/points/i.test(x.definition)&&/>/.test(x.definition)),'Redemption points must be positive');
+ assert(constraints.some(x=>x.table_name==='LoyaltyRedemption'&&x.definition.includes('CHECK')&&x.definition.includes('points')&&x.definition.includes('>')),'Redemption points must be positive');
  assert(has('LoyaltyAdjustment','FOREIGN KEY ("sourceEntryId")'),'Loyalty source FK missing');
  assert(has('PosExchange','FOREIGN KEY ("returnId")'),'Exchange return FK missing');
  assert(has('PosExchange','FOREIGN KEY ("replacementSaleId")'),'Exchange replacement sale FK missing');
