@@ -119,7 +119,15 @@ export class OnlineService {
     const targetReversed=Number(totalReturned.div(order.subtotal).mul(earning.points).floor().toString());
     const prior=await tx.loyaltyAdjustment.aggregate({where:{sourceEntryId:earning.id},_sum:{points:true}});
     const remaining=Math.max(0,earning.points+(prior._sum.points??0));
-    const toReverse=Math.min(remaining,Math.max(0,targetReversed+(prior._sum.points??0)));
+    const redeemed=await tx.loyaltyRedemption.aggregate({where:{customerId:earning.customerId},_sum:{points:true}});
+    const [allEarned,allReversed]=await Promise.all([
+     tx.loyaltyEntry.aggregate({where:{customerId:earning.customerId},_sum:{points:true}}),
+     tx.loyaltyAdjustment.aggregate({where:{customerId:earning.customerId},_sum:{points:true}})
+    ]);
+    const spendable=(allEarned._sum.points??0)+(allReversed._sum.points??0)-(redeemed._sum.points??0);
+    const requested=Math.min(remaining,Math.max(0,targetReversed+(prior._sum.points??0)));
+    if(requested>spendable)throw new ConflictException('Return loyalty reversal would exceed unspent points; reconcile existing redemptions before approving this return');
+    const toReverse=requested;
     if(toReverse>0){await tx.loyaltyAdjustment.create({data:{customerId:earning.customerId,sourceEntryId:earning.id,idempotencyKey:`online-return-loyalty:${ret.id}`,points:-toReverse,reason:`Automatic merchandise return ${ret.id}`,actorId:u.id}});}
    }
    await tx.auditLog.create({data:{actorId:u.id,action:'ONLINE_RETURN_APPROVED',entityType:'OnlineReturn',entityId:ret.id,after:{orderId:id,merchandiseAmount:merchandiseAmount.toString(),lines:lines.map(x=>({variantId:x.variantId,quantity:x.quantity,quarantined:x.quarantined}))}}});
