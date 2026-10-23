@@ -40,6 +40,7 @@ class ReturnDto {
 }
 class RefundSettlementDto {
  @IsUUID() returnId!:string;
+ @IsOptional() @IsUUID() payoutShiftId?:string;
  @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
  @IsEnum(PosTenderType) method!:PosTenderType;
  @IsNumber({maxDecimalPlaces:2}) @Min(0.01) amount!:number;
@@ -178,7 +179,7 @@ export class PosService {
    if(previous){
     const original=await tx.posReturn.findUniqueOrThrow({where:{id:previous.returnId}});
     this.branchAccess(u,original.locationId);
-    if(previous.returnId!==dto.returnId||previous.method!==dto.method||!previous.amount.equals(money(dto.amount))||(previous.reference??null)!==(dto.reference??null))throw new ConflictException('Refund key reused with different details');
+    if(previous.returnId!==dto.returnId||previous.method!==dto.method||!previous.amount.equals(money(dto.amount))||(previous.reference??null)!==(dto.reference??null)||(previous.payoutShiftId??null)!==(dto.payoutShiftId??null))throw new ConflictException('Refund key reused with different details');
     return previous;
    }
    if(dto.reference!==undefined&&dto.reference.trim()!==dto.reference)throw new BadRequestException('Refund reference must not have leading or trailing whitespace');
@@ -186,11 +187,17 @@ export class PosService {
    if(!ret||ret.status!=='APPROVED')throw new BadRequestException('Approved return required');
    this.branchAccess(u,ret.locationId);
    if(dto.method!=='CASH'&&!dto.reference?.trim())throw new BadRequestException('Non-cash refund requires a payment reference');
+   if(dto.method==='CASH'){
+    if(!dto.payoutShiftId)throw new BadRequestException('Cash payout requires an open payout shift');
+    const shift=await tx.posShift.findUnique({where:{id:dto.payoutShiftId}});
+    if(!shift||shift.status!=='OPEN'||shift.locationId!==ret.locationId)throw new ConflictException('Cash payout shift must be open and belong to the return branch');
+    this.branchAccess(u,shift.locationId);
+   }else if(dto.payoutShiftId)throw new BadRequestException('Payout shift is only applicable to cash refunds');
    const due=ret.lines.reduce((sum,line)=>sum.plus(line.refundAmount),new Prisma.Decimal(0));
    const paid=await tx.posRefundSettlement.aggregate({where:{returnId:ret.id},_sum:{amount:true}});
    const remaining=due.minus(paid._sum.amount??new Prisma.Decimal(0));
    if(money(dto.amount).greaterThan(remaining))throw new ConflictException('Refund exceeds outstanding approved return amount');
-   const entry=await tx.posRefundSettlement.create({data:{returnId:ret.id,idempotencyKey:dto.idempotencyKey,method:dto.method,amount:money(dto.amount),reference:dto.reference,settledById:u.id}});
+   const entry=await tx.posRefundSettlement.create({data:{returnId:ret.id,idempotencyKey:dto.idempotencyKey,method:dto.method,amount:money(dto.amount),reference:dto.reference,payoutShiftId:dto.payoutShiftId,settledById:u.id}});
    await tx.auditLog.create({data:{actorId:u.id,action:'POS_REFUND_SETTLEMENT_RECORDED',entityType:'PosRefundSettlement',entityId:entry.id,after:{returnId:ret.id,amount:entry.amount.toString(),method:entry.method,reference:entry.reference}}});
    return entry;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
@@ -210,11 +217,10 @@ export class PosService {
   const card=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CARD').reduce((sum,t)=>sum+t.amount.toNumber(),0);
   const returns=await this.db.posReturn.findMany({where:{sale:{shiftId:id}},include:{lines:true}});
   const returnAmount=returns.flatMap(r=>r.lines).reduce((sum,l)=>sum.plus(l.refundAmount),new Prisma.Decimal(0));
-  const settlementRecords=await this.db.posRefundSettlement.findMany({where:{return:{sale:{shiftId:id}}},select:{method:true,amount:true,settledAt:true}});
-  const cashRefunds=settlementRecords.filter(x=>x.method==='CASH').reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
-  const nonCashRefunds=settlementRecords.filter(x=>x.method!=='CASH').reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
-  const cashExpected=shift.openingCash.toNumber()+cash;
-  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),recordedCashRefunds:cashRefunds.toString(),recordedNonCashRefunds:nonCashRefunds.toString(),illustrativeCashAfterLinkedRefunds:cashExpected-cashRefunds.toNumber(),expectedCash:cashExpected,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-cashExpected,note:'Expected cash and variance exclude refund payouts because payout shifts are not linked. Illustrative cash after linked refunds is not a drawer reconciliation: refunds may have been paid in a later shift.'};
+  const settlementRecords=await this.db.posRefundSettlement.findMany({where:{payoutShiftId:id,method:'CASH'},select:{amount:true}});
+  const cashRefunds=settlementRecords.reduce((sum,x)=>sum.plus(x.amount),new Prisma.Decimal(0));
+  const cashExpected=shift.openingCash.toNumber()+cash-cashRefunds.toNumber();
+  return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,recordedReturnCount:returns.length,recordedReturnValue:returnAmount.toString(),recordedCashRefunds:cashRefunds.toString(),expectedCash:cashExpected,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-cashExpected,note:'Cash refunds are deducted only when explicitly recorded against this payout shift. Refunds without a payout shift are excluded; ensure all local sales have synced before closing.'};
  }
  async deviceStatus(deviceId:string,u:Principal){
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
