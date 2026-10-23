@@ -22,10 +22,12 @@ class ActionDto { @IsString() @MinLength(8) idempotencyKey!:string; }
 export class OnlineService {
  constructor(private db:Db){}
  private digest(v:unknown){return createHash('sha256').update(JSON.stringify(v)).digest('hex');}
+ private shippingFee(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;if(raw===undefined)throw new ConflictException('COD shipping fee is not configured');if(!/^(0|[1-9]\\d*)(\\.\\d{1,2})?$/.test(raw))throw new ConflictException('Invalid ONLINE_COD_SHIPPING_PKR configuration');return new Prisma.Decimal(raw);}
  async checkout(d:CheckoutDto){
   if(new Set(d.items.map(x=>x.variantId)).size!==d.items.length)throw new BadRequestException('Duplicate variants');
   // Card/wallet payment is not yet integrated. Do not collect or claim to charge these methods.
   if(d.paymentMethod!=='COD')throw new BadRequestException('Only COD is currently enabled. Online payment gateways require verified provider integration.');
+  const shippingFee=this.shippingFee();
   const hash=this.digest(d);
   return this.db.$transaction(async tx=>{
    const previous=await tx.onlineOrder.findUnique({where:{idempotencyKey:d.idempotencyKey}});
@@ -42,12 +44,12 @@ export class OnlineService {
     if(!balance||balance.onHand-balance.reservedOnline-balance.reservedReplenish-balance.quarantined-balance.safetyBuffer<item.quantity)throw new ConflictException(`Insufficient online-store allocated stock for ${variant.sku}`);
     subtotal=subtotal.plus(variant.price.mul(item.quantity));lines.push({variantId:item.variantId,quantity:item.quantity,unitPrice:variant.price});
    }
-   const order=await tx.onlineOrder.create({data:{orderNumber:`ON-${randomUUID().slice(0,8).toUpperCase()}`,idempotencyKey:d.idempotencyKey,requestHash:hash,warehouseId:warehouse.id,customerName:d.customerName,phone:d.phone,email:d.email,address:d.address,city:d.city,paymentMethod:d.paymentMethod,subtotal,total:subtotal,lines:{create:lines}}});
+   const order=await tx.onlineOrder.create({data:{orderNumber:`ON-${randomUUID().slice(0,8).toUpperCase()}`,idempotencyKey:d.idempotencyKey,requestHash:hash,warehouseId:warehouse.id,customerName:d.customerName,phone:d.phone,email:d.email,address:d.address,city:d.city,paymentMethod:d.paymentMethod,subtotal,shippingFee,total:subtotal.plus(shippingFee),lines:{create:lines}}});
    for(const line of lines){
     await tx.stockReservation.create({data:{locationId:warehouse.id,variantId:line.variantId,purpose:'ONLINE_ORDER',quantity:line.quantity,referenceId:order.id}});
     await tx.stockBalance.update({where:{locationId_variantId:{locationId:warehouse.id,variantId:line.variantId}},data:{reservedOnline:{increment:line.quantity},version:{increment:1}}});
    }
-   await tx.auditLog.create({data:{action:'ONLINE_ORDER_PLACED',entityType:'OnlineOrder',entityId:order.id,after:{total:subtotal.toString(),itemCount:lines.length}}});
+   await tx.auditLog.create({data:{action:'ONLINE_ORDER_PLACED',entityType:'OnlineOrder',entityId:order.id,after:{total:subtotal.plus(shippingFee).toString(),shippingFee:shippingFee.toString(),itemCount:lines.length}}});
    return order;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
  }
@@ -79,6 +81,7 @@ export class OnlineService {
 }
 @Controller('store') export class StoreController {
  constructor(private db:Db,private svc:OnlineService){}
+ @Get('shipping') shipping(){const raw=process.env.ONLINE_COD_SHIPPING_PKR;const valid=raw!==undefined&&/^(0|[1-9]\\d*)(\\.\\d{1,2})?$/.test(raw);return {available:valid,shippingFee:valid?raw:null,currency:'PKR',paymentMethod:'COD'};}
  @Get('products') async products(){
   const warehouse=await this.db.location.findFirst({where:{type:'ONLINE',active:true},orderBy:{code:'asc'}});
   const products=await this.db.product.findMany({where:{active:true},include:{category:true,brand:true,variants:{where:{active:true},include:{balances:{where:{locationId:warehouse?.id??'00000000-0000-0000-0000-000000000000'}}}}},orderBy:{createdAt:'desc'},take:200});
