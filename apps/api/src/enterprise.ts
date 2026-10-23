@@ -100,6 +100,12 @@ class LoyaltyReversalDto {
  @IsInt() @Min(1) points!:number;
  @IsString() @MinLength(10) @MaxLength(500) reason!:string;
 }
+class LoyaltyRedemptionDto {
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!:string;
+ @IsInt() @Min(1) points!:number;
+ @IsString() @MinLength(3) @MaxLength(100) reference!:string;
+ @IsString() @MinLength(10) @MaxLength(500) reason!:string;
+}
 @Controller('retail') @UseGuards(...guards) @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
 export class RetailController {
  constructor(private db:Db){}
@@ -124,15 +130,38 @@ export class RetailController {
    return adjustment;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
+ @Post('customers/:id/loyalty-redemptions') @Roles('SUPER_ADMIN')
+ async redeemLoyalty(@Param('id') id:string,@Body() dto:LoyaltyRedemptionDto,@CurrentUser() u:Principal){
+  if(process.env.LOYALTY_REDEMPTION_ENABLED!=='true')throw new ConflictException('Loyalty redemption is disabled; configure LOYALTY_REDEMPTION_ENABLED=true only after financial approval');
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'loyalty-customer:'+id}))`;
+   const previous=await tx.loyaltyRedemption.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+   if(previous){if(previous.customerId!==id||previous.points!==dto.points||previous.reference!==dto.reference||previous.reason!==dto.reason)throw new ConflictException('Redemption key reused with different request');return previous;}
+   const customer=await tx.retailCustomer.findUnique({where:{id}});
+   if(!customer)throw new BadRequestException('Customer not found');
+   const [earned,reversed,redeemed]=await Promise.all([
+    tx.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+    tx.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}})
+   ]);
+   const available=(earned._sum.points??0)+(reversed._sum.points??0)-(redeemed._sum.points??0);
+   if(dto.points>available)throw new ConflictException('Insufficient available loyalty points');
+   const redemption=await tx.loyaltyRedemption.create({data:{customerId:id,idempotencyKey:dto.idempotencyKey,points:dto.points,reference:dto.reference,reason:dto.reason,actorId:u.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'LOYALTY_POINTS_REDEEMED',entityType:'LoyaltyRedemption',entityId:redemption.id,after:{customerId:id,points:dto.points,reference:dto.reference}}});
+   return redemption;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
  @Get('customers/:id/loyalty-ledger') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async loyaltyLedger(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
-  const [summary,entries,adjustments,adjustmentTotal]=await Promise.all([
+  const [summary,entries,adjustments,adjustmentTotal,redemptionTotal,redemptions]=await Promise.all([
    this.db.loyaltyEntry.aggregate({where:{customerId:id},_sum:{points:true},_count:{_all:true}}),
    this.db.loyaltyEntry.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50,select:{id:true,orderId:true,points:true,amount:true,createdAt:true}}),
    this.db.loyaltyAdjustment.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50}),
-   this.db.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}})
+   this.db.loyaltyAdjustment.aggregate({where:{customerId:id},_sum:{points:true}}),
+   this.db.loyaltyRedemption.aggregate({where:{customerId:id},_sum:{points:true}}),
+   this.db.loyaltyRedemption.findMany({where:{customerId:id},orderBy:{createdAt:'desc'},take:50})
   ]);
-  return {customerId:customer.id,earnedPoints:summary._sum.points??0,reversedPoints:-(adjustmentTotal._sum.points??0),netPoints:(summary._sum.points??0)+(adjustmentTotal._sum.points??0),adjustments,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:false,rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Earning and admin-recorded reversals only; no redemption, automatic return linkage or exchange credits. Existing delivered orders are not automatically backfilled.'};
+  return {customerId:customer.id,earnedPoints:summary._sum.points??0,reversedPoints:-(adjustmentTotal._sum.points??0),netPoints:(summary._sum.points??0)+(adjustmentTotal._sum.points??0)-(redemptionTotal._sum.points??0),redeemedPoints:redemptionTotal._sum.points??0,redemptions,adjustments,entryCount:summary._count._all,entries:entries.map(x=>({...x,amount:x.amount.toString()})),redeemable:process.env.LOYALTY_REDEMPTION_ENABLED==='true',rule:process.env.LOYALTY_PKR_PER_POINT?'Configured earn-only accrual':'Accrual disabled',note:'Admin-recorded point redemption is disabled by default and does not apply payment discounts or issue refunds. Returns can reduce the balance after prior redemption. Existing delivered orders are not automatically backfilled.'};
  }
  @Get('customers/:id/rewards-preview') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async rewardsPreview(@Param('id') id:string){
   const customer=await this.db.retailCustomer.findUniqueOrThrow({where:{id}});
