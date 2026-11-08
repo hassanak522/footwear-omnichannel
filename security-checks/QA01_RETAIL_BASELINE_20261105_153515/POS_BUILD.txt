@@ -1,0 +1,7 @@
+﻿node.exe : npm notice run @footwear/pos-desktop@0.1.0 build
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...top@0.1.0 build:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

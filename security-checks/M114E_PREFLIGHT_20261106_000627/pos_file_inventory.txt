@@ -1,0 +1,9 @@
+G:\footwear-omnichannel\apps\pos-desktop\index.html
+G:\footwear-omnichannel\apps\pos-desktop\package.json
+G:\footwear-omnichannel\apps\pos-desktop\tsconfig.json
+G:\footwear-omnichannel\apps\pos-desktop\vite.config.ts
+G:\footwear-omnichannel\apps\pos-desktop\electron\main.cjs
+G:\footwear-omnichannel\apps\pos-desktop\electron\preload.cjs
+G:\footwear-omnichannel\apps\pos-desktop\src\global.d.ts
+G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+G:\footwear-omnichannel\apps\pos-desktop\src\style.css

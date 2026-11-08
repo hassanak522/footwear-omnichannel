@@ -1,0 +1,68 @@
+﻿BEGIN
+section | data
+DATABASE_IDENTITY | {"user": "footwear", "database": "footwear_omnichannel_test"}
+(1 row)
+section | data
+LOCATIONS | {"id": "0b0cc789-66ce-462b-9f94-f3ab33739975", "code": "M112_POS_BRANCH_A", "name": "M112 Synthetic POS Branch A", "type": "BRANCH", "active": true, "address": null, "createdAt": "2026-11-03T09:52:14.658", "updatedAt": "2026-11-03T09:52:14.658"}
+LOCATIONS | {"id": "46d6e7fe-8733-422e-83db-bd6b40bdb7d1", "code": "M111_TEST_BRANCH_B", "name": "M111 Synthetic Test Branch B", "type": "BRANCH", "active": true, "address": null, "createdAt": "2026-11-02T18:54:08.756", "updatedAt": "2026-11-02T18:54:08.756"}
+LOCATIONS | {"id": "87a6cd9a-ff80-41f4-869c-669b63068fce", "code": "M109-TEST-WH", "name": "M109 Synthetic Test Warehouse", "type": "WAREHOUSE", "active": true, "address": null, "createdAt": "2026-10-31T10:14:23.54", "updatedAt": "2026-10-31T10:14:23.54"}
+(3 rows)
+section | data
+USER_LOCATION_ASSIGNMENT_COUNTS | {"count": 2, "locationId": "0b0cc789-66ce-462b-9f94-f3ab33739975"}
+USER_LOCATION_ASSIGNMENT_COUNTS | {"count": 3, "locationId": "46d6e7fe-8733-422e-83db-bd6b40bdb7d1"}
+USER_LOCATION_ASSIGNMENT_COUNTS | {"count": 1, "locationId": "87a6cd9a-ff80-41f4-869c-669b63068fce"}
+(3 rows)
+section | data
+PRODUCT_VARIANTS | {"id": "127776de-a3a2-43d9-bd4f-639c16679c3c"}
+PRODUCT_VARIANTS | {"id": "4c49064f-5d8a-40ee-8a1d-b5c2ad7a0e8f"}
+PRODUCT_VARIANTS | {"id": "839557a6-bb35-4ef8-8066-dd5cef6f2747"}
+PRODUCT_VARIANTS | {"id": "b36dc564-aebd-48d1-8543-3f80f804a1cd"}
+(4 rows)
+section | data
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockBalance", "column": "id", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockBalance", "column": "locationId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockBalance", "column": "variantId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "onHand", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "reservedOnline", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "reservedReplenish", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "quarantined", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "safetyBuffer", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockBalance", "column": "version", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockBalance", "column": "updatedAt", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockMovement", "column": "id", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockMovement", "column": "locationId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockMovement", "column": "variantId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "USER-DEFINED", "table": "StockMovement", "column": "type", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockMovement", "column": "quantityDelta", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "text", "table": "StockMovement", "column": "referenceType", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "text", "table": "StockMovement", "column": "referenceId", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "text", "table": "StockMovement", "column": "idempotencyKey", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockMovement", "column": "actorId", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "text", "table": "StockMovement", "column": "notes", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "jsonb", "table": "StockMovement", "column": "metadata", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockMovement", "column": "createdAt", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransfer", "column": "id", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "text", "table": "StockTransfer", "column": "transferNumber", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransfer", "column": "sourceId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransfer", "column": "destinationId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "USER-DEFINED", "table": "StockTransfer", "column": "status", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockTransfer", "column": "dispatchedAt", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockTransfer", "column": "receivedAt", "nullable": "YES"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockTransfer", "column": "createdAt", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "timestamp without time zone", "table": "StockTransfer", "column": "updatedAt", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransferItem", "column": "id", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransferItem", "column": "transferId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "uuid", "table": "StockTransferItem", "column": "variantId", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockTransferItem", "column": "requestedQty", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockTransferItem", "column": "dispatchedQty", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockTransferItem", "column": "receivedQty", "nullable": "NO"}
+TRANSFER_TABLE_COLUMNS | {"type": "integer", "table": "StockTransferItem", "column": "damagedQty", "nullable": "NO"}
+(38 rows)
+section | data
+RETAIL_TABLE_COUNTS | {"table": "Location", "estimated_rows": -1}
+RETAIL_TABLE_COUNTS | {"table": "StockBalance", "estimated_rows": -1}
+RETAIL_TABLE_COUNTS | {"table": "StockMovement", "estimated_rows": -1}
+RETAIL_TABLE_COUNTS | {"table": "StockTransfer", "estimated_rows": -1}
+RETAIL_TABLE_COUNTS | {"table": "StockTransferItem", "estimated_rows": -1}
+(5 rows)
+COMMIT

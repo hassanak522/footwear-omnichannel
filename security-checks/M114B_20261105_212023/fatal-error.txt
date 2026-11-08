@@ -1,0 +1,3 @@
+Error: Electron initialization failed; check sql.js install and source.
+    at launch (G:\footwear-omnichannel\M114B_PACKAGE\m114b-harness.cjs:18:146)
+    at async G:\footwear-omnichannel\M114B_PACKAGE\m114b-harness.cjs:21:10

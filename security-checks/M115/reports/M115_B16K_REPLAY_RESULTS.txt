@@ -1,0 +1,11 @@
+﻿M115-B16K ISOLATED MIGRATION REPLAY
+Database: footwear_m115_replay_20261107
+Tables before: 42
+M112_DRIFT: PASS
+M113_TRANSFER: PASS
+M112_SHIFT: PASS
+Tables after: 70
+Migration records after: 15
+Final verification: PASS
+Operational DB unchanged by this procedure.
+QA DB unchanged by this procedure.

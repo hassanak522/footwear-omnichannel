@@ -1,0 +1,4 @@
+"Test","Status","Detail"
+"ISOLATED PREFLIGHT","PASS","Test DB, locations, variant and API 3002 verified (API database must also be checked separately)"
+"WAREHOUSE AVAILABLE STOCK","INFO","31 units; 13 required for partial + damaged tests"
+"WRITES","SKIPPED","No changes made; use -Execute only after confirming API 3002 database isolation"

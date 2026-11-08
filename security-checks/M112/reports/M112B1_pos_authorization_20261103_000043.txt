@@ -1,0 +1,94 @@
+7: import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+9: class RegisterDeviceDto {
+11: @IsUUID() locationId!: string;
+13: class OpenShiftDto {
+17: class CloseShiftDto {
+41: class PreflightDto {
+42: @IsUUID() locationId!:string;
+45: class QuoteCartDto extends PreflightDto {
+48: class OnlineDiscountSaleDto extends QuoteCartDto {
+55: class SyncSaleDto {
+88: private branchAccess(u:Principal,id:string){assertLocation(u,id);}
+89: async registerDevice(dto:RegisterDeviceDto,u:Principal){
+90: this.branchAccess(u,dto.locationId);
+91: const location=await this.db.location.findUnique({where:{id:dto.locationId}});
+93: return this.db.posDevice.create({data:{code:dto.code,locationId:dto.locationId}});
+95: async openShift(dto:OpenShiftDto,u:Principal){
+96: const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+97: this.branchAccess(u,device.locationId);
+101: const active=await tx.posShift.findFirst({where:{deviceId:dto.deviceId,status:'OPEN'}});
+103: return tx.posShift.create({data:{deviceId:dto.deviceId,locationId:device.locationId,cashierId:u.id,openingCash:money(dto.openingCash)}});
+106: async closeShift(id:string,dto:CloseShiftDto,u:Principal){
+109: const shift=await tx.posShift.findUniqueOrThrow({where:{id}});
+110: this.branchAccess(u,shift.locationId);
+118: async preflight(dto:PreflightDto,u:Principal){
+119: this.branchAccess(u,dto.locationId);
+123: this.db.productVariant.findMany({where:{id:{in:ids}},select:{id:true,active:true,price:true}}),
+124: this.db.stockBalance.findMany({where:{locationId:dto.locationId,variantId:{in:ids}}})
+142: async quoteCart(dto:QuoteCartDto,u:Principal){
+144: const check=await this.preflight(dto,u);
+153: const promo=await this.db.retailPromotion.findUnique({where:{code}});
+171: const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+172: this.branchAccess(u,device.locationId);
+173: if(!device.active||device.locationId!==dto.locationId)throw new BadRequestException('Invalid device/location');
+179: const previous=await tx.posSale.findUnique({where:{deviceId_localSaleId:{deviceId:dto.deviceId,localSaleId:dto.localSaleId}}});
+182: const redemption=await tx.promotionRedemption.findFirst({where:{saleId:previous.id}});
+185: const shift=await tx.posShift.findUniqueOrThrow({where:{id:dto.shiftId}});
+186: if(shift.deviceId!==device.id||shift.status!=='OPEN'||shift.locationId!==device.locationId)throw new ConflictException('Open shift required');
+188: const promo=await tx.retailPromotion.findUnique({where:{code}});
+193: await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${device.locationId+':'+line.variantId}))`;
+194: const variant=await tx.productVariant.findUnique({where:{id:line.variantId}});
+198: const balance=await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:device.locationId,variantId:line.variantId}},create:{locationId:device.locationId,variantId:line.variantId},update:{}});
+207: if(dto.customerId){const c=await tx.retailCustomer.findUnique({where:{id:dto.customerId}});if(!c)throw new BadRequestException('Unknown customer');}
+210: const sale=await tx.posSale.create({data:{deviceId:device.id,localSaleId:dto.localSaleId,payloadHash,locationId:device.locationId,shiftId:shift.id,cashierId:shift.cashierId,status:'ACCEPTED',soldAt:now,total:new Prisma.Decimal(due).div(100) ... [truncated]
+219: await tx.stockMovement.create({data:{locationId:device.locationId,variantId:l.variantId,type:'SALE',quantityDelta:-l.quantity,referenceType:'POS_SALE',referenceId:sale.id,idempotencyKey:`pos:${sale.id}:${l.variantId}`,actorId:shift.cashierI ... [truncated]
+225: async syncSale(dto:SyncSaleDto,u:Principal){
+227: const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+228: this.branchAccess(u,device.locationId);
+237: const existing=await tx.posSale.findUnique({where:{deviceId_localSaleId:{deviceId:dto.deviceId,localSaleId:dto.localSaleId}}});
+243: const shift=await tx.posShift.findUniqueOrThrow({where:{id:dto.shiftId}});
+244: if(shift.deviceId!==dto.deviceId||shift.locationId!==device.locationId)throw new BadRequestException('Shift does not belong to this device');
+250: await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${device.locationId+':'+line.variantId}))`;
+251: const variant=await tx.productVariant.findUnique({where:{id:line.variantId}});
+258: const balance=await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:device.locationId,variantId:line.variantId}},create:{locationId:device.locationId,variantId:line.variantId},update:{}});
+265: const sale=await tx.posSale.create({data:{deviceId:dto.deviceId,localSaleId:dto.localSaleId,payloadHash,locationId:device.locationId,shiftId:dto.shiftId,cashierId:shift.cashierId,status:conflictReason?'STOCK_CONFLICT':'ACCEPTED',conflictRea ... [truncated]
+267: const customer=await tx.retailCustomer.findUnique({where:{id:dto.customerId},select:{id:true}});
+280: await tx.stockMovement.create({data:{locationId:device.locationId,variantId:line.variantId,type:'SALE',quantityDelta:-line.quantity,referenceType:'POS_SALE',referenceId:sale.id,idempotencyKey:`pos:${sale.id}:${line.variantId}`,actorId:shift ... [truncated]
+287: async returnSale(dto:ReturnDto,u:Principal){
+291: const existing=await tx.posReturn.findUnique({where:{idempotencyKey:dto.idempotencyKey},include:{lines:true}});
+293: const sale=await tx.posSale.findUnique({where:{id:dto.saleId},include:{lines:true,returns:{include:{lines:true}}}});
+295: this.branchAccess(u,sale.locationId);
+296: const redemption=await tx.promotionRedemption.findFirst({where:{saleId:sale.id}});
+311: const ret=await tx.posReturn.create({data:{saleId:sale.id,locationId:sale.locationId,idempotencyKey:dto.idempotencyKey,reason:dto.reason,approvedById:u.id,lines:{create:records}},include:{lines:true}});
+313: await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sale.locationId+':'+line.variantId}))`;
+314: await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:sale.locationId,variantId:line.variantId}},create:{locationId:sale.locationId,variantId:line.variantId,onHand:line.quantity,quarantined:line.quarantined?line.quantity:0}, ... [truncated]
+315: await tx.stockMovement.create({data:{locationId:sale.locationId,variantId:line.variantId,type:'SALE_RETURN',quantityDelta:line.quantity,referenceType:'POS_RETURN',referenceId:ret.id,idempotencyKey:`pos-return:${ret.id}:${line.variantId}`,ac ... [truncated]
+319: const linked=await tx.saleCustomerLink.findUnique({where:{saleId:sale.id}});
+321: const earned=await tx.loyaltyLedgerEntry.findFirst({where:{saleId:sale.id,reason:'SALE_EARN'}});
+340: const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId}});
+341: this.branchAccess(u,device.locationId);
+342: const sale=await this.db.posSale.findUnique({where:{deviceId_localSaleId:{deviceId,localSaleId}}});
+344: const redemption = await this.db.promotionRedemption.findFirst({
+349: ? await this.db.retailPromotion.findUnique({
+358: async shiftSummary(id:string,u:Principal){
+359: const shift=await this.db.posShift.findUniqueOrThrow({where:{id},include:{sales:{include:{tenders:true}}}});
+360: this.branchAccess(u,shift.locationId);
+366: async deviceStatus(deviceId:string,u:Principal){
+367: const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
+368: this.branchAccess(u,device.locationId);
+369: const shift=await this.db.posShift.findFirst({where:{deviceId,status:'OPEN'},orderBy:{openedAt:'desc'},select:{id:true,openedAt:true,cashierId:true,openingCash:true}});
+370: return {id:device.id,code:device.code,active:device.active,locationId:device.locationId,location:device.location,openShift:shift};
+372: async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
+374: @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
+377: @Get('devices/:id/status') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') deviceStatus(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.deviceStatus(id,u);}
+378: @Post('devices') @Roles('SUPER_ADMIN','BRANCH_MANAGER') register(@Body() dto:RegisterDeviceDto,@CurrentUser() u:Principal){return this.pos.registerDevice(dto,u);}
+379: @Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
+380: @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
+381: @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
+382: @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+383: @Post('checkout/online-discounted-sale') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') discounted(@Body() dto:OnlineDiscountSaleDto,@CurrentUser() u:Principal){return this.pos.onlineDiscountSale(dto,u);}
+384: @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+388: @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
+389: @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+390: @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
+391: @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}

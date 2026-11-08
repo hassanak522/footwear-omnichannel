@@ -1,0 +1,104 @@
+﻿ROYAL STEP M115-A/B RELEASE READINESS AUDIT
+Mode: READ-ONLY
+Generated: 2026-11-07 13:35:32
+
+=== M115-A1 PROJECT STRUCTURE ===
+apps\api : True
+apps\pos-desktop : True
+packages\database : True
+packages\database\prisma\schema.prisma : True
+security-checks : True
+
+=== M115-A2 ENVIRONMENT FILE INVENTORY ===
+ENV FILE: \.env
+ENV FILE: \apps\api\.env
+ENV FILE: \apps\api\.env.example
+ENV FILE: \apps\web\.env.example
+ENV FILE: \packages\database\.env
+ENV FILE: \packages\database\.env.example
+
+=== M115-A3 ENVIRONMENT VARIABLE NAMES ===
+FILE: .env
+  DATABASE_URL
+  LOYALTY_POINTS_PER_100_PKR
+  POS_STRICT_CATALOG_PRICING
+FILE: apps\api\.env
+  DATABASE_URL
+  JWT_SECRET
+  PORT
+  CORS_ORIGIN
+  M112_Manager_B_Test_Password
+  M112_Manager_B_Test_email
+  M112_Manager_A_Test_Password
+  M112_Manager_A_Test_email
+  M112_Cashier_A_Test_email
+  Cashier_Test_Password
+  Warehouse_Manager_Email
+  Warehouse_Manager_Password
+FILE: packages\database\.env
+  DATABASE_URL
+FILE: apps\api\.env.example
+  DATABASE_URL
+  JWT_SECRET
+  PORT
+  CORS_ORIGIN
+
+=== M115-A4 HARDCODED ENDPOINT SCAN ===
+\apps\pos-desktop\src\main.tsx:5 ENDPOINT_REFERENCE
+\apps\pos-desktop\src\main.tsx:6 ENDPOINT_REFERENCE
+\apps\pos-desktop\electron\main.cjs:79 ENDPOINT_REFERENCE
+
+=== M115-A5 QA PATCH INVENTORY ===
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E11C_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E11C_FAILED_SWITCH_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E11H_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E5_20261106_011022.bak
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E7_20261106_162933.bak
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E8_20261106_163830.bak
+PATCH/BACKUP: \apps\pos-desktop\electron\main.cjs.M114E_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\electron\preload.cjs.M114E11H_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\src\main.tsx.M114E11H_BACKUP
+PATCH/BACKUP: \apps\pos-desktop\src\main.tsx.M114E_BACKUP
+
+=== M115-A6 DEBUG AND QA CONFIGURATION ===
+\apps\pos-desktop\src\main.tsx:4 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:4 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:20 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:45 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:47 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:50 CONFIG_REFERENCE
+\apps\pos-desktop\electron\main.cjs:79 CONFIG_REFERENCE
+
+=== M115-B1 POSTGRESQL CONTAINER ===
+footwear-postgres | Up 9 minutes (healthy) | 127.0.0.1:5433->5432/tcp
+
+=== M115-B2 QA DATABASE IDENTITY ===
+QA DATABASE: footwear_omnichannel_test|footwear
+
+=== M115-B3 DATABASE LIST ===
+DATABASE: footwear_omnichannel
+DATABASE: footwear_omnichannel_test
+DATABASE: postgres
+
+=== M115-B4 PRISMA MIGRATION INVENTORY ===
+Migration directories: 7
+MIGRATION: 20261017093820
+MIGRATION: 20261017162436
+MIGRATION: 20261018133424
+MIGRATION: 20261018180405_initial_full_platform
+MIGRATION: 20261023114234_m12_m14_enterprise_foundation
+MIGRATION: 20261023163826_milestone15_branch_operations
+MIGRATION: 20261104_m112b8i_shift_snapshot
+Migration lock exists: True
+
+=== M115-B5 QA MIGRATION HISTORY ===
+MIGRATION HISTORY: 20261104_m112b8i_shift_snapshot|FINISHED|2026-11-03 20:11:02.287+00
+MIGRATION HISTORY: 20261023163826_milestone15_branch_operations|FINISHED|2026-10-30 19:13:54.731665+00
+MIGRATION HISTORY: 20261023114234_m12_m14_enterprise_foundation|FINISHED|2026-10-30 19:13:54.483667+00
+MIGRATION HISTORY: 20261018180405_initial_full_platform|FINISHED|2026-10-30 19:13:54.338787+00
+MIGRATION HISTORY: 20261018133424|FINISHED|2026-10-30 19:13:54.230021+00
+MIGRATION HISTORY: 20261017162436|FINISHED|2026-10-30 19:13:54.01099+00
+MIGRATION HISTORY: 20261017093820|FINISHED|2026-10-30 19:13:52.573161+00
+
+=== M115-B6 BACKUP TOOL AVAILABILITY ===
+pg_dump (PostgreSQL) 16.15

@@ -1,0 +1,13 @@
+﻿M115-B16O CONTROLLED PRISMA SCHEMA MERGE
+Status: PASS
+Original schema SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+Current schema previous SHA256: 5E7A6D19B78909FB66E555B0D4EED369E0DA0A0E45FEA79CF772B73BE7F05C4F
+Merged schema SHA256: A54239EB277445FE9DD7B338418EAD1D398674D59E6BCFB1BC4BFAD39E081859
+Backup: G:\footwear-omnichannel\security-checks\M115\backups\schema_before_B16O_20261107_145706.prisma
+Models before: 61
+Models after: 69
+Recovered models: 8
+Reciprocal relation fields restored: 8
+Prisma validation: PASS
+Database operations: NONE
+Migrations executed: NONE

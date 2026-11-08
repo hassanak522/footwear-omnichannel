@@ -1,0 +1,2 @@
+﻿npm notice run @footwear/api@1.0.0 build
+npm notice run nest build

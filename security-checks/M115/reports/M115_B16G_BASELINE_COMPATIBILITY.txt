@@ -1,0 +1,22 @@
+﻿M115-B16G BASELINE COMPATIBILITY
+Mode: READ-ONLY
+Database: footwear_omnichannel
+Drift CREATE TABLE targets: 26
+Existing table collisions: 0
+Drift CREATE TYPE targets: 12
+Existing enum collisions: 0
+TransferStatus: REQUESTED
+TransferStatus: APPROVED
+TransferStatus: PICKING
+TransferStatus: DISPATCHED
+TransferStatus: PARTIALLY_RECEIVED
+TransferStatus: RECEIVED
+TransferStatus: CANCELLED
+StockTransferItem: id|uuid|NO|
+StockTransferItem: transferId|uuid|NO|
+StockTransferItem: variantId|uuid|NO|
+StockTransferItem: requestedQty|integer|NO|
+StockTransferItem: dispatchedQty|integer|NO|0
+StockTransferItem: receivedQty|integer|NO|0
+StockTransferItem: damagedQty|integer|NO|0
+PROPOSED: ALTER TYPE "TransferStatus" ADD VALUE 'SHORTAGE_CLOSED';

@@ -1,0 +1,227 @@
+﻿M115-B16E SQL ARTIFACT SAFETY AND COVERAGE
+Mode: FILE INSPECTION ONLY
+
+====================================
+FILE: security-checks\M112\M112B8I_snapshot.sql
+====================================
+SHA256: 13E555B3E1903592A90AD205F845250CCA2CE853A579EC4CD3B8A64B1E1F79BC
+Lines: 1320
+Size bytes: 46669
+
+--- SQL STATEMENT INDICATORS ---
+CREATE TABLE: 59
+ALTER TABLE: 43
+CREATE INDEX: 87
+CREATE TYPE: 28
+DROP TABLE: 0
+DROP COLUMN: 0
+DROP TYPE: 0
+TRUNCATE: 0
+DELETE FROM: 0
+UPDATE: 43
+INSERT INTO: 0
+DO BLOCK: 0
+FUNCTION: 0
+
+--- TARGET TABLE COVERAGE ---
+REFERENCED: CashReconciliation
+REFERENCED: DrawerMovement
+REFERENCED: FinanceExceptionCase
+REFERENCED: FinanceExceptionCaseEvent
+REFERENCED: FinanceJournal
+REFERENCED: FinanceJournalLine
+REFERENCED: FinancePeriodLock
+REFERENCED: FinancePostingBatch
+REFERENCED: FinancePostingLine
+REFERENCED: FinanceSnapshot
+REFERENCED: InventoryCostBasis
+REFERENCED: InventoryCostRevision
+REFERENCED: LoyaltyLedgerEntry
+REFERENCED: PaymentException
+REFERENCED: PaymentExceptionEvidence
+REFERENCED: PromotionRedemption
+REFERENCED: RefundRecord
+REFERENCED: RetailPromotion
+REFERENCED: SaleCustomerLink
+REFERENCED: SettlementBatch
+REFERENCED: SettlementEntry
+REFERENCED: SupplierInvoice
+REFERENCED: SupplierPayableEvent
+REFERENCED: SupplierPaymentRequest
+REFERENCED: SupplierPaymentSettlement
+REFERENCED: SupplierSettlementReview
+
+--- FIRST 20 LINES ---
+-- CreateEnum
+CREATE TYPE "LocationType" AS ENUM ('WAREHOUSE', 'BRANCH', 'ONLINE');
+
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'DISABLED');
+
+-- CreateEnum
+CREATE TYPE "StockMovementType" AS ENUM ('OPENING_BALANCE', 'SUPPLIER_RECEIPT', 'SALE', 'SALE_RETURN', 'RESERVATION', 'RESERVATION_RELEASE', 'TRANSFER_DISPATCH', 'TRANSFER_RECEIPT', 'ADJUSTMENT', 'QUARANTINE', 'QUARANTINE_RELEASE');
+
+-- CreateEnum
+CREATE TYPE "ReservationPurpose" AS ENUM ('ONLINE_ORDER', 'BRANCH_REPLENISHMENT');
+
+-- CreateEnum
+CREATE TYPE "ReservationStatus" AS ENUM ('ACTIVE', 'CONSUMED', 'RELEASED', 'EXPIRED');
+
+-- CreateEnum
+CREATE TYPE "TransferStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PICKING', 'DISPATCHED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED');
+
+-- CreateEnum
+CREATE TYPE "PosShiftStatus" AS ENUM ('OPEN', 'CLOSED');
+
+====================================
+FILE: security-checks\M112\reports\M112B8_schema_drift.sql
+====================================
+SHA256: EE2A6A798538BA261D4A38191E8993598D902EE2337472D4AE3C2D8936396C51
+Lines: 597
+Size bytes: 20704
+
+--- SQL STATEMENT INDICATORS ---
+CREATE TABLE: 26
+ALTER TABLE: 4
+CREATE INDEX: 49
+CREATE TYPE: 12
+DROP TABLE: 0
+DROP COLUMN: 0
+DROP TYPE: 0
+TRUNCATE: 0
+DELETE FROM: 0
+UPDATE: 4
+INSERT INTO: 0
+DO BLOCK: 0
+FUNCTION: 0
+
+--- TARGET TABLE COVERAGE ---
+REFERENCED: CashReconciliation
+REFERENCED: DrawerMovement
+REFERENCED: FinanceExceptionCase
+REFERENCED: FinanceExceptionCaseEvent
+REFERENCED: FinanceJournal
+REFERENCED: FinanceJournalLine
+REFERENCED: FinancePeriodLock
+REFERENCED: FinancePostingBatch
+REFERENCED: FinancePostingLine
+REFERENCED: FinanceSnapshot
+REFERENCED: InventoryCostBasis
+REFERENCED: InventoryCostRevision
+REFERENCED: LoyaltyLedgerEntry
+REFERENCED: PaymentException
+REFERENCED: PaymentExceptionEvidence
+REFERENCED: PromotionRedemption
+REFERENCED: RefundRecord
+REFERENCED: RetailPromotion
+REFERENCED: SaleCustomerLink
+REFERENCED: SettlementBatch
+REFERENCED: SettlementEntry
+REFERENCED: SupplierInvoice
+REFERENCED: SupplierPayableEvent
+REFERENCED: SupplierPaymentRequest
+REFERENCED: SupplierPaymentSettlement
+REFERENCED: SupplierSettlementReview
+
+--- FIRST 20 LINES ---
+-- CreateEnum
+CREATE TYPE "RefundRecordStatus" AS ENUM ('REQUESTED', 'APPROVED', 'PAID', 'REJECTED');
+
+-- CreateEnum
+CREATE TYPE "PromotionStatus" AS ENUM ('DRAFT', 'ACTIVE', 'DISABLED');
+
+-- CreateEnum
+CREATE TYPE "PaymentExceptionStatus" AS ENUM ('OPEN', 'UNDER_REVIEW', 'RESOLVED', 'VOIDED');
+
+-- CreateEnum
+CREATE TYPE "PaymentEvidenceKind" AS ENUM ('CASH_COUNT', 'TERMINAL_RECEIPT', 'BANK_REFERENCE', 'OTHER');
+
+-- CreateEnum
+CREATE TYPE "CashReconciliationStatus" AS ENUM ('SUBMITTED', 'APPROVED', 'DISPUTED');
+
+-- CreateEnum
+CREATE TYPE "DrawerMovementType" AS ENUM ('CASH_IN', 'CASH_OUT', 'PETTY_CASH', 'CASH_REFUND', 'BANK_DEPOSIT');
+
+-- CreateEnum
+CREATE TYPE "DrawerMovementStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED');
+
+====================================
+FILE: security-checks\M113\M113_proposed.sql
+====================================
+SHA256: 475C89E890951FE21D383E85F3385C1687E159F13FE33413F9400F31116A2A53
+Lines: 28
+Size bytes: 1089
+
+--- SQL STATEMENT INDICATORS ---
+CREATE TABLE: 1
+ALTER TABLE: 2
+CREATE INDEX: 2
+CREATE TYPE: 0
+DROP TABLE: 0
+DROP COLUMN: 0
+DROP TYPE: 0
+TRUNCATE: 0
+DELETE FROM: 0
+UPDATE: 1
+INSERT INTO: 0
+DO BLOCK: 0
+FUNCTION: 0
+
+--- TARGET TABLE COVERAGE ---
+REFERENCED: StockTransferReceipt
+
+--- FIRST 20 LINES ---
+-- AlterEnum
+ALTER TYPE "TransferStatus" ADD VALUE 'SHORTAGE_CLOSED';
+
+-- AlterTable
+ALTER TABLE "StockTransferItem" ADD COLUMN     "shortageQty" INTEGER NOT NULL DEFAULT 0;
+
+-- CreateTable
+CREATE TABLE "StockTransferReceipt" (
+    "id" UUID NOT NULL,
+    "transferId" UUID NOT NULL,
+    "variantId" UUID NOT NULL,
+    "receivedQty" INTEGER NOT NULL,
+    "damagedQty" INTEGER NOT NULL,
+    "idempotencyKey" TEXT NOT NULL,
+    "actorId" UUID NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "StockTransferReceipt_pkey" PRIMARY KEY ("id")
+);
+
+
+====================================
+COMBINED TABLE COVERAGE
+====================================
+COVERED: CashReconciliation
+COVERED: DrawerMovement
+COVERED: FinanceExceptionCase
+COVERED: FinanceExceptionCaseEvent
+COVERED: FinanceJournal
+COVERED: FinanceJournalLine
+COVERED: FinancePeriodLock
+COVERED: FinancePostingBatch
+COVERED: FinancePostingLine
+COVERED: FinanceSnapshot
+COVERED: InventoryCostBasis
+COVERED: InventoryCostRevision
+COVERED: LoyaltyLedgerEntry
+COVERED: PaymentException
+COVERED: PaymentExceptionEvidence
+COVERED: PromotionRedemption
+COVERED: RefundRecord
+COVERED: RetailPromotion
+COVERED: SaleCustomerLink
+COVERED: SettlementBatch
+COVERED: SettlementEntry
+COVERED: StockTransferReceipt
+COVERED: SupplierInvoice
+COVERED: SupplierPayableEvent
+COVERED: SupplierPaymentRequest
+COVERED: SupplierPaymentSettlement
+COVERED: SupplierSettlementReview
+
+Tables referenced: 27 / 27
+Tables not referenced: 0

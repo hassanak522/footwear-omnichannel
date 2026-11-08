@@ -1,0 +1,8 @@
+﻿{
+    "saleId":  "80e79bb0-a21c-44f3-9f45-468b0006de2f",
+    "localSaleId":  "724b3088-5e68-455b-aab2-57cac45b196e",
+    "payload":  "{\r\n    \"localSaleId\":  \"724b3088-5e68-455b-aab2-57cac45b196e\",\r\n    \"tenders\":  [\r\n                    {\r\n                        \"type\":  \"CASH\",\r\n                        \"amount\":  600\r\n                    },\r\n                    {\r\n                        \"amount\":  400,\r\n                        \"reference\":  \"M112-B8H-TEST-CARD\",\r\n                        \"type\":  \"CARD\"\r\n                    }\r\n                ],\r\n    \"shiftId\":  \"2d5f25cc-9367-400e-ae2b-d9ea774207cb\",\r\n    \"soldAt\":  \"2026-11-03T13:55:53.5033710Z\",\r\n    \"deviceId\":  \"b75f845b-6e99-48ab-9af4-8f7422d52628\",\r\n    \"lines\":  [\r\n                  {\r\n                      \"unitPrice\":  1000,\r\n                      \"variantId\":  \"839557a6-bb35-4ef8-8066-dd5cef6f2747\",\r\n                      \"quantity\":  1\r\n                  }\r\n              ]\r\n}",
+    "variantId":  "839557a6-bb35-4ef8-8066-dd5cef6f2747",
+    "shiftId":  "2d5f25cc-9367-400e-ae2b-d9ea774207cb",
+    "deviceId":  "b75f845b-6e99-48ab-9af4-8f7422d52628"
+}

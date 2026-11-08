@@ -1,0 +1,10 @@
+[
+    {
+        "Code":  201,
+        "Response":  "{\"id\":\"dc75270f-f733-4eb1-89ec-ce5783582440\",\"transferNumber\":\"TR-37f67ff8-81de-4cbe-9a60-54b7673d57ac\",\"sourceId\":\"87a6cd9a-ff80-41f4-869c-669b63068fce\",\"destinationId\":\"0b0cc789-66ce-462b-9f94-f3ab33739975\",\"status\":\"RECEIVED\",\"dispatchedAt\":\"2026-11-05T15:42:44.711Z\",\"receivedAt\":\"2026-11-05T15:43:19.501Z\",\"createdAt\":\"2026-11-05T15:42:44.388Z\",\"updatedAt\":\"2026-11-05T15:43:19.504Z\",\"items\":[{\"id\":\"bd9ec8ad-3e4f-4653-8647-390c95427ef2\",\"transferId\":\"dc75270f-f733-4eb1-89ec-ce5783582440\",\"vari"
+    },
+    {
+        "Code":  201,
+        "Response":  "{\"id\":\"dc75270f-f733-4eb1-89ec-ce5783582440\",\"transferNumber\":\"TR-37f67ff8-81de-4cbe-9a60-54b7673d57ac\",\"sourceId\":\"87a6cd9a-ff80-41f4-869c-669b63068fce\",\"destinationId\":\"0b0cc789-66ce-462b-9f94-f3ab33739975\",\"status\":\"RECEIVED\",\"dispatchedAt\":\"2026-11-05T15:42:44.711Z\",\"receivedAt\":\"2026-11-05T15:43:19.501Z\",\"createdAt\":\"2026-11-05T15:42:44.388Z\",\"updatedAt\":\"2026-11-05T15:43:19.504Z\",\"items\":[{\"id\":\"bd9ec8ad-3e4f-4653-8647-390c95427ef2\",\"transferId\":\"dc75270f-f733-4eb1-89ec-ce5783582440\",\"vari"
+    }
+]

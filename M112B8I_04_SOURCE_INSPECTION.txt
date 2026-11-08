@@ -1,0 +1,377 @@
+﻿===== .\apps\api\src\pos.ts : 1-210 =====
+    1: import { createHash } from 'node:crypto';
+    2: import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Injectable, Param, Post, UseGuards } from '@nestjs/common';
+    3: import { Type } from 'class-transformer';
+    4: import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+    5: import { PosTenderType, Prisma } from '@prisma/client';
+    6: import { Db } from './db';
+    7: import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+    8: 
+    9: class RegisterDeviceDto {
+   10:  @IsString() @Matches(/^[A-Z0-9_-]{3,50}$/) code!: string;
+   11:  @IsUUID() locationId!: string;
+   12: }
+   13: class OpenShiftDto {
+   14:  @IsUUID() deviceId!: string;
+   15:  @IsNumber({maxDecimalPlaces:2}) @Min(0) openingCash!: number;
+   16: }
+   17: class CloseShiftDto {
+   18:  @IsNumber({maxDecimalPlaces:2}) @Min(0) closingCash!: number;
+   19: }
+   20: class SaleLineDto {
+   21:  @IsUUID() variantId!: string;
+   22:  @IsInt() @Min(1) quantity!: number;
+   23:  @IsNumber({maxDecimalPlaces:2}) @Min(0) unitPrice!: number;
+   24: }
+   25: class SaleTenderDto {
+   26:  @IsEnum(PosTenderType) type!: PosTenderType;
+   27:  @IsNumber({maxDecimalPlaces:2}) @Min(0) amount!: number;
+   28:  @IsOptional() @IsString() @MaxLength(100) reference?: string;
+   29: }
+   30: class ReturnLineDto {
+   31:  @IsUUID() variantId!: string;
+   32:  @IsInt() @Min(1) quantity!: number;
+   33:  @IsOptional() @IsBoolean() quarantined?: boolean;
+   34: }
+   35: class ReturnDto {
+   36:  @IsUUID() saleId!: string;
+   37:  @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!: string;
+   38:  @IsString() @MinLength(3) @MaxLength(500) reason!: string;
+   39:  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
+   40: }
+   41: class PreflightDto {
+   42:  @IsUUID() locationId!:string;
+   43:  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleLineDto) lines!:SaleLineDto[];
+   44: }
+   45: class QuoteCartDto extends PreflightDto {
+   46:  @IsOptional() @IsString() @MaxLength(50) promotionCode?:string;
+   47: }
+   48: class OnlineDiscountSaleDto extends QuoteCartDto {
+   49:  @IsUUID() deviceId!:string;
+   50:  @IsUUID() shiftId!:string;
+   51:  @IsUUID() localSaleId!:string;
+   52:  @IsOptional() @IsUUID() customerId?:string;
+   53:  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!:SaleTenderDto[];
+   54: }
+   55: class SyncSaleDto {
+   56:  @IsOptional() @IsUUID() customerId?: string;
+   57:  @IsUUID() deviceId!: string;
+   58:  @IsUUID() localSaleId!: string;
+   59:  @IsUUID() shiftId!: string;
+   60:  @IsDateString() soldAt!: string;
+   61:  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleLineDto) lines!: SaleLineDto[];
+   62:  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!: SaleTenderDto[];
+   63: }
+   64: const money=(v:number)=>new Prisma.Decimal(v.toFixed(2));
+   65: // Deterministic proportional discount allocation in integer cents.
+   66: // A line's allocated net amount is divided across units cumulatively, ensuring
+   67: // partial returns sum to the exact original net line value without over-refunds.
+   68: function discountedLineNets(lines:{variantId:string;quantity:number;unitPrice:Prisma.Decimal}[],discountCents:number){
+   69:  const ordered=[...lines].sort((a,b)=>a.variantId.localeCompare(b.variantId));
+   70:  const gross=ordered.map(l=>Math.round(l.unitPrice.toNumber()*100)*l.quantity);
+   71:  const subtotal=gross.reduce((n,v)=>n+v,0);
+   72:  if(subtotal<=0||discountCents<0||discountCents>subtotal)throw new ConflictException('Invalid sale discount allocation');
+   73:  const floors=gross.map(g=>Math.floor(g*discountCents/subtotal));
+   74:  let remainder=discountCents-floors.reduce((n,v)=>n+v,0);
+   75:  const ranks=gross.map((g,i)=>({i,frac:(g*discountCents)%subtotal}))
+   76:    .sort((a,b)=>b.frac-a.frac||a.i-b.i);
+   77:  for(let j=0;j<remainder;j++)floors[ranks[j].i]++;
+   78:  return new Map(ordered.map((l,i)=>[l.variantId,gross[i]-floors[i]]));
+   79: }
+   80: const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+   81: // Opt-in policy: set LOYALTY_POINTS_PER_100_PKR to a positive integer only after HQ approval.
+   82: const pointsPer100=()=>{const raw=process.env.LOYALTY_POINTS_PER_100_PKR??'0';return /^\d+$/.test(raw)?Math.min(100,Number(raw)):0;};
+   83: 
+   84: 
+   85: @Injectable()
+   86: export class PosService {
+   87:  constructor(private db:Db){}
+   88:  private branchAccess(u:Principal,id:string){assertLocation(u,id);}
+   89:  async registerDevice(dto:RegisterDeviceDto,u:Principal){
+   90:   this.branchAccess(u,dto.locationId);
+   91:   const location=await this.db.location.findUnique({where:{id:dto.locationId}});
+   92:   if(!location||location.type!=='BRANCH'||!location.active)throw new BadRequestException('Active branch required');
+   93:   return this.db.posDevice.create({data:{code:dto.code,locationId:dto.locationId}});
+   94:  }
+   95:  async openShift(dto:OpenShiftDto,u:Principal){
+   96:   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+   97:   this.branchAccess(u,device.locationId);
+   98:   if(!device.active)throw new ForbiddenException('Device disabled');
+   99:   return this.db.$transaction(async tx=>{
+  100:    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift:${dto.deviceId}`}))`;
+  101:    const active=await tx.posShift.findFirst({where:{deviceId:dto.deviceId,status:'OPEN'}});
+  102:    if(active)throw new ConflictException('Device already has an open shift');
+  103:    return tx.posShift.create({data:{deviceId:dto.deviceId,locationId:device.locationId,cashierId:u.id,openingCash:money(dto.openingCash)}});
+  104:   });
+  105:  }
+  106:  
+  107: async closeShift(id:string,dto:CloseShiftDto,u:Principal){
+  108:  return this.db.$transaction(async tx=>{
+  109:   await tx.$executeRaw`
+  110:    SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${id}`}))
+  111:   `;
+  112: 
+  113:   const shift=await tx.posShift.findUniqueOrThrow({where:{id}});
+  114:   this.branchAccess(u,shift.locationId);
+  115: 
+  116:   if(
+  117:    shift.cashierId!==u.id &&
+  118:    !u.roles.includes('SUPER_ADMIN') &&
+  119:    !u.roles.includes('BRANCH_MANAGER')
+  120:   ){
+  121:    throw new ForbiddenException('Not shift owner');
+  122:   }
+  123: 
+  124:   if(shift.status!=='OPEN'){
+  125:    throw new ConflictException('Shift already closed');
+  126:   }
+  127: 
+  128:   const sales=await tx.posSale.findMany({
+  129:    where:{shiftId:id},
+  130:    include:{tenders:true}
+  131:   });
+  132: 
+  133:   const movements=await tx.drawerMovement.findMany({
+  134:    where:{shiftId:id,status:'APPROVED'}
+  135:   });
+  136: 
+  137:   const accepted=sales.filter(s=>s.status==='ACCEPTED');
+  138: 
+  139:   const cents=(value:Prisma.Decimal)=>
+  140:    Math.round(value.toNumber()*100);
+  141: 
+  142:   const decimal=(value:number)=>
+  143:    new Prisma.Decimal((value/100).toFixed(2));
+  144: 
+  145:   const tenderTotal=(type:PosTenderType)=>
+  146:    accepted
+  147:     .flatMap(s=>s.tenders)
+  148:     .filter(t=>t.type===type)
+  149:     .reduce((sum,t)=>sum+cents(t.amount),0);
+  150: 
+  151:   const cash=tenderTotal('CASH');
+  152:   const card=tenderTotal('CARD');
+  153:   const other=tenderTotal('OTHER');
+  154: 
+  155:   const drawerAdjustment=movements.reduce(
+  156:    (sum,m)=>sum+
+  157:     (m.type==='CASH_IN'?1:-1)*cents(m.amount),
+  158:    0
+  159:   );
+  160: 
+  161:   const opening=cents(shift.openingCash);
+  162:   const counted=cents(money(dto.closingCash));
+  163:   const expected=opening+cash+drawerAdjustment;
+  164:   const variance=counted-expected;
+  165:   const closedAt=new Date();
+  166: 
+  167:   const result=await tx.posShift.update({
+  168:    where:{id},
+  169:    data:{
+  170:     status:'CLOSED',
+  171:     closedAt,
+  172:     closingCash:decimal(counted)
+  173:    }
+  174:   });
+  175: 
+  176:   await tx.posShiftClosingSnapshot.create({
+  177:    data:{
+  178:     shiftId:id,
+  179:     locationId:shift.locationId,
+  180:     deviceId:shift.deviceId,
+  181:     cashierId:shift.cashierId,
+  182:     openingCash:decimal(opening),
+  183:     cashSales:decimal(cash),
+  184:     cardSales:decimal(card),
+  185:     otherSales:decimal(other),
+  186:     drawerAdjustment:decimal(drawerAdjustment),
+  187:     approvedMovements:movements.length,
+  188:     expectedCash:decimal(expected),
+  189:     countedCash:decimal(counted),
+  190:     variance:decimal(variance),
+  191:     acceptedSales:accepted.length,
+  192:     conflictedSales:sales.length-accepted.length,
+  193:     closedAt
+  194:    }
+  195:   });
+  196: 
+  197:   await tx.auditLog.create({
+  198:    data:{
+  199:     actorId:u.id,
+  200:     action:'POS_SHIFT_CLOSED_SNAPSHOT',
+  201:     entityType:'PosShift',
+  202:     entityId:id,
+  203:     after:{
+  204:      expectedCash:decimal(expected).toString(),
+  205:      countedCash:decimal(counted).toString(),
+  206:      variance:decimal(variance).toString(),
+  207:      acceptedSales:accepted.length,
+  208:      approvedMovements:movements.length
+  209:     }
+  210:    }
+
+===== .\apps\api\src\pos.ts : 520-565 =====
+  520:       select: { code: true }
+  521:      })
+  522:     : null;
+  523:   return {found:true,id:sale.id,localSaleId:sale.localSaleId,status:sale.status,total:sale.total.toString(),
+  524:    promotionCode: promotion?.code ?? null,discount:redemption?.discountAmount.toString()??'0.00',
+  525:    action:'Do not resubmit payment. Retrieve receipt using accepted sale details.'};
+  526:  }
+  527:  async shiftSummary(id:string,u:Principal){
+  528:   const shift=await this.db.posShift.findUniqueOrThrow({where:{id},include:{sales:{include:{tenders:true}}}});
+  529:   this.branchAccess(u,shift.locationId);
+  530:   const accepted=shift.sales.filter(s=>s.status==='ACCEPTED');
+  531:   const cash=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CASH').reduce((sum,t)=>sum+t.amount.toNumber(),0);
+  532:   const card=accepted.flatMap(s=>s.tenders).filter(t=>t.type==='CARD').reduce((sum,t)=>sum+t.amount.toNumber(),0);
+  533:   return {shiftId:id,status:shift.status,openingCash:shift.openingCash,closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:shift.sales.length-accepted.length,cashSales:cash,cardSales:card,expectedCash:shift.openingCash.toNumber()+cash,variance:shift.closingCash===null?null:shift.closingCash.toNumber()-shift.openingCash.toNumber()-cash};
+  534:  }
+  535:  async deviceStatus(deviceId:string,u:Principal){
+  536:   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
+  537:   this.branchAccess(u,device.locationId);
+  538:   const shift=await this.db.posShift.findFirst({where:{deviceId,status:'OPEN'},orderBy:{openedAt:'desc'},select:{id:true,openedAt:true,cashierId:true,openingCash:true}});
+  539:   return {id:device.id,code:device.code,active:device.active,locationId:device.locationId,location:device.location,openShift:shift};
+  540:  }
+  541:  async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
+  542: }
+  543: @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
+  544: export class PosController {
+  545:  constructor(private pos:PosService){}
+  546:  @Get('devices/:id/status') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') deviceStatus(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.deviceStatus(id,u);}
+  547:  @Post('devices') @Roles('SUPER_ADMIN','BRANCH_MANAGER') register(@Body() dto:RegisterDeviceDto,@CurrentUser() u:Principal){return this.pos.registerDevice(dto,u);}
+  548:  @Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
+  549:  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
+  550:  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
+  551:  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+  552:  @Post('checkout/online-discounted-sale') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') discounted(@Body() dto:OnlineDiscountSaleDto,@CurrentUser() u:Principal){return this.pos.onlineDiscountSale(dto,u);}
+  553:  @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+  554:  discountedStatus(@Param('deviceId') deviceId:string,@Param('localSaleId') localSaleId:string,@CurrentUser() u:Principal){
+  555:   return this.pos.discountedSaleStatus(deviceId,localSaleId,u);
+  556:  }
+  557:  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
+  558:  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+  559:  @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
+  560:  @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
+  561: }
+
+===== .\apps\api\src\cash-reconciliation.ts : 1-75 =====
+    1: import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+    2: import { IsEnum, IsNumber, IsString, IsUUID, MaxLength, Min } from 'class-validator';
+    3: import { CashReconciliationStatus, Prisma } from '@prisma/client';
+    4: import { Db } from './db';
+    5: import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+    6: 
+    7: class SubmitCashDto {
+    8:  @IsUUID() shiftId!:string;
+    9:  @IsNumber({maxDecimalPlaces:2}) @Min(0) countedCash!:number;
+   10:  @IsString() @MaxLength(1000) note!:string;
+   11: }
+   12: class ReviewCashDto {
+   13:  @IsEnum(CashReconciliationStatus) status!:CashReconciliationStatus;
+   14:  @IsString() @MaxLength(2000) note!:string;
+   15: }
+   16: @Controller('cash-reconciliation')
+   17: @UseGuards(JwtAuthGuard,RolesGuard)
+   18: export class CashReconciliationController {
+   19:  constructor(private readonly db:Db){}
+   20:  private isManager(u:Principal){return u.roles.includes('SUPER_ADMIN')||u.roles.includes('BRANCH_MANAGER');}
+   21:  private async getAccessible(id:string,u:Principal){
+   22:   const rec=await this.db.cashReconciliation.findUniqueOrThrow({where:{id}});
+   23:   assertLocation(u,rec.locationId);
+   24:   if(!this.isManager(u)&&rec.submittedById!==u.id)throw new ForbiddenException('Only your own reconciliation is accessible');
+   25:   return rec;
+   26:  }
+   27:  @Post('submit') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+   28:  async submit(@Body() d:SubmitCashDto,@CurrentUser() u:Principal){
+   29:   const shift=await this.db.posShift.findUniqueOrThrow({where:{id:d.shiftId}});
+   30:   assertLocation(u,shift.locationId);
+   31:   if(shift.status!=='CLOSED')throw new ConflictException('Close the POS shift before reconciliation');
+   32:   if(!this.isManager(u)&&shift.cashierId!==u.id)throw new ForbiddenException('Only the shift cashier may submit');
+   33:   if(shift.closingCash===null)throw new ConflictException('Shift has no closing cash count');
+   34:   const accepted=await this.db.posSale.findMany({where:{shiftId:d.shiftId,status:'ACCEPTED'},select:{tenders:{where:{type:'CASH'},select:{amount:true}}}});
+   35:   const cents=(n:Prisma.Decimal)=>Math.round(n.toNumber()*100);
+   36:   const opening=cents(shift.openingCash);
+   37:   const cashSales=accepted.flatMap(s=>s.tenders).reduce((sum,t)=>sum+cents(t.amount),0);
+   38:   const expected=opening+cashSales;
+   39:   const counted=Math.round(d.countedCash*100);
+   40:   const decimal=(c:number)=>new Prisma.Decimal((c/100).toFixed(2));
+   41:   try{
+   42:    return await this.db.cashReconciliation.create({data:{
+   43:     shiftId:shift.id,locationId:shift.locationId,openingCash:decimal(opening),recordedCashSales:decimal(cashSales),
+   44:     expectedCash:decimal(expected),countedCash:decimal(counted),variance:decimal(counted-expected),
+   45:     cashierNote:d.note.trim(),submittedById:u.id
+   46:    }});
+   47:   }catch(e){if(e instanceof Prisma.PrismaClientKnownRequestError&&e.code==='P2002')throw new ConflictException('Reconciliation already submitted for this shift');throw e;}
+   48:  }
+   49:  @Get() @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+   50:  async list(@Query('locationId') locationId:string,@CurrentUser() u:Principal){
+   51:   if(!locationId)throw new BadRequestException('locationId required');
+   52:   assertLocation(u,locationId);
+   53:   return this.db.cashReconciliation.findMany({where:{locationId,...(!this.isManager(u)?{submittedById:u.id}:{})},orderBy:{submittedAt:'desc'},take:100});
+   54:  }
+   55:  @Get(':id') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+   56:  async detail(@Param('id') id:string,@CurrentUser() u:Principal){return this.getAccessible(id,u);}
+   57:  @Patch(':id/review') @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+   58:  async review(@Param('id') id:string,@Body() d:ReviewCashDto,@CurrentUser() u:Principal){
+   59:   if(!this.isManager(u))throw new ForbiddenException('Manager required');
+   60:   const rec=await this.getAccessible(id,u);
+   61:   if(rec.status!=='SUBMITTED')throw new ConflictException('Already reviewed');
+   62:   if(d.status!=='APPROVED'&&d.status!=='DISPUTED')throw new BadRequestException('Review must APPROVE or DISPUTE');
+   63:   if(!d.note.trim())throw new BadRequestException('Review note required');
+   64:   const result=await this.db.cashReconciliation.updateMany({where:{id,status:'SUBMITTED'},data:{status:d.status,reviewedById:u.id,reviewedAt:new Date(),reviewNote:d.note.trim()}});
+   65:   if(result.count!==1)throw new ConflictException('Reconciliation changed; reload');
+   66:   return this.db.cashReconciliation.findUniqueOrThrow({where:{id}});
+   67:  }
+   68: }
+
+===== .\apps\api\src\finance-controls.ts : 120-140 =====
+  120:   });
+  121: }
+  122: 
+  123:  @Get('shift/:shiftId/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+  124:  async summary(@Param('shiftId') shiftId:string,@CurrentUser() u:Principal){
+  125:   const shift=await this.db.posShift.findUniqueOrThrow({where:{id:shiftId}});assertLocation(u,shift.locationId);
+  126:   if(!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER')&&shift.cashierId!==u.id)throw new ForbiddenException('Not your shift');
+  127:   const movements=await this.db.drawerMovement.findMany({where:{shiftId,status:'APPROVED'}});
+  128:   const signed=(t:DrawerMovementType)=>t==='CASH_IN'?1:-1;
+  129:   const adjustment=movements.reduce((n,m)=>n+signed(m.type)*Math.round(m.amount.toNumber()*100),0);
+  130:   const reconciliation=await this.db.cashReconciliation.findUnique({where:{shiftId}});
+  131:   return {shiftId,approvedMovementAdjustment:(adjustment/100).toFixed(2),movementCount:movements.length,
+  132:    ... (reconciliation?{originalExpectedCash:reconciliation.expectedCash.toString(),adjustedExpectedCash:((Math.round(reconciliation.expectedCash.toNumber()*100)+adjustment)/100).toFixed(2),originalCountedCash:reconciliation.countedCash.toString(),note:'Informational adjustment only; original reconciliation is immutable.'}:{note:'No submitted cash reconciliation. Approved movements alone are not a drawer balance.'})};
+  133:  }
+  134: }
+  135: class EntryDto {
+  136:  @IsString() @MaxLength(200) externalId!:string;
+  137:  @IsString() @MaxLength(200) terminalReference!:string;
+  138:  @IsNumber({maxDecimalPlaces:2}) @Min(0) grossAmount!:number;
+  139:  @IsNumber({maxDecimalPlaces:2}) @Min(0) feeAmount!:number;
+  140:  @IsNumber({maxDecimalPlaces:2}) @Min(0) netAmount!:number;
+
+===== .\packages\database\prisma\schema.prisma : 1075-1100 =====
+ 1075: model PosShiftClosingSnapshot {
+ 1076:   id                String   @id @default(uuid()) @db.Uuid
+ 1077:   shiftId           String   @unique @db.Uuid
+ 1078:   locationId        String   @db.Uuid
+ 1079:   deviceId          String   @db.Uuid
+ 1080:   cashierId         String   @db.Uuid
+ 1081: 
+ 1082:   openingCash       Decimal  @db.Decimal(12, 2)
+ 1083:   cashSales         Decimal  @db.Decimal(12, 2)
+ 1084:   cardSales         Decimal  @db.Decimal(12, 2)
+ 1085:   otherSales        Decimal  @db.Decimal(12, 2)
+ 1086:   expectedCash      Decimal  @db.Decimal(12, 2)
+ 1087:   countedCash       Decimal  @db.Decimal(12, 2)
+ 1088:   variance          Decimal  @db.Decimal(12, 2)
+ 1089:   drawerAdjustment  Decimal  @default(0) @db.Decimal(12, 2)
+ 1090:   approvedMovements Int      @default(0)
+ 1091: 
+ 1092:   acceptedSales     Int
+ 1093:   conflictedSales   Int
+ 1094: 
+ 1095:   closedAt          DateTime
+ 1096:   createdAt         DateTime @default(now())
+ 1097: 
+ 1098:   @@index([locationId, closedAt])
+ 1099: }
+ 1100: 
+

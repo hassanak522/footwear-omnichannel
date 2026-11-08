@@ -1,0 +1,1 @@
+﻿NOT RUN: DB integration intentionally excluded from read-only baseline; requires separately verified isolated test DB.

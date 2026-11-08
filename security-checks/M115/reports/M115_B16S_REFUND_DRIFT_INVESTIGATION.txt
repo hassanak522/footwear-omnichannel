@@ -1,0 +1,85 @@
+﻿M115-B16S REFUND SETTLEMENT DRIFT INVESTIGATION
+Mode: READ-ONLY
+
+Replay database identity: PASS
+Current schema checksum: PASS
+
+=== POSTGRESQL FOREIGN KEY ===
+PosRefundSettlement_payoutShiftId_fkey | FOREIGN KEY ("payoutShiftId") REFERENCES "PosShift"(id) ON UPDATE CASCADE ON DELETE RESTRICT | validated=true
+PosRefundSettlement_returnId_fkey | FOREIGN KEY ("returnId") REFERENCES "PosReturn"(id) ON UPDATE CASCADE ON DELETE RESTRICT | validated=true
+
+=== POSTGRESQL INDEX DEFINITIONS ===
+PosRefundSettlement_idempotencyKey_key | CREATE UNIQUE INDEX "PosRefundSettlement_idempotencyKey_key" ON public."PosRefundSettlement" USING btree ("idempotencyKey")
+PosRefundSettlement_payoutShiftId_settledAt_idx | CREATE INDEX "PosRefundSettlement_payoutShiftId_settledAt_idx" ON public."PosRefundSettlement" USING btree ("payoutShiftId", "settledAt")
+PosRefundSettlement_pkey | CREATE UNIQUE INDEX "PosRefundSettlement_pkey" ON public."PosRefundSettlement" USING btree (id)
+PosRefundSettlement_returnId_settledAt_idx | CREATE INDEX "PosRefundSettlement_returnId_settledAt_idx" ON public."PosRefundSettlement" USING btree ("returnId", "settledAt")
+
+=== CURRENT PRISMA MODEL ===
+
+model PosRefundSettlement {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return PosReturn @relation(fields:[returnId],references:[id])
+ payoutShiftId String? @db.Uuid
+ payoutShift PosShift? @relation(fields:[payoutShiftId],references:[id])
+ idempotencyKey String @unique
+ method PosTenderType
+ amount Decimal @db.Decimal(12,2)
+ reference String?
+ settledById String @db.Uuid
+ settledAt DateTime @default(now())
+ @@index([returnId,settledAt])
+}
+
+=== ORIGINAL PRISMA MODEL ===
+
+model PosRefundSettlement {
+ id String @id @default(uuid()) @db.Uuid
+ returnId String @db.Uuid
+ return PosReturn @relation(fields:[returnId],references:[id])
+ payoutShiftId String? @db.Uuid
+ payoutShift PosShift? @relation(fields:[payoutShiftId],references:[id])
+ idempotencyKey String @unique
+ method PosTenderType
+ amount Decimal @db.Decimal(12,2)
+ reference String?
+ settledById String @db.Uuid
+ settledAt DateTime @default(now())
+ @@index([returnId,settledAt])
+}
+
+=== CURRENT POS SHIFT MODEL ===
+
+model PosShift {
+  id          String         @id @default(uuid()) @db.Uuid
+  deviceId    String         @db.Uuid
+  locationId  String         @db.Uuid
+  cashierId   String         @db.Uuid
+  status      PosShiftStatus @default(OPEN)
+  openingCash Decimal        @db.Decimal(12, 2)
+  closingCash Decimal?       @db.Decimal(12, 2)
+  openedAt    DateTime       @default(now())
+  closedAt    DateTime?
+  device      PosDevice      @relation(fields: [deviceId], references: [id])
+  location    Location       @relation(fields: [locationId], references: [id])
+  cashier     User           @relation(fields: [cashierId], references: [id])
+  sales       PosSale[]
+
+  @@index([deviceId, status])
+
+  refundPayouts PosRefundSettlement[]
+}
+
+=== RELEVANT HISTORICAL MIGRATION SQL ===
+
+MIGRATION: 20261023140000_refund_payout_shift
+Line 1: ALTER TABLE "PosRefundSettlement" ADD COLUMN "payoutShiftId" UUID;
+Line 2: ALTER TABLE "PosRefundSettlement" ADD CONSTRAINT "PosRefundSettlement_payoutShiftId_fkey" FOREIGN KEY ("payoutShiftId") REFERENCES "PosShift"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+Line 3: CREATE INDEX "PosRefundSettlement_payoutShiftId_settledAt_idx" ON "PosRefundSettlement"("payoutShiftId","settledAt");
+
+=== SUMMARY ===
+Replay database: VERIFIED
+Current schema: VERIFIED
+Database modifications: NONE
+Prisma modifications: NONE
+Migrations executed: NONE

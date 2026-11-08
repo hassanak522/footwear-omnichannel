@@ -1,0 +1,8 @@
+"Check","Result","Detail"
+"QA DATABASE","PASS","Warehouse available=12; isolated database queried directly"
+"API HEALTH","PASS","HTTP 200 (does NOT prove API database isolation)"
+"AUTH","PASS","Warehouse and branch authenticated"
+"A create","PASS","HTTP 201"
+"A approve","PASS","HTTP 201"
+"A dispatch","PASS","HTTP 201"
+"A HTTP","FAIL","codes=500,201"

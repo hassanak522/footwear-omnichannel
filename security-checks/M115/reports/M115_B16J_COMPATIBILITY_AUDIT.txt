@@ -1,0 +1,34 @@
+﻿M115-B16J CANDIDATE MIGRATION COMPATIBILITY
+Mode: READ-ONLY
+Database: footwear_m115_replay_20261107
+Replay identity: PASS
+Baseline tables: 42
+Finished migrations: 15
+
+=== M112_DRIFT ===
+CREATE TABLE targets: 26
+CREATE INDEX targets: 49
+CREATE TYPE targets: 12
+Table collisions: 0
+Index collisions: 0
+Enum collisions: 0
+
+=== M113_TRANSFER ===
+CREATE TABLE targets: 1
+CREATE INDEX targets: 2
+CREATE TYPE targets: 0
+Table collisions: 0
+Index collisions: 0
+Enum collisions: 0
+
+=== M112_SHIFT ===
+CREATE TABLE targets: 1
+CREATE INDEX targets: 2
+CREATE TYPE targets: 0
+Table collisions: 0
+Index collisions: 0
+Enum collisions: 0
+
+=== FOREIGN KEY TARGET REFERENCES ===
+Referenced FK tables: 5
+Unresolved FK targets: 0

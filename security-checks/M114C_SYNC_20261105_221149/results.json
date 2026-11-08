@@ -1,0 +1,122 @@
+[
+    {
+        "test":  "EXPLICIT_QA_CONFIRMATION",
+        "pass":  true,
+        "detail":  "Operator must have verified QA DATABASE_URL in API launch terminal"
+    },
+    {
+        "test":  "TOKEN_PROVIDED",
+        "pass":  true,
+        "detail":  "Set M114C_QA_TOKEN in this terminal; do not paste token into chat"
+    },
+    {
+        "test":  "EXPECTED_API_PID",
+        "pass":  true,
+        "detail":  "actual=12164 expected=12164"
+    },
+    {
+        "test":  "API_COMMAND",
+        "pass":  true,
+        "detail":  "Node dist/main.js required"
+    },
+    {
+        "test":  "QA_DATABASE",
+        "pass":  true,
+        "detail":  "psql connects to isolated QA DB"
+    },
+    {
+        "test":  "STOCK_ROW_FOUND",
+        "pass":  true,
+        "detail":  "Stock balance must be present"
+    },
+    {
+        "test":  "STOCK_AVAILABLE",
+        "pass":  true,
+        "detail":  "available=35"
+    },
+    {
+        "test":  "API_HEALTH",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "AUTHORIZED_DEVICE_STATUS",
+        "pass":  true,
+        "detail":  "HTTP 200"
+    },
+    {
+        "test":  "DEVICE_LOCATION",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "DEVICE_ACTIVE",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "NO_OPEN_SHIFT",
+        "pass":  true,
+        "detail":  "Stop if shift exists; do not interfere with another QA run"
+    },
+    {
+        "test":  "AUTHORIZED_SESSION",
+        "pass":  true,
+        "detail":  "HTTP 200"
+    },
+    {
+        "test":  "OPEN_QA_SHIFT",
+        "pass":  true,
+        "detail":  "HTTP 201"
+    },
+    {
+        "test":  "SHIFT_ID_RETURNED",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "SYNC_ACCEPTED",
+        "pass":  true,
+        "detail":  "HTTP 201"
+    },
+    {
+        "test":  "DUPLICATE_REPLAY",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "PAYLOAD_MISMATCH_REJECTED",
+        "pass":  true,
+        "detail":  "HTTP 409"
+    },
+    {
+        "test":  "STOCK_CONFLICT_RECORDED",
+        "pass":  true,
+        "detail":  "HTTP 201"
+    },
+    {
+        "test":  "STOCK_CONFLICT_REPLAY",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "DB_ACCEPTED_SINGLE",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "DB_CONFLICT_SINGLE",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "DB_SINGLE_STOCK_MOVEMENT",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "DB_CONFLICT_NO_MOVEMENT",
+        "pass":  true,
+        "detail":  ""
+    }
+]

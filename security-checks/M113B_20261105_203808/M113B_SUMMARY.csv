@@ -1,0 +1,3 @@
+"Check","Status","Detail"
+"ISOLATED PREFLIGHT","PASS","Test DB and API 3002 healthy; warehouse available=18; API process DB must be independently confirmed"
+"WRITES","SKIPPED","Read-only mode"

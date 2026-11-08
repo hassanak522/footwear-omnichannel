@@ -1,0 +1,7 @@
+﻿M115-B15A BACKUP RECOVERY
+Database: footwear_omnichannel
+Archive catalog: PASS
+Backup file: G:\RoyalStep-DB-Backups\royalstep_operational_20261107_142456.dump
+Size bytes: 113271
+SHA256: 37928FD9078E323FEAF0152D19772920306EAF7938DBBE0F0531ABEF51BADB1F
+Restore test: PENDING

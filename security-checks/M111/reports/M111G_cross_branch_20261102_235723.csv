@@ -1,0 +1,5 @@
+"Test","Expected","Actual","Result"
+"A accesses A","200","200","PASS"
+"A accesses B","403","403","PASS"
+"B accesses B","200","200","PASS"
+"B accesses A","403","403","PASS"

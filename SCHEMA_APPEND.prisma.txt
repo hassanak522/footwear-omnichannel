@@ -1,0 +1,32 @@
+// Milestone 42: manually captured valuation cost assumptions; NOT actual COGS posting.
+model InventoryCostBasis {
+ id String @id @default(uuid()) @db.Uuid
+ locationId String @db.Uuid
+ variantId String @db.Uuid
+ unitCost Decimal @db.Decimal(12,2)
+ currency String @default("PKR") @db.VarChar(3)
+ sourceNote String @db.VarChar(500)
+ enteredById String @db.Uuid
+ updatedAt DateTime @updatedAt
+ @@unique([locationId,variantId])
+ @@index([locationId])
+}
+// Milestone 43: supplier invoice records and matching against existing PO.
+enum SupplierInvoiceStatus { DRAFT REVIEWED DISPUTED }
+model SupplierInvoice {
+ id String @id @default(uuid()) @db.Uuid
+ purchaseOrderId String @db.Uuid
+ supplierId String @db.Uuid
+ warehouseId String @db.Uuid
+ invoiceNumber String @db.VarChar(120)
+ invoiceDate DateTime
+ totalAmount Decimal @db.Decimal(14,2)
+ status SupplierInvoiceStatus @default(DRAFT)
+ note String @db.VarChar(1000)
+ createdById String @db.Uuid
+ reviewedById String? @db.Uuid
+ reviewedAt DateTime?
+ createdAt DateTime @default(now())
+ @@unique([supplierId,invoiceNumber])
+ @@index([warehouseId,status])
+}

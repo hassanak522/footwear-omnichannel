@@ -1,0 +1,6 @@
+"Request","HTTPStatus","Body"
+"1","500","{""statusCode"":500,""message"":""Internal server error""}"
+"2","201","{""id"":""0d0033a1-3d48-44e1-8689-8b195f47c776"",""locationId"":""87a6cd9a-ff80-41f4-869c-669b63068fce"",""variantId"":""b36dc564-aebd-48d1-8543-3f80f804a1cd"",""purpose"":""ONLINE_ORDER"",""status"":""ACTIVE"",""quantity"":1,""referenceId"":""M109-B10-15bba72f24d74b179dae73d07cede74f-2"",""expiresAt"":null,""createdAt"":""2026-11-01T10:21:45.268Z"",""updatedAt"":""2026-11-01T10:21:45.268Z""}"
+"3","201","{""id"":""d106c89f-780c-4305-b79c-e6d7371cb3cc"",""locationId"":""87a6cd9a-ff80-41f4-869c-669b63068fce"",""variantId"":""b36dc564-aebd-48d1-8543-3f80f804a1cd"",""purpose"":""ONLINE_ORDER"",""status"":""ACTIVE"",""quantity"":1,""referenceId"":""M109-B10-15bba72f24d74b179dae73d07cede74f-3"",""expiresAt"":null,""createdAt"":""2026-11-01T10:21:40.285Z"",""updatedAt"":""2026-11-01T10:21:40.285Z""}"
+"4","500","{""statusCode"":500,""message"":""Internal server error""}"
+"5","500","{""statusCode"":500,""message"":""Internal server error""}"

@@ -1,0 +1,44 @@
+﻿M115-B13 ORIGINAL MIGRATION RECOVERY SEARCH
+Mode: READ-ONLY
+
+SEARCHING: G:\Comprehensive Royal Step
+
+SEARCHING: G:\footwear-omnichannel-main
+VERIFIED MATCH: 20261023120000_loyalty_entry
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023120000_loyalty_entry\migration.sql
+VERIFIED MATCH: 20261023130000_pos_refund_settlement
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023130000_pos_refund_settlement\migration.sql
+VERIFIED MATCH: 20261023140000_refund_payout_shift
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023140000_refund_payout_shift\migration.sql
+VERIFIED MATCH: 20261023150000_loyalty_adjustments
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023150000_loyalty_adjustments\migration.sql
+VERIFIED MATCH: 20261023160000_pos_exchanges
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023160000_pos_exchanges\migration.sql
+VERIFIED MATCH: 20261023170000_online_returns
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023170000_online_returns\migration.sql
+VERIFIED MATCH: 20261023180000_online_refund_settlements
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261023180000_online_refund_settlements\migration.sql
+VERIFIED MATCH: 20261024120000_loyalty_redemptions
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261024120000_loyalty_redemptions\migration.sql
+VERIFIED MATCH: 20261024130000_refund_balance_guards
+  PATH: G:\footwear-omnichannel-main\packages\database\prisma\migrations\20261024130000_refund_balance_guards\migration.sql
+
+SEARCHING: G:\footwear-security-next15-test
+
+SEARCHING: G:\M112_B8I_BACKUP_20261103_204232
+
+SEARCHING: G:\royal-step-N
+
+SEARCHING: G:\footwear-next15-results
+
+=== FINAL RECOVERY SUMMARY ===
+RECOVERABLE: 20261023120000_loyalty_entry
+RECOVERABLE: 20261023130000_pos_refund_settlement
+RECOVERABLE: 20261023140000_refund_payout_shift
+RECOVERABLE: 20261023150000_loyalty_adjustments
+RECOVERABLE: 20261023160000_pos_exchanges
+RECOVERABLE: 20261023170000_online_returns
+RECOVERABLE: 20261023180000_online_refund_settlements
+RECOVERABLE: 20261024120000_loyalty_redemptions
+RECOVERABLE: 20261024130000_refund_balance_guards
+Verified recovered: 9 / 9

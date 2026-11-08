@@ -1,0 +1,3 @@
+"Check","Result","Detail"
+"QA DATABASE","PASS","Warehouse available=10; isolated database queried directly"
+"API HEALTH","PASS","HTTP 200 (does NOT prove API database isolation)"

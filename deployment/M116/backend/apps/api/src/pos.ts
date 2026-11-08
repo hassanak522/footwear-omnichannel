@@ -1,0 +1,631 @@
+import { createHash } from 'node:crypto';
+import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, NotFoundException, Get, Injectable, Param, Post, UseGuards } from '@nestjs/common';
+import { Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { PosTenderType, Prisma } from '@prisma/client';
+import { Db } from './db';
+import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+
+export async function withPosTransactionRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const maxAttempts = 6;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const retryable =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034';
+
+      if (!retryable) {
+        throw error;
+      }
+
+      if (attempt === maxAttempts) {
+        throw new ConflictException(
+          'POS transaction is busy. Check sale status using the original localSaleId before retrying.',
+        );
+      }
+
+      const delayMs =
+        Math.min(1600, 100 * Math.pow(2, attempt - 1)) +
+        Math.floor(Math.random() * 100);
+
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, delayMs),
+      );
+    }
+  }
+
+  throw new ConflictException('POS transaction could not complete.');
+}
+class RegisterDeviceDto {
+ @IsString() @Matches(/^[A-Z0-9_-]{3,50}$/) code!: string;
+ @IsUUID() locationId!: string;
+}
+class OpenShiftDto {
+ @IsUUID() deviceId!: string;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0) openingCash!: number;
+}
+class CloseShiftDto {
+ @IsNumber({maxDecimalPlaces:2}) @Min(0) closingCash!: number;
+}
+class SaleLineDto {
+ @IsUUID() variantId!: string;
+ @IsInt() @Min(1) quantity!: number;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0) unitPrice!: number;
+}
+class SaleTenderDto {
+ @IsEnum(PosTenderType) type!: PosTenderType;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0) amount!: number;
+ @IsOptional() @IsString() @MaxLength(100) reference?: string;
+}
+class ReturnLineDto {
+ @IsUUID() variantId!: string;
+ @IsInt() @Min(1) quantity!: number;
+ @IsOptional() @IsBoolean() quarantined?: boolean;
+}
+class ReturnDto {
+ @IsUUID() saleId!: string;
+ @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!: string;
+ @IsString() @MinLength(3) @MaxLength(500) reason!: string;
+ @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
+}
+class PreflightDto {
+ @IsUUID() locationId!:string;
+ @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleLineDto) lines!:SaleLineDto[];
+}
+class QuoteCartDto extends PreflightDto {
+ @IsOptional() @IsString() @MaxLength(50) promotionCode?:string;
+}
+class OnlineDiscountSaleDto extends QuoteCartDto {
+ @IsUUID() deviceId!:string;
+ @IsUUID() shiftId!:string;
+ @IsUUID() localSaleId!:string;
+ @IsOptional() @IsUUID() customerId?:string;
+ @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!:SaleTenderDto[];
+}
+class SyncSaleDto {
+ @IsOptional() @IsUUID() customerId?: string;
+ @IsUUID() deviceId!: string;
+ @IsUUID() localSaleId!: string;
+ @IsUUID() shiftId!: string;
+ @IsDateString() soldAt!: string;
+ @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleLineDto) lines!: SaleLineDto[];
+ @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!: SaleTenderDto[];
+}
+const money=(v:number)=>new Prisma.Decimal(v.toFixed(2));
+// Deterministic proportional discount allocation in integer cents.
+// A line's allocated net amount is divided across units cumulatively, ensuring
+// partial returns sum to the exact original net line value without over-refunds.
+function discountedLineNets(lines:{variantId:string;quantity:number;unitPrice:Prisma.Decimal}[],discountCents:number){
+ const ordered=[...lines].sort((a,b)=>a.variantId.localeCompare(b.variantId));
+ const gross=ordered.map(l=>Math.round(l.unitPrice.toNumber()*100)*l.quantity);
+ const subtotal=gross.reduce((n,v)=>n+v,0);
+ if(subtotal<=0||discountCents<0||discountCents>subtotal)throw new ConflictException('Invalid sale discount allocation');
+ const floors=gross.map(g=>Math.floor(g*discountCents/subtotal));
+ let remainder=discountCents-floors.reduce((n,v)=>n+v,0);
+ const ranks=gross.map((g,i)=>({i,frac:(g*discountCents)%subtotal}))
+   .sort((a,b)=>b.frac-a.frac||a.i-b.i);
+ for(let j=0;j<remainder;j++)floors[ranks[j].i]++;
+ return new Map(ordered.map((l,i)=>[l.variantId,gross[i]-floors[i]]));
+}
+const hash=(v:unknown)=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
+// Opt-in policy: set LOYALTY_POINTS_PER_100_PKR to a positive integer only after HQ approval.
+const pointsPer100=()=>{const raw=process.env.LOYALTY_POINTS_PER_100_PKR??'0';return /^\d+$/.test(raw)?Math.min(100,Number(raw)):0;};
+
+
+@Injectable()
+export class PosService {
+ constructor(private db:Db){}
+ private branchAccess(u:Principal,id:string){assertLocation(u,id);}
+ async registerDevice(dto:RegisterDeviceDto,u:Principal){
+  this.branchAccess(u,dto.locationId);
+  const location=await this.db.location.findUnique({where:{id:dto.locationId}});
+  if(!location||location.type!=='BRANCH'||!location.active)throw new BadRequestException('Active branch required');
+  return this.db.posDevice.create({data:{code:dto.code,locationId:dto.locationId}});
+ }
+ async openShift(dto:OpenShiftDto,u:Principal){
+  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+  this.branchAccess(u,device.locationId);
+  if(!device.active)throw new ForbiddenException('Device disabled');
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift:${dto.deviceId}`}))`;
+   const active=await tx.posShift.findFirst({where:{deviceId:dto.deviceId,status:'OPEN'}});
+   if(active)throw new ConflictException('Device already has an open shift');
+   return tx.posShift.create({data:{deviceId:dto.deviceId,locationId:device.locationId,cashierId:u.id,openingCash:money(dto.openingCash)}});
+  });
+ }
+
+async closeShift(id:string,dto:CloseShiftDto,u:Principal){
+ return this.db.$transaction(async tx=>{
+  await tx.$executeRaw`
+   SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${id}`}))
+  `;
+
+  const shift = await tx.posShift.findUnique({
+    where: { id },
+  });
+
+  if (!shift) {
+    throw new NotFoundException('POS shift not found');
+  }
+  this.branchAccess(u,shift.locationId);
+
+  if(
+   shift.cashierId!==u.id &&
+   !u.roles.includes('SUPER_ADMIN') &&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Not shift owner');
+  }
+
+  if(shift.status!=='OPEN'){
+   throw new ConflictException('Shift already closed');
+  }
+
+  const sales=await tx.posSale.findMany({
+   where:{shiftId:id},
+   include:{tenders:true}
+  });
+
+  const movements=await tx.drawerMovement.findMany({
+   where:{shiftId:id,status:'APPROVED'}
+  });
+
+  const accepted=sales.filter(s=>s.status==='ACCEPTED');
+
+  const cents=(value:Prisma.Decimal)=>
+   Math.round(value.toNumber()*100);
+
+  const decimal=(value:number)=>
+   new Prisma.Decimal((value/100).toFixed(2));
+
+  const tenderTotal=(type:PosTenderType)=>
+   accepted
+    .flatMap(s=>s.tenders)
+    .filter(t=>t.type===type)
+    .reduce((sum,t)=>sum+cents(t.amount),0);
+
+  const cash=tenderTotal('CASH');
+  const card=tenderTotal('CARD');
+  const other=tenderTotal('OTHER');
+
+  const drawerAdjustment=movements.reduce(
+   (sum,m)=>sum+
+    (m.type==='CASH_IN'?1:-1)*cents(m.amount),
+   0
+  );
+
+  const opening=cents(shift.openingCash);
+  const counted=cents(money(dto.closingCash));
+  const expected=opening+cash+drawerAdjustment;
+  const variance=counted-expected;
+  const closedAt=new Date();
+
+  const result=await tx.posShift.update({
+   where:{id},
+   data:{
+    status:'CLOSED',
+    closedAt,
+    closingCash:decimal(counted)
+   }
+  });
+
+  await tx.posShiftClosingSnapshot.create({
+   data:{
+    shiftId:id,
+    locationId:shift.locationId,
+    deviceId:shift.deviceId,
+    cashierId:shift.cashierId,
+    openingCash:decimal(opening),
+    cashSales:decimal(cash),
+    cardSales:decimal(card),
+    otherSales:decimal(other),
+    drawerAdjustment:decimal(drawerAdjustment),
+    approvedMovements:movements.length,
+    expectedCash:decimal(expected),
+    countedCash:decimal(counted),
+    variance:decimal(variance),
+    acceptedSales:accepted.length,
+    conflictedSales:sales.length-accepted.length,
+    closedAt
+   }
+  });
+
+  await tx.auditLog.create({
+   data:{
+    actorId:u.id,
+    action:'POS_SHIFT_CLOSED_SNAPSHOT',
+    entityType:'PosShift',
+    entityId:id,
+    after:{
+     expectedCash:decimal(expected).toString(),
+     countedCash:decimal(counted).toString(),
+     variance:decimal(variance).toString(),
+     acceptedSales:accepted.length,
+     approvedMovements:movements.length
+    }
+   }
+  });
+
+  return result;
+ },{
+  isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+  timeout:15000
+ });
+}
+
+ async preflight(dto:PreflightDto,u:Principal){
+  this.branchAccess(u,dto.locationId);
+  if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
+  const ids=dto.lines.map(l=>l.variantId);
+  const [variants,balances]=await Promise.all([
+   this.db.productVariant.findMany({where:{id:{in:ids}},select:{id:true,active:true,price:true}}),
+   this.db.stockBalance.findMany({where:{locationId:dto.locationId,variantId:{in:ids}}})
+  ]);
+  const lines=dto.lines.map(l=>{
+   const v=variants.find(v=>v.id===l.variantId);
+   const b=balances.find(b=>b.variantId===l.variantId);
+   const available=b?b.onHand-b.reservedOnline-b.reservedReplenish-b.quarantined-b.safetyBuffer:0;
+   const catalogCents=v?Math.round(v.price.toNumber()*100):null;
+   const submittedCents=Math.round(l.unitPrice*100);
+   const issues=[...(!v||!v.active?['UNKNOWN_OR_INACTIVE_VARIANT']:[]),
+    ...(catalogCents!==null&&catalogCents!==submittedCents?['PRICE_CHANGED']:[]),
+    ...(available<l.quantity?['INSUFFICIENT_SELLABLE_STOCK']:[])];
+   return {variantId:l.variantId,quantity:l.quantity,submittedUnitPrice:l.unitPrice,
+    catalogUnitPrice:catalogCents===null?null:(catalogCents/100).toFixed(2),available,issues};
+  });
+  return {ok:lines.every(l=>l.issues.length===0),checkedAt:new Date().toISOString(),
+   advisoryOnly:true,validForOfflineAcceptance:false,
+   warning:'Snapshot only. Stock and catalog prices can change before synchronization. No discount authorized.',lines};
+ }
+ async quoteCart(dto:QuoteCartDto,u:Principal){
+  // Server-owned catalog and stock only; client-provided prices are never trusted for the quote.
+  const check=await this.preflight(dto,u);
+  const subtotalCents=check.lines.reduce((sum,l)=>sum+(l.catalogUnitPrice===null?0:Math.round(Number(l.catalogUnitPrice)*100)*l.quantity),0);
+  const result={...check,subtotal:(subtotalCents/100).toFixed(2),discount:'0.00',total:(subtotalCents/100).toFixed(2),
+   promotion:{eligible:false,reason:'No promotion supplied'},
+   checkoutEnabled:false,quoteOnly:true,expiresAt:new Date(Date.now()+60_000).toISOString(),
+   warning:'Advisory quote only. Does not authorize discounted payment, reserve stock, or record coupon redemption.'};
+  const code=dto.promotionCode?.trim().toUpperCase();
+  if(!code)return result;
+  if(!/^[A-Z0-9_-]{3,50}$/.test(code))throw new BadRequestException('Invalid promotion code format');
+  const promo=await this.db.retailPromotion.findUnique({where:{code}});
+  const now=new Date();
+  if(!promo||promo.status!=='ACTIVE'||promo.startsAt>now||promo.endsAt<=now){
+   return {...result,promotion:{eligible:false,reason:'Promotion not active'}};
+  }
+  if(!['PERCENT','FIXED'].includes(promo.type)||promo.value.lte(0)||promo.type==='PERCENT'&&promo.value.gt(100)){
+   return {...result,promotion:{eligible:false,reason:'Promotion configuration invalid'}};
+  }
+  if(!check.ok)return {...result,promotion:{eligible:false,reason:'Resolve catalog price and stock issues before quoting a discount'}};
+  const discountCents=promo.type==='PERCENT'
+   ?Math.min(subtotalCents,Math.round(subtotalCents*promo.value.toNumber()/100))
+   :Math.min(subtotalCents,Math.round(promo.value.toNumber()*100));
+  return {...result,discount:(discountCents/100).toFixed(2),total:((subtotalCents-discountCents)/100).toFixed(2),
+   promotion:{eligible:true,reason:'Preview eligible; not authorized for settlement',code:promo.code,title:promo.title}};
+ }
+ async onlineDiscountSale(dto:OnlineDiscountSaleDto,u:Principal){
+  if(!dto.promotionCode?.trim())throw new BadRequestException('Promotion code required');
+  if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variant lines');
+  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+  this.branchAccess(u,device.locationId);
+  if(!device.active||device.locationId!==dto.locationId)throw new BadRequestException('Invalid device/location');
+  const code=dto.promotionCode.trim().toUpperCase();
+  if(!/^[A-Z0-9_-]{3,50}$/.test(code))throw new BadRequestException('Invalid promotion code');
+  const payloadHash=hash({...dto,promotionCode:code});
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${dto.shiftId}`}))
+     `;
+
+   await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(hashtext(${`pos-sale:${dto.deviceId}:${dto.localSaleId}`}))
+     `;
+   const previous=await tx.posSale.findUnique({where:{deviceId_localSaleId:{deviceId:dto.deviceId,localSaleId:dto.localSaleId}}});
+   if(previous){
+    if(previous.payloadHash!==payloadHash)throw new ConflictException('Sale ID reused with different payload');
+    const redemption=await tx.promotionRedemption.findFirst({where:{saleId:previous.id}});
+    return {id:previous.id,localSaleId:previous.localSaleId,status:previous.status,duplicate:true,total:previous.total.toString(),discount:redemption?.discountAmount.toString()??'0.00'};
+   }
+   const shift=await tx.posShift.findUniqueOrThrow({where:{id:dto.shiftId}});
+   if(shift.deviceId!==device.id||shift.status!=='OPEN'||shift.locationId!==device.locationId)throw new ConflictException('Open shift required');
+   if(shift.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
+   const promo=await tx.retailPromotion.findUnique({where:{code}});
+   const now=new Date();
+   if(!promo||promo.status!=='ACTIVE'||promo.startsAt>now||promo.endsAt<=now||promo.value.lte(0)||!['PERCENT','FIXED'].includes(promo.type)||promo.type==='PERCENT'&&promo.value.gt(100))throw new ConflictException('Promotion no longer valid');
+   const lines=[] as {variantId:string;quantity:number;grossCents:number;priceCents:number;balanceId:string}[];
+   for(const line of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${device.locationId+':'+line.variantId}))`;
+    const variant=await tx.productVariant.findUnique({where:{id:line.variantId}});
+    if(!variant?.active)throw new ConflictException('Variant inactive');
+    const priceCents=Math.round(variant.price.toNumber()*100);
+    if(priceCents!==Math.round(line.unitPrice*100))throw new ConflictException('Price changed. Refresh cart before payment');
+    const balance=await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:device.locationId,variantId:line.variantId}},create:{locationId:device.locationId,variantId:line.variantId},update:{}});
+    if(balance.onHand-balance.reservedOnline-balance.reservedReplenish-balance.quarantined-balance.safetyBuffer<line.quantity)throw new ConflictException('Insufficient branch stock');
+    lines.push({variantId:line.variantId,quantity:line.quantity,grossCents:priceCents*line.quantity,priceCents,balanceId:balance.id});
+   }
+   const subtotal=lines.reduce((n,l)=>n+l.grossCents,0);
+   const discount=promo.type==='PERCENT'?Math.min(subtotal,Math.round(subtotal*promo.value.toNumber()/100)):Math.min(subtotal,Math.round(promo.value.toNumber()*100));
+   if(discount<=0)throw new ConflictException('Promotion gives no discount');
+   const due=subtotal-discount;
+   if(dto.tenders.reduce((n,t)=>n+Math.round(t.amount*100),0)!==due)throw new BadRequestException('Tender amounts must equal discounted total');
+   if(dto.customerId){const c=await tx.retailCustomer.findUnique({where:{id:dto.customerId}});if(!c)throw new BadRequestException('Unknown customer');}
+   // Allocate discount in cents by largest remainder; keep per-unit prices at catalog values.
+   // Discount is stored in PromotionRedemption; return refunds need a later discount-aware allocator.
+   const sale=await tx.posSale.create({data:{deviceId:device.id,localSaleId:dto.localSaleId,payloadHash,locationId:device.locationId,shiftId:shift.id,cashierId:shift.cashierId,status:'ACCEPTED',soldAt:now,total:new Prisma.Decimal(due).div(100),lines:{create:lines.map(l=>({variantId:l.variantId,quantity:l.quantity,unitPrice:new Prisma.Decimal(l.priceCents).div(100)}))},tenders:{create:dto.tenders.map(t=>({type:t.type,amount:money(t.amount),reference:t.reference}))}}});
+   await tx.promotionRedemption.create({data:{promotionId:promo.id,saleId:sale.id,customerId:dto.customerId,discountAmount:new Prisma.Decimal(discount).div(100)}});
+   if(dto.customerId){
+    await tx.saleCustomerLink.create({data:{saleId:sale.id,customerId:dto.customerId,linkedById:u.id}});
+    const rate=pointsPer100();const points=Math.floor(due/10000)*rate;
+    if(points>0)await tx.loyaltyLedgerEntry.create({data:{customerId:dto.customerId,saleId:sale.id,points,reason:'SALE_EARN'}});
+   }
+   for(const l of lines){
+    await tx.stockBalance.update({where:{id:l.balanceId},data:{onHand:{decrement:l.quantity},version:{increment:1}}});
+    await tx.stockMovement.create({data:{locationId:device.locationId,variantId:l.variantId,type:'SALE',quantityDelta:-l.quantity,referenceType:'POS_SALE',referenceId:sale.id,idempotencyKey:`pos:${sale.id}:${l.variantId}`,actorId:shift.cashierId}});
+   }
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_DISCOUNTED_SALE',entityType:'PosSale',entityId:sale.id,after:{promotionCode:code,subtotal:(subtotal/100).toFixed(2),discount:(discount/100).toFixed(2),total:(due/100).toFixed(2)}}});
+   return {id:sale.id,localSaleId:sale.localSaleId,status:'ACCEPTED',duplicate:false,subtotal:(subtotal/100).toFixed(2),discount:(discount/100).toFixed(2),total:(due/100).toFixed(2),promotionCode:code};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async syncSale(dto:SyncSaleDto,u:Principal){
+  if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variant lines: aggregate quantities before sync');
+  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
+  this.branchAccess(u,device.locationId);
+  if(!device.active)throw new ForbiddenException('Device disabled');
+  const payloadHash=hash(dto);
+  const expectedTotal=dto.lines.reduce((sum,l)=>sum+Math.round(l.unitPrice*100)*l.quantity,0);
+  const paidTotal=dto.tenders.reduce((sum,t)=>sum+Math.round(t.amount*100),0);
+  if(expectedTotal!==paidTotal)throw new BadRequestException('Tender amounts must equal sale total');
+  if(new Date(dto.soldAt).getTime()>Date.now()+5*60_000)throw new BadRequestException('Sale timestamp is in the future');
+  return withPosTransactionRetry(() => this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${dto.shiftId}`}))`;
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-sale:${dto.deviceId}:${dto.localSaleId}`}))`;
+   const existing=await tx.posSale.findUnique({
+    where:{
+      deviceId_localSaleId:{
+        deviceId:dto.deviceId,
+        localSaleId:dto.localSaleId
+      }
+    }
+  });
+   if(existing){
+    if(existing.payloadHash!==payloadHash)throw new ConflictException('Local sale ID reused with different payload');
+    return {id:existing.id,localSaleId:existing.localSaleId,status:existing.status,conflictReason:existing.conflictReason,duplicate:true};
+   }
+   // Existing local sales may sync after shift close. The shift must still belong to this device.
+   const shift=await tx.posShift.findUniqueOrThrow({where:{id:dto.shiftId}});
+   if(shift.deviceId!==dto.deviceId||shift.locationId!==device.locationId)throw new BadRequestException('Shift does not belong to this device');
+   if(shift.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
+   if(new Date(dto.soldAt)<shift.openedAt || (shift.closedAt && new Date(dto.soldAt)>shift.closedAt))throw new BadRequestException('Sale time outside shift');
+   let conflictReason:string|undefined;
+   const balances:{variantId:string;id:string;onHand:number;reservedOnline:number;reservedReplenish:number;quarantined:number;safetyBuffer:number}[]=[];
+   for(const line of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${device.locationId+':'+line.variantId}))`;
+    const variant=await tx.productVariant.findUnique({where:{id:line.variantId}});
+    if(!variant||!variant.active)throw new BadRequestException(`Unknown or inactive variant ${line.variantId}`);
+    // Opt-in server-authoritative price validation. No coupon/loyalty discount is accepted.
+    // An offline catalog with stale prices must be refreshed or reviewed; never silently reprice a paid sale.
+    if(process.env.POS_STRICT_CATALOG_PRICING==='true' && Math.round(variant.price.toNumber()*100)!==Math.round(line.unitPrice*100)){
+     throw new ConflictException(`Price mismatch for variant ${line.variantId}. Sale not accepted; reconcile payment and refresh catalog before retry.`);
+    }
+    const balance=await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:device.locationId,variantId:line.variantId}},create:{locationId:device.locationId,variantId:line.variantId},update:{}});
+    balances.push({...balance});
+    if(balance.onHand-balance.reservedOnline-balance.reservedReplenish-balance.quarantined-balance.safetyBuffer<line.quantity){
+     conflictReason=`Insufficient sellable branch stock for variant ${line.variantId}`;
+     break;
+    }
+   }
+   const sale=await tx.posSale.create({data:{deviceId:dto.deviceId,localSaleId:dto.localSaleId,payloadHash,locationId:device.locationId,shiftId:dto.shiftId,cashierId:shift.cashierId,status:conflictReason?'STOCK_CONFLICT':'ACCEPTED',conflictReason,soldAt:new Date(dto.soldAt),total:new Prisma.Decimal(expectedTotal).div(100),lines:{create:dto.lines.map(l=>({variantId:l.variantId,quantity:l.quantity,unitPrice:money(l.unitPrice)}))},tenders:{create:dto.tenders.map(t=>({type:t.type,amount:money(t.amount),reference:t.reference}))}}});
+   if(!conflictReason && dto.customerId){
+    const customer=await tx.retailCustomer.findUnique({where:{id:dto.customerId},select:{id:true}});
+    if(!customer)throw new BadRequestException('Selected customer no longer exists');
+    await tx.saleCustomerLink.create({data:{saleId:sale.id,customerId:dto.customerId,linkedById:u.id}});
+    const rate=pointsPer100();
+    if(rate>0){
+     const points=Math.floor(expectedTotal/10000)*rate;
+     if(points>0)await tx.loyaltyLedgerEntry.create({data:{customerId:dto.customerId,saleId:sale.id,points,reason:'SALE_EARN'}});
+    }
+   }
+   if(!conflictReason){
+    for(const line of dto.lines){
+     const balance=balances.find(b=>b.variantId===line.variantId)!;
+     await tx.stockBalance.update({where:{id:balance.id},data:{onHand:{decrement:line.quantity},version:{increment:1}}});
+     await tx.stockMovement.create({data:{locationId:device.locationId,variantId:line.variantId,type:'SALE',quantityDelta:-line.quantity,referenceType:'POS_SALE',referenceId:sale.id,idempotencyKey:`pos:${sale.id}:${line.variantId}`,actorId:shift.cashierId}});
+    }
+   }
+   await tx.auditLog.create({data:{actorId:u.id,action:conflictReason?'POS_STOCK_CONFLICT':'POS_SALE_SYNC',entityType:'PosSale',entityId:sale.id,after:{status:sale.status,deviceId:dto.deviceId,localSaleId:dto.localSaleId}}});
+   return {id:sale.id,localSaleId:sale.localSaleId,status:sale.status,conflictReason:sale.conflictReason,duplicate:false};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000}));
+ }
+ async returnSale(dto:ReturnDto,u:Principal){
+  if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate return variants');
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${dto.saleId}`}))`;
+   const existing = await tx.posReturn.findUnique({
+    where: { idempotencyKey: dto.idempotencyKey },
+    include: { lines: true }
+   });
+
+   if (existing) {
+    this.branchAccess(u, existing.locationId);
+
+    if (existing.saleId !== dto.saleId) {
+     throw new ConflictException('Return key already used');
+    }
+
+    const requestedLines = [...dto.lines]
+      .map(line => ({
+       variantId: line.variantId,
+       quantity: line.quantity,
+       quarantined: line.quarantined === true
+      }))
+      .sort((a, b) => a.variantId.localeCompare(b.variantId));
+
+     const storedLines = existing.lines
+      .map(line => ({
+       variantId: line.variantId,
+       quantity: line.quantity,
+       quarantined: line.quarantined
+      }))
+      .sort((a, b) => a.variantId.localeCompare(b.variantId));
+
+     const sameLines =
+      requestedLines.length === storedLines.length &&
+      requestedLines.every((line, index) =>
+       line.variantId === storedLines[index].variantId &&
+       line.quantity === storedLines[index].quantity &&
+       line.quarantined === storedLines[index].quarantined
+      );
+
+     if (existing.reason !== dto.reason || !sameLines) {
+      throw new ConflictException(
+       'Idempotency key already used with a different return payload'
+      );
+     }
+
+     return existing;
+   }
+
+   const sale = await tx.posSale.findUnique({
+    where: { id: dto.saleId },
+    include: {
+     lines: true,
+     returns: { include: { lines: true } }
+    }
+   });
+
+   if (!sale || sale.status !== 'ACCEPTED') {
+    throw new BadRequestException('Accepted original sale required');
+   }
+
+   this.branchAccess(u, sale.locationId);
+   const redemption=await tx.promotionRedemption.findFirst({where:{saleId:sale.id}});
+   const discountCents=redemption?Math.round(redemption.discountAmount.toNumber()*100):0;
+   const lineNet=discountedLineNets(sale.lines,discountCents);
+   const records=[];
+   for(const line of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+    const sold=sale.lines.find(l=>l.variantId===line.variantId);
+    if(!sold)throw new BadRequestException('Variant not in original sale');
+    const previouslyReturned=sale.returns.flatMap(r=>r.lines).filter(l=>l.variantId===line.variantId).reduce((n,l)=>n+l.quantity,0);
+    if(line.quantity>sold.quantity-previouslyReturned)throw new ConflictException('Return exceeds unreturned quantity');
+    const net=lineNet.get(line.variantId);
+    if(net===undefined)throw new ConflictException('Missing line discount allocation');
+    const cumulative=(qty:number)=>Math.floor(net*qty/sold.quantity);
+    const refundCents=cumulative(previouslyReturned+line.quantity)-cumulative(previouslyReturned);
+    records.push({variantId:line.variantId,quantity:line.quantity,quarantined:line.quarantined===true,refundAmount:new Prisma.Decimal(refundCents).div(100)});
+   }
+   const ret=await tx.posReturn.create({data:{saleId:sale.id,locationId:sale.locationId,idempotencyKey:dto.idempotencyKey,reason:dto.reason,approvedById:u.id,lines:{create:records}},include:{lines:true}});
+   for(const line of records){
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sale.locationId+':'+line.variantId}))`;
+    await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:sale.locationId,variantId:line.variantId}},create:{locationId:sale.locationId,variantId:line.variantId,onHand:line.quantity,quarantined:line.quarantined?line.quantity:0},update:{onHand:{increment:line.quantity},...(line.quarantined?{quarantined:{increment:line.quantity}}:{}),version:{increment:1}}});
+    await tx.stockMovement.create({data:{locationId:sale.locationId,variantId:line.variantId,type:'SALE_RETURN',quantityDelta:line.quantity,referenceType:'POS_RETURN',referenceId:ret.id,idempotencyKey:`pos-return:${ret.id}:${line.variantId}`,actorId:u.id}});
+   }
+   // Revoke previously earned points proportionally. Cumulative rounding ensures a full
+   // return reverses the entire original award, even across multiple partial returns.
+   const linked=await tx.saleCustomerLink.findUnique({where:{saleId:sale.id}});
+   if(linked){
+    const earned=await tx.loyaltyLedgerEntry.findFirst({where:{saleId:sale.id,reason:'SALE_EARN'}});
+    if(earned && earned.points>0){
+     const returnedBefore=sale.returns.flatMap(r=>r.lines).reduce((n,l)=>n+l.refundAmount.toNumber(),0);
+     const returnedNow=records.reduce((n,l)=>n+l.refundAmount.toNumber(),0);
+     const total=sale.total.toNumber();
+     if(total>0){
+      const before=Math.min(earned.points,Math.floor(earned.points*returnedBefore/total));
+      const after=Math.min(earned.points,Math.floor(earned.points*(returnedBefore+returnedNow)/total));
+      const reverse=after-before;
+      if(reverse>0)await tx.loyaltyLedgerEntry.create({data:{customerId:linked.customerId,returnId:ret.id,points:-reverse,reason:'RETURN_REVERSAL'}});
+     }
+    }
+   }
+   await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entityType:'PosReturn',entityId:ret.id,after:{saleId:sale.id,reason:dto.reason,lines:records.map(x=>({variantId:x.variantId,quantity:x.quantity,quarantined:x.quarantined,refundAmount:x.refundAmount.toString()}))}}});
+   return ret;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
+ }
+ async discountedSaleStatus(deviceId:string,localSaleId:string,u:Principal){
+  if(!/^[0-9a-fA-F-]{36}$/.test(deviceId)||!/^[0-9a-fA-F-]{36}$/.test(localSaleId))throw new BadRequestException('Valid UUIDs required');
+  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId}});
+  this.branchAccess(u,device.locationId);
+  const sale=await this.db.posSale.findUnique({where:{deviceId_localSaleId:{deviceId,localSaleId}}});
+  if(!sale)return {found:false,deviceId,localSaleId,action:'Check connectivity and retry identical checkout payload with same localSaleId; do not charge again.'};
+  const redemption = await this.db.promotionRedemption.findFirst({
+    where: { saleId: sale.id }
+  });
+
+  const promotion = redemption
+    ? await this.db.retailPromotion.findUnique({
+      where: { id: redemption.promotionId },
+      select: { code: true }
+     })
+    : null;
+  return {found:true,id:sale.id,localSaleId:sale.localSaleId,status:sale.status,total:sale.total.toString(),
+   promotionCode: promotion?.code ?? null,discount:redemption?.discountAmount.toString()??'0.00',
+   action:'Do not resubmit payment. Retrieve receipt using accepted sale details.'};
+ }
+  async shiftSummary(id:string,u:Principal){
+    const shift=await this.db.posShift.findUniqueOrThrow({where:{id}});
+    this.branchAccess(u,shift.locationId);
+    if(shift.status==='CLOSED'){
+      const snapshot=await this.db.posShiftClosingSnapshot.findUnique({where:{shiftId:id}});
+      if(!snapshot)throw new ConflictException('Closed legacy shift has no verified closing snapshot; manual review required');
+      const lateSales=await this.db.posSale.findMany({
+        where:{shiftId:id,status:'ACCEPTED',syncedAt:{gt:snapshot.closedAt}},
+        select:{id:true,syncedAt:true,tenders:{select:{type:true,amount:true}}}
+      });
+      const lateTender=(type:PosTenderType)=>lateSales.flatMap(s=>s.tenders)
+        .filter(t=>t.type===type).reduce((sum,t)=>sum+Math.round(t.amount.toNumber()*100),0);
+      return {
+        shiftId:id,status:shift.status,snapshotVerified:true,closedAt:snapshot.closedAt,
+        openingCash:snapshot.openingCash,closingCash:snapshot.countedCash,
+        acceptedSales:snapshot.acceptedSales,conflictedSales:snapshot.conflictedSales,
+        cashSales:snapshot.cashSales,cardSales:snapshot.cardSales,otherSales:snapshot.otherSales,
+        drawerAdjustment:snapshot.drawerAdjustment,approvedMovements:snapshot.approvedMovements,
+        expectedCash:snapshot.expectedCash,variance:snapshot.variance,
+        lateSync:{acceptedSales:lateSales.length,cashSales:(lateTender('CASH')/100).toFixed(2),
+          cardSales:(lateTender('CARD')/100).toFixed(2),otherSales:(lateTender('OTHER')/100).toFixed(2),
+          note:'Late-sync sales are excluded from immutable closing totals.'}
+      };
+    }
+    const sales=await this.db.posSale.findMany({where:{shiftId:id},include:{tenders:true}});
+    const accepted=sales.filter(s=>s.status==='ACCEPTED');
+    const total=(type:PosTenderType)=>accepted.flatMap(s=>s.tenders)
+      .filter(t=>t.type===type).reduce((sum,t)=>sum+Math.round(t.amount.toNumber()*100),0);
+    const movements=await this.db.drawerMovement.findMany({where:{shiftId:id,status:'APPROVED'}});
+    const adjustment=movements.reduce((sum,m)=>sum+(m.type==='CASH_IN'?1:-1)*Math.round(m.amount.toNumber()*100),0);
+    const expected=Math.round(shift.openingCash.toNumber()*100)+total('CASH')+adjustment;
+    return {shiftId:id,status:shift.status,snapshotVerified:false,openingCash:shift.openingCash,
+      closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:sales.length-accepted.length,
+      cashSales:(total('CASH')/100).toFixed(2),cardSales:(total('CARD')/100).toFixed(2),
+      otherSales:(total('OTHER')/100).toFixed(2),drawerAdjustment:(adjustment/100).toFixed(2),
+      expectedCash:(expected/100).toFixed(2),variance:null};
+  }
+ async deviceStatus(deviceId:string,u:Principal){
+  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId},include:{location:{select:{name:true,code:true,active:true}}}});
+  this.branchAccess(u,device.locationId);
+  const shift=await this.db.posShift.findFirst({where:{deviceId,status:'OPEN'},orderBy:{openedAt:'desc'},select:{id:true,openedAt:true,cashierId:true,openingCash:true}});
+  return {id:device.id,code:device.code,active:device.active,locationId:device.locationId,location:device.location,openShift:shift};
+ }
+ async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
+}
+@Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
+export class PosController {
+ constructor(private pos:PosService){}
+ @Get('devices/:id/status') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') deviceStatus(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.deviceStatus(id,u);}
+ @Post('devices') @Roles('SUPER_ADMIN','BRANCH_MANAGER') register(@Body() dto:RegisterDeviceDto,@CurrentUser() u:Principal){return this.pos.registerDevice(dto,u);}
+ @Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
+ @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
+ @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
+ @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+ @Post('checkout/online-discounted-sale') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') discounted(@Body() dto:OnlineDiscountSaleDto,@CurrentUser() u:Principal){return this.pos.onlineDiscountSale(dto,u);}
+ @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ discountedStatus(@Param('deviceId') deviceId:string,@Param('localSaleId') localSaleId:string,@CurrentUser() u:Principal){
+  return this.pos.discountedSaleStatus(deviceId,localSaleId,u);
+ }
+ @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
+ @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
+ @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
+ @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
+}

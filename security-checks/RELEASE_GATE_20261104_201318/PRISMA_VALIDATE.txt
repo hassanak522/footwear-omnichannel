@@ -1,0 +1,15 @@
+﻿node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run prisma validate
+warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please 
+migrate to a Prisma config file (e.g., `prisma.config.ts`).
+For more information, see: https://pris.ly/prisma-config
+
+Environment variables loaded from .env
+Prisma schema loaded from prisma\schema.prisma
+The schema at prisma\schema.prisma is valid ≡ƒÜÇ

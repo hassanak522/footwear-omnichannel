@@ -1,0 +1,20 @@
+﻿node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run jest --config jest.m112-b6.config.cjs --runInBand
+PASS src/pos-retry.m112-b6.spec.ts (18.874 s)
+  M112-B8I-05M-B6 POS transaction retry
+    ΓêÜ retries transient P2034 and succeeds (8 ms)
+    ΓêÜ returns HTTP 409 after six P2034 failures (4 ms)
+    ΓêÜ does not retry non-P2034 errors (1 ms)
+    ΓêÜ does not retry other Prisma errors (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        22.476 s, estimated 85 s
+Ran all test suites.

@@ -1,0 +1,3216 @@
+{
+  "add": [],
+  "added": 0,
+  "audited": 804,
+  "change": [
+    {
+      "from": {
+        "name": "@nestjs/common",
+        "version": "10.4.22",
+        "path": "G:\\footwear-omnichannel\\node_modules\\@nestjs\\common"
+      },
+      "to": {
+        "name": "@nestjs/common",
+        "version": "10.4.15",
+        "path": "G:\\footwear-omnichannel\\node_modules\\@nestjs\\common"
+      }
+    },
+    {
+      "from": {
+        "name": "vite",
+        "version": "6.4.4",
+        "path": "G:\\footwear-omnichannel\\node_modules\\vite"
+      },
+      "to": {
+        "name": "vite",
+        "version": "6.4.5",
+        "path": "G:\\footwear-omnichannel\\node_modules\\vite"
+      }
+    },
+    {
+      "from": {
+        "name": "qs",
+        "version": "6.14.2",
+        "path": "G:\\footwear-omnichannel\\node_modules\\qs"
+      },
+      "to": {
+        "name": "qs",
+        "version": "6.14.3",
+        "path": "G:\\footwear-omnichannel\\node_modules\\qs"
+      }
+    },
+    {
+      "from": {
+        "name": "joi",
+        "version": "18.3.0",
+        "path": "G:\\footwear-omnichannel\\node_modules\\joi"
+      },
+      "to": {
+        "name": "joi",
+        "version": "18.3.2",
+        "path": "G:\\footwear-omnichannel\\node_modules\\joi"
+      }
+    },
+    {
+      "from": {
+        "name": "follow-redirects",
+        "version": "1.16.1",
+        "path": "G:\\footwear-omnichannel\\node_modules\\follow-redirects"
+      },
+      "to": {
+        "name": "follow-redirects",
+        "version": "1.16.2",
+        "path": "G:\\footwear-omnichannel\\node_modules\\follow-redirects"
+      }
+    },
+    {
+      "from": {
+        "name": "fast-uri",
+        "version": "3.1.8",
+        "path": "G:\\footwear-omnichannel\\node_modules\\fast-uri"
+      },
+      "to": {
+        "name": "fast-uri",
+        "version": "3.1.9",
+        "path": "G:\\footwear-omnichannel\\node_modules\\fast-uri"
+      }
+    }
+  ],
+  "changed": 6,
+  "funding": 122,
+  "remove": [
+    {
+      "name": "@tokenizer/token",
+      "version": "0.3.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@tokenizer\\token"
+    },
+    {
+      "name": "@tokenizer/inflate",
+      "version": "0.2.7",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@tokenizer\\inflate"
+    },
+    {
+      "name": "ms",
+      "version": "2.1.3",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@tokenizer\\inflate\\node_modules\\ms"
+    },
+    {
+      "name": "debug",
+      "version": "4.4.3",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@tokenizer\\inflate\\node_modules\\debug"
+    },
+    {
+      "name": "@borewit/text-codec",
+      "version": "0.2.2",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@borewit\\text-codec"
+    },
+    {
+      "name": "uint8array-extras",
+      "version": "1.6.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\uint8array-extras"
+    },
+    {
+      "name": "token-types",
+      "version": "6.1.2",
+      "path": "G:\\footwear-omnichannel\\node_modules\\token-types"
+    },
+    {
+      "name": "strtok3",
+      "version": "10.5.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\strtok3"
+    },
+    {
+      "name": "file-type",
+      "version": "20.4.1",
+      "path": "G:\\footwear-omnichannel\\node_modules\\file-type"
+    },
+    {
+      "name": "fflate",
+      "version": "0.8.3",
+      "path": "G:\\footwear-omnichannel\\node_modules\\fflate"
+    }
+  ],
+  "removed": 10,
+  "audit": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {
+      "@angular-devkit/core": {
+        "name": "@angular-devkit/core",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "ajv",
+          "picomatch"
+        ],
+        "effects": [
+          "@angular-devkit/schematics",
+          "@angular-devkit/schematics-cli",
+          "@nestjs/cli",
+          "@nestjs/schematics"
+        ],
+        "range": "12.0.0-next.0 - 19.2.22 || 20.0.0-next.0 - 20.3.21 || 21.0.0-next.0 - 21.2.4 || 22.0.0-next.0 - 22.0.0-rc.3",
+        "nodes": [
+          "node_modules/@angular-devkit/schematics-cli/node_modules/@angular-devkit/core",
+          "node_modules/@angular-devkit/schematics/node_modules/@angular-devkit/core",
+          "node_modules/@nestjs/cli/node_modules/@angular-devkit/core",
+          "node_modules/@nestjs/schematics/node_modules/@angular-devkit/core"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "@angular-devkit/schematics": {
+        "name": "@angular-devkit/schematics",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@angular-devkit/core"
+        ],
+        "effects": [
+          "@angular-devkit/schematics-cli",
+          "@nestjs/cli",
+          "@nestjs/schematics"
+        ],
+        "range": "12.0.0-next.0 - 19.2.21 || 20.0.0-next.0 - 20.3.17 || 21.0.0-next.0 - 21.1.4 || 21.2.0-next.0 - 21.2.0-rc.2",
+        "nodes": [
+          "node_modules/@angular-devkit/schematics"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "@angular-devkit/schematics-cli": {
+        "name": "@angular-devkit/schematics-cli",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@angular-devkit/core",
+          "@angular-devkit/schematics",
+          "inquirer"
+        ],
+        "effects": [
+          "@nestjs/cli"
+        ],
+        "range": "0.12.0-beta.0 - 19.2.21 || 20.0.0-next.0 - 20.3.17 || 21.0.0-next.0 - 21.1.4 || 21.2.0-next.0 - 21.2.0-rc.2",
+        "nodes": [
+          "node_modules/@angular-devkit/schematics-cli"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "@jest/core": {
+        "name": "@jest/core",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/reporters",
+          "@jest/transform",
+          "jest-config",
+          "jest-resolve-dependencies",
+          "jest-runner",
+          "jest-runtime",
+          "jest-snapshot"
+        ],
+        "effects": [
+          "jest",
+          "jest-cli"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@jest/core"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@jest/expect": {
+        "name": "@jest/expect",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "jest-snapshot"
+        ],
+        "effects": [
+          "@jest/globals",
+          "jest-circus"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@jest/expect"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@jest/globals": {
+        "name": "@jest/globals",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/expect"
+        ],
+        "effects": [
+          "jest-runtime"
+        ],
+        "range": ">=28.0.0-alpha.0",
+        "nodes": [
+          "node_modules/@jest/globals"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@jest/reporters": {
+        "name": "@jest/reporters",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/transform",
+          "glob"
+        ],
+        "effects": [
+          "@jest/core"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@jest/reporters"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@jest/transform": {
+        "name": "@jest/transform",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "babel-plugin-istanbul"
+        ],
+        "effects": [
+          "@jest/core",
+          "@jest/reporters",
+          "babel-jest",
+          "jest-runner",
+          "jest-runtime",
+          "jest-snapshot",
+          "ts-jest"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/@jest/transform"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@nestjs/cli": {
+        "name": "@nestjs/cli",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "@angular-devkit/core",
+          "@angular-devkit/schematics",
+          "@angular-devkit/schematics-cli",
+          "@nestjs/schematics",
+          "fork-ts-checker-webpack-plugin",
+          "glob",
+          "inquirer",
+          "webpack"
+        ],
+        "effects": [],
+        "range": ">=2.0.0-rc.1",
+        "nodes": [
+          "node_modules/@nestjs/cli"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "@nestjs/common": {
+        "name": "@nestjs/common",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "file-type"
+        ],
+        "effects": [],
+        "range": "10.4.16 - 10.4.22 || 11.0.16 - 11.1.16 || 12.0.0-alpha.0 - 12.0.0-alpha.7",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "@nestjs/config": {
+        "name": "@nestjs/config",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "lodash"
+        ],
+        "effects": [],
+        "range": "1.1.6 - 4.0.3",
+        "nodes": [
+          "node_modules/@nestjs/config"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/config",
+          "version": "12.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "@nestjs/core": {
+        "name": "@nestjs/core",
+        "severity": "moderate",
+        "isDirect": true,
+        "via": [
+          "@nestjs/platform-express",
+          {
+            "source": 1117063,
+            "name": "@nestjs/core",
+            "dependency": "@nestjs/core",
+            "title": "@nestjs/core Improperly Neutralizes Special Elements in Output Used by a Downstream Component ('Injection')",
+            "url": "https://github.com/advisories/GHSA-36xv-jgw5-4q75",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-74"
+            ],
+            "cvss": {
+              "score": 6.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:N/A:L"
+            },
+            "range": "<=11.1.17"
+          }
+        ],
+        "effects": [
+          "@nestjs/platform-express"
+        ],
+        "range": "<=11.1.17",
+        "nodes": [
+          "node_modules/@nestjs/core"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/core",
+          "version": "12.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "@nestjs/platform-express": {
+        "name": "@nestjs/platform-express",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "@nestjs/core",
+          "body-parser",
+          "multer"
+        ],
+        "effects": [
+          "@nestjs/core"
+        ],
+        "range": "<=11.1.14 || 12.0.0-alpha.0 - 12.0.0-alpha.7",
+        "nodes": [
+          "node_modules/@nestjs/platform-express"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "@nestjs/schematics": {
+        "name": "@nestjs/schematics",
+        "severity": "moderate",
+        "isDirect": true,
+        "via": [
+          "@angular-devkit/core",
+          "@angular-devkit/schematics"
+        ],
+        "effects": [
+          "@nestjs/cli"
+        ],
+        "range": "8.0.0 - 11.0.9",
+        "nodes": [
+          "node_modules/@nestjs/schematics"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/schematics",
+          "version": "12.0.12",
+          "isSemVerMajor": true
+        }
+      },
+      "@prisma/config": {
+        "name": "@prisma/config",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          "deepmerge-ts",
+          "effect"
+        ],
+        "effects": [
+          "prisma"
+        ],
+        "range": "6.13.0-dev.1 - 7.10.0 || 8.1.0-dev.1 - 8.1.0-dev.4",
+        "nodes": [
+          "node_modules/@prisma/config"
+        ],
+        "fixAvailable": {
+          "name": "prisma",
+          "version": "7.10.1",
+          "isSemVerMajor": true
+        }
+      },
+      "ajv": {
+        "name": "ajv",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1113715,
+            "name": "ajv",
+            "dependency": "ajv",
+            "title": "ajv has ReDoS when using `$data` option",
+            "url": "https://github.com/advisories/GHSA-2g4f-4pwh-qvx6",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400",
+              "CWE-1333"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=7.0.0-alpha.0 <8.18.0"
+          }
+        ],
+        "effects": [
+          "@angular-devkit/core"
+        ],
+        "range": "7.0.0-alpha.0 - 8.17.1",
+        "nodes": [
+          "node_modules/@angular-devkit/schematics-cli/node_modules/ajv",
+          "node_modules/@angular-devkit/schematics/node_modules/ajv",
+          "node_modules/@nestjs/cli/node_modules/ajv",
+          "node_modules/@nestjs/schematics/node_modules/ajv"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "babel-jest": {
+        "name": "babel-jest",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/transform",
+          "babel-plugin-istanbul"
+        ],
+        "effects": [
+          "jest-config",
+          "ts-jest"
+        ],
+        "range": ">=24.0.0-alpha.0",
+        "nodes": [
+          "node_modules/babel-jest"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "babel-plugin-istanbul": {
+        "name": "babel-plugin-istanbul",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "test-exclude"
+        ],
+        "effects": [
+          "@jest/transform",
+          "babel-jest"
+        ],
+        "range": ">=5.0.1",
+        "nodes": [
+          "node_modules/babel-plugin-istanbul"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "body-parser": {
+        "name": "body-parser",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1123977,
+            "name": "body-parser",
+            "dependency": "body-parser",
+            "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+            "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6",
+            "severity": "low",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": "<1.20.6"
+          },
+          {
+            "source": 1243073,
+            "name": "body-parser",
+            "dependency": "body-parser",
+            "title": "body-parser vulnerable to Denial of Service via trailing bytes after a compressed request body",
+            "url": "https://github.com/advisories/GHSA-27r3-jxmh-p828",
+            "severity": "high",
+            "cwe": [
+              "CWE-248"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<1.20.9"
+          }
+        ],
+        "effects": [
+          "@nestjs/platform-express"
+        ],
+        "range": "<=1.20.8",
+        "nodes": [
+          "node_modules/body-parser"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "create-jest": {
+        "name": "create-jest",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          "jest-config"
+        ],
+        "effects": [
+          "jest-cli"
+        ],
+        "range": ">=29.7.0",
+        "nodes": [
+          "node_modules/create-jest"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "deepmerge": {
+        "name": "deepmerge",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1243505,
+            "name": "deepmerge",
+            "dependency": "deepmerge",
+            "title": "deepmerge mergeObject() allows prototype poisoning of returned objects",
+            "url": "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+            "severity": "low",
+            "cwe": [
+              "CWE-1321"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": ">=4.2.0 <=4.3.1"
+          }
+        ],
+        "effects": [
+          "fork-ts-checker-webpack-plugin",
+          "jest-config"
+        ],
+        "range": ">=4.2.0",
+        "nodes": [
+          "node_modules/deepmerge"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "deepmerge-ts": {
+        "name": "deepmerge-ts",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1145093,
+            "name": "deepmerge-ts",
+            "dependency": "deepmerge-ts",
+            "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+            "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx",
+            "severity": "high",
+            "cwe": [
+              "CWE-674"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<8.0.0"
+          }
+        ],
+        "effects": [
+          "@prisma/config"
+        ],
+        "range": "<8.0.0",
+        "nodes": [
+          "node_modules/deepmerge-ts"
+        ],
+        "fixAvailable": {
+          "name": "prisma",
+          "version": "7.10.1",
+          "isSemVerMajor": true
+        }
+      },
+      "effect": {
+        "name": "effect",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1115356,
+            "name": "effect",
+            "dependency": "effect",
+            "title": "Effect `AsyncLocalStorage` context lost/contaminated inside Effect fibers under concurrent load with RPC",
+            "url": "https://github.com/advisories/GHSA-38f7-945m-qr2g",
+            "severity": "high",
+            "cwe": [
+              "CWE-362"
+            ],
+            "cvss": {
+              "score": 7.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+            },
+            "range": "<3.20.0"
+          }
+        ],
+        "effects": [
+          "@prisma/config"
+        ],
+        "range": "<3.20.0",
+        "nodes": [
+          "node_modules/effect"
+        ],
+        "fixAvailable": {
+          "name": "prisma",
+          "version": "7.10.1",
+          "isSemVerMajor": true
+        }
+      },
+      "electron": {
+        "name": "electron",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          {
+            "source": 1107272,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron has ASAR Integrity Bypass via resource modification",
+            "url": "https://github.com/advisories/GHSA-vmqv-hx8q-j7mg",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-94",
+              "CWE-829"
+            ],
+            "cvss": {
+              "score": 6.1,
+              "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:R/S:U/C:L/I:H/A:L"
+            },
+            "range": "<35.7.5"
+          },
+          {
+            "source": 1116041,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: AppleScript injection in app.moveToApplicationsFolder on macOS",
+            "url": "https://github.com/advisories/GHSA-5rqw-r77c-jp79",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-78"
+            ],
+            "cvss": {
+              "score": 6.5,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:L"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116045,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Service worker can spoof executeJavaScript IPC replies",
+            "url": "https://github.com/advisories/GHSA-xj5x-m3f3-5x3h",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-290",
+              "CWE-345"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116049,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Incorrect origin passed to permission request handler for iframe requests",
+            "url": "https://github.com/advisories/GHSA-r5p7-gp4j-qhrx",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116053,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Out-of-bounds read in second-instance IPC on macOS and Linux",
+            "url": "https://github.com/advisories/GHSA-3c8v-cfp5-9885",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-125"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:H/I:N/A:L"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116057,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: nodeIntegrationInWorker not correctly scoped in shared renderer processes",
+            "url": "https://github.com/advisories/GHSA-xwr5-m59h-vwqr",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-653"
+            ],
+            "cvss": {
+              "score": 6.8,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116060,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Use-after-free in offscreen child window paint callback",
+            "url": "https://github.com/advisories/GHSA-532v-xpq5-8h95",
+            "severity": "high",
+            "cwe": [
+              "CWE-416"
+            ],
+            "cvss": {
+              "score": 8.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+            },
+            "range": "<39.8.1"
+          },
+          {
+            "source": 1116064,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Registry key path injection in app.setAsDefaultProtocolClient on Windows",
+            "url": "https://github.com/advisories/GHSA-mwmh-mq4g-g6gr",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-20",
+              "CWE-74"
+            ],
+            "cvss": {
+              "score": 4.7,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116068,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Use-after-free in download save dialog callback",
+            "url": "https://github.com/advisories/GHSA-9w97-2464-8783",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-416"
+            ],
+            "cvss": {
+              "score": 5.8,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:H/I:L/A:L"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116072,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Use-after-free in WebContents fullscreen, pointer-lock, and keyboard-lock permission callbacks",
+            "url": "https://github.com/advisories/GHSA-8337-3p73-46f4",
+            "severity": "high",
+            "cwe": [
+              "CWE-416"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116076,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Use-after-free in PowerMonitor on Windows and macOS",
+            "url": "https://github.com/advisories/GHSA-jjp3-mq3x-295m",
+            "severity": "high",
+            "cwe": [
+              "CWE-416"
+            ],
+            "cvss": {
+              "score": 7,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116084,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Unquoted executable path in app.setLoginItemSettings on Windows",
+            "url": "https://github.com/advisories/GHSA-jfqx-fxh3-c62j",
+            "severity": "low",
+            "cwe": [
+              "CWE-428"
+            ],
+            "cvss": {
+              "score": 3.9,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:U/C:L/I:L/A:L"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116088,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: HTTP Response Header Injection in custom protocol handlers and webRequest",
+            "url": "https://github.com/advisories/GHSA-4p4r-m79c-wq3v",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-74",
+              "CWE-113"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:H/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116092,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: USB device selection not validated against filtered device list",
+            "url": "https://github.com/advisories/GHSA-9899-m83m-qhpj",
+            "severity": "low",
+            "cwe": [
+              "CWE-862"
+            ],
+            "cvss": {
+              "score": 3.3,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1116111,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Use-after-free in offscreen shared texture release() callback",
+            "url": "https://github.com/advisories/GHSA-8x5q-pvf5-64mp",
+            "severity": "low",
+            "cwe": [
+              "CWE-416"
+            ],
+            "cvss": {
+              "score": 2.3,
+              "vectorString": "CVSS:3.1/AV:L/AC:L/PR:H/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=33.0.0-alpha.1 <39.8.5"
+          },
+          {
+            "source": 1116259,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Crash in clipboard.readImage() on malformed clipboard image data",
+            "url": "https://github.com/advisories/GHSA-f37v-82c4-4x64",
+            "severity": "low",
+            "cwe": [
+              "CWE-476"
+            ],
+            "cvss": {
+              "score": 2.8,
+              "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:R/S:U/C:N/I:N/A:L"
+            },
+            "range": "<39.8.5"
+          },
+          {
+            "source": 1116320,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Named window.open targets not scoped to the opener's browsing context",
+            "url": "https://github.com/advisories/GHSA-f3pv-wv63-48x8",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-668"
+            ],
+            "cvss": {
+              "score": 6,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:C/C:L/I:L/A:L"
+            },
+            "range": "<39.8.5"
+          },
+          {
+            "source": 1117459,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Renderer command-line switch injection via undocumented commandLineSwitches webPreference",
+            "url": "https://github.com/advisories/GHSA-9wfr-w7mm-pc7f",
+            "severity": "high",
+            "cwe": [
+              "CWE-88",
+              "CWE-912"
+            ],
+            "cvss": {
+              "score": 7.7,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H"
+            },
+            "range": "<38.8.6"
+          },
+          {
+            "source": 1136551,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Parent process code-sign check is spoofable",
+            "url": "https://github.com/advisories/GHSA-jm7p-cc5g-qwxx",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-367"
+            ],
+            "cvss": {
+              "score": 6.3,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136552,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Custom protocol with supportFetchAPI but not corsEnabled allows cross-origin reads",
+            "url": "https://github.com/advisories/GHSA-v3j7-r9gq-3gjw",
+            "severity": "high",
+            "cwe": [
+              "CWE-942"
+            ],
+            "cvss": {
+              "score": 7.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N"
+            },
+            "range": "<39.8.10"
+          },
+          {
+            "source": 1136559,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Extension tab APIs operate across session boundaries",
+            "url": "https://github.com/advisories/GHSA-m55f-7gqj-fr98",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-284"
+            ],
+            "cvss": {
+              "score": 6.6,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:C/C:H/I:L/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136560,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: shell.openPath path validation bypass via embedded null byte",
+            "url": "https://github.com/advisories/GHSA-5c9j-mhmv-5xgx",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-20",
+              "CWE-158"
+            ],
+            "cvss": {
+              "score": 6,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:H/A:N"
+            },
+            "range": "<39.8.6"
+          },
+          {
+            "source": 1136567,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Context isolation bypass via Function.prototype.bind hijack",
+            "url": "https://github.com/advisories/GHSA-h7rp-cf8h-j98x",
+            "severity": "high",
+            "cwe": [
+              "CWE-693"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:L/A:N"
+            },
+            "range": "<39.8.9"
+          },
+          {
+            "source": 1136571,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Cross-origin iframe can position native autofill popup",
+            "url": "https://github.com/advisories/GHSA-x8rc-wpg4-grpf",
+            "severity": "low",
+            "cwe": [
+              "CWE-1021"
+            ],
+            "cvss": {
+              "score": 3.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:N/I:L/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136575,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Permission Check Handler Receives Main Frame Origin Instead of Requesting Iframe Origin",
+            "url": "https://github.com/advisories/GHSA-9pf5-hg6p-4pwp",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": "<39.8.7"
+          },
+          {
+            "source": 1136579,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Off-screen rendering trusts GPU-supplied geometry over shared-memory size",
+            "url": "https://github.com/advisories/GHSA-pfmc-3mgc-p6fp",
+            "severity": "low",
+            "cwe": [
+              "CWE-125"
+            ],
+            "cvss": {
+              "score": 3.9,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:C/C:L/I:N/A:L"
+            },
+            "range": "<39.8.10"
+          },
+          {
+            "source": 1136590,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: HTTP redirect followed into local file loader",
+            "url": "https://github.com/advisories/GHSA-v64r-4m7r-3mvq",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136597,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: window.open features string controls some window options considered privileged",
+            "url": "https://github.com/advisories/GHSA-v93f-fgjr-hjrj",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-20"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136607,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Sandboxed iframe can bypass the allow-popups restriction via the OpenURL navigation path",
+            "url": "https://github.com/advisories/GHSA-9f4c-93c8-jc8g",
+            "severity": "high",
+            "cwe": [
+              "CWE-693",
+              "CWE-1021"
+            ],
+            "cvss": {
+              "score": 7.2,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"
+            },
+            "range": "<39.8.10"
+          },
+          {
+            "source": 1136634,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Sandboxed iframes can launch external protocol handlers",
+            "url": "https://github.com/advisories/GHSA-p2rr-rvmm-c5fp",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-284"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:L/A:N"
+            },
+            "range": "<39.8.8"
+          },
+          {
+            "source": 1136647,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: DevTools embedder handler executes arbitrary files via shell open",
+            "url": "https://github.com/advisories/GHSA-f2r8-jv7c-xqmp",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-78"
+            ],
+            "cvss": {
+              "score": 6.9,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:H/UI:R/S:C/C:H/I:H/A:N"
+            },
+            "range": "<39.8.9"
+          },
+          {
+            "source": 1136651,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: contextBridge object copy honors prototype setters",
+            "url": "https://github.com/advisories/GHSA-ff2p-hmqr-hxm4",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-1321"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:L/A:N"
+            },
+            "range": "<39.8.9"
+          },
+          {
+            "source": 1136659,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: DevTools JavaScript Injection via Unsanitized Dock State Parameter",
+            "url": "https://github.com/advisories/GHSA-4f78-qhmw-8j8m",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-94",
+              "CWE-116"
+            ],
+            "cvss": {
+              "score": 5.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:U/C:H/I:H/A:N"
+            },
+            "range": "<39.8.7"
+          },
+          {
+            "source": 1239973,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron drops inherited HTML sandbox restrictions for popups opened through OpenURLFromTab",
+            "url": "https://github.com/advisories/GHSA-hq2x-r82h-9wj4",
+            "severity": "high",
+            "cwe": [
+              "CWE-346",
+              "CWE-693"
+            ],
+            "cvss": {
+              "score": 8.2,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"
+            },
+            "range": "<41.10.4"
+          },
+          {
+            "source": 1239977,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Windows opened from a sandboxed top-level document do not inherit its sandbox restrictions",
+            "url": "https://github.com/advisories/GHSA-gr2m-v5gq-v685",
+            "severity": "high",
+            "cwe": [
+              "CWE-266",
+              "CWE-693"
+            ],
+            "cvss": {
+              "score": 8.2,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"
+            },
+            "range": "<41.10.6"
+          },
+          {
+            "source": 1239981,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: File and HTTP protocol handlers allow cross-origin reads without corsEnabled",
+            "url": "https://github.com/advisories/GHSA-j84w-jfhq-vhvj",
+            "severity": "high",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 7.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:N/A:N"
+            },
+            "range": "<41.10.6"
+          },
+          {
+            "source": 1240060,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Local race condition in Squirrel.Mac update installation on macOS",
+            "url": "https://github.com/advisories/GHSA-vv43-5jgx-7qv8",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-367"
+            ],
+            "cvss": {
+              "score": 6.7,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:R/S:U/C:H/I:H/A:H"
+            },
+            "range": "<39.8.10"
+          },
+          {
+            "source": 1241657,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: <webview> can enable Node.js integration in Web Workers despite embedder restrictions",
+            "url": "https://github.com/advisories/GHSA-9qh4-3jw8-366w",
+            "severity": "high",
+            "cwe": [
+              "CWE-269",
+              "CWE-1188"
+            ],
+            "cvss": {
+              "score": 8.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:H/I:H/A:H"
+            },
+            "range": "<41.10.6"
+          },
+          {
+            "source": 1242756,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: HID and USB permission checks can be attributed to the wrong origin",
+            "url": "https://github.com/advisories/GHSA-fw47-9c62-h3vw",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:L/A:N"
+            },
+            "range": "<42.11.3"
+          },
+          {
+            "source": 1242835,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: SameSite cookie restrictions are not applied to windows opened from links",
+            "url": "https://github.com/advisories/GHSA-2p8c-gr87-2676",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-352"
+            ],
+            "cvss": {
+              "score": 4.2,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:L/A:N"
+            },
+            "range": "<42.11.3"
+          },
+          {
+            "source": 1242839,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Pointer lock permission requests can be attributed to the wrong frame",
+            "url": "https://github.com/advisories/GHSA-x562-297c-g43g",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:L"
+            },
+            "range": "<42.11.9"
+          },
+          {
+            "source": 1242843,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Extension tabs.query returns tab URLs and titles without the tabs permission",
+            "url": "https://github.com/advisories/GHSA-98mx-cjp9-gchm",
+            "severity": "low",
+            "cwe": [
+              "CWE-862"
+            ],
+            "cvss": {
+              "score": 3.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"
+            },
+            "range": "<42.11.1"
+          },
+          {
+            "source": 1242850,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Frame subscription trusts GPU-supplied frame geometry",
+            "url": "https://github.com/advisories/GHSA-3qxv-5xgr-q7w9",
+            "severity": "low",
+            "cwe": [
+              "CWE-125"
+            ],
+            "cvss": {
+              "score": 3.9,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:C/C:L/I:N/A:L"
+            },
+            "range": "<42.11.6"
+          },
+          {
+            "source": 1242854,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Off-screen rendering on macOS trusts GPU-supplied frame geometry",
+            "url": "https://github.com/advisories/GHSA-h3v5-h239-pg29",
+            "severity": "low",
+            "cwe": [
+              "CWE-125"
+            ],
+            "cvss": {
+              "score": 3.9,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:H/UI:N/S:C/C:L/I:N/A:L"
+            },
+            "range": "<42.11.6"
+          },
+          {
+            "source": 1242858,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: openExternal permission requests can be attributed to the wrong origin",
+            "url": "https://github.com/advisories/GHSA-997q-gvvc-jwmx",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-346"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:L/I:L/A:N"
+            },
+            "range": "<42.11.3"
+          },
+          {
+            "source": 1243069,
+            "name": "electron",
+            "dependency": "electron",
+            "title": "Electron: Mitigation for compromised eMudhra intermediate certificates",
+            "url": "https://github.com/advisories/GHSA-jr5w-w6x2-84p9",
+            "severity": "high",
+            "cwe": [
+              "CWE-299"
+            ],
+            "cvss": {
+              "score": 7.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+            },
+            "range": "<42.11.16"
+          },
+          "extract-zip"
+        ],
+        "effects": [],
+        "range": "<=42.11.15 || 43.0.0-alpha.1 - 43.0.0-beta.8",
+        "nodes": [
+          "node_modules/electron"
+        ],
+        "fixAvailable": {
+          "name": "electron",
+          "version": "45.2.2",
+          "isSemVerMajor": true
+        }
+      },
+      "external-editor": {
+        "name": "external-editor",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          "tmp"
+        ],
+        "effects": [
+          "inquirer"
+        ],
+        "range": ">=1.1.1",
+        "nodes": [
+          "node_modules/external-editor"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "extract-zip": {
+        "name": "extract-zip",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1139346,
+            "name": "extract-zip",
+            "dependency": "extract-zip",
+            "title": "extract-zip unvalidated symlink path traversal",
+            "url": "https://github.com/advisories/GHSA-jmr9-qjv8-65gv",
+            "severity": "high",
+            "cwe": [
+              "CWE-22"
+            ],
+            "cvss": {
+              "score": 8.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N"
+            },
+            "range": "<=2.0.1"
+          },
+          {
+            "source": 1193685,
+            "name": "extract-zip",
+            "dependency": "extract-zip",
+            "title": "extract-zip allows arbitrary file writes through symlink archive entries",
+            "url": "https://github.com/advisories/GHSA-7pqw-9j4j-h8q3",
+            "severity": "high",
+            "cwe": [
+              "CWE-22"
+            ],
+            "cvss": {
+              "score": 8.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:H"
+            },
+            "range": "<=2.0.1"
+          }
+        ],
+        "effects": [
+          "electron"
+        ],
+        "range": "*",
+        "nodes": [
+          "node_modules/extract-zip"
+        ],
+        "fixAvailable": {
+          "name": "electron",
+          "version": "45.2.2",
+          "isSemVerMajor": true
+        }
+      },
+      "fast-uri": {
+        "name": "fast-uri",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1243098,
+            "name": "fast-uri",
+            "dependency": "fast-uri",
+            "title": "fast-uri vulnerable to URI scheme spoofing via percent-encoded scheme decoding",
+            "url": "https://github.com/advisories/GHSA-w74x-v6f9-j3xg",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-172",
+              "CWE-180"
+            ],
+            "cvss": {
+              "score": 6.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+            },
+            "range": ">=3.0.0 <3.1.9"
+          },
+          {
+            "source": 1243101,
+            "name": "fast-uri",
+            "dependency": "fast-uri",
+            "title": "fast-uri vulnerable to improper path equivalence in relative reference normalization",
+            "url": "https://github.com/advisories/GHSA-xhq7-xmqj-769h",
+            "severity": "low",
+            "cwe": [
+              "CWE-41"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": ">=3.0.0 <3.1.9"
+          },
+          {
+            "source": 1243104,
+            "name": "fast-uri",
+            "dependency": "fast-uri",
+            "title": "fast-uri vulnerable to host confusion via unchecked WHATWG host canonicalization",
+            "url": "https://github.com/advisories/GHSA-wjr9-j795-jxcr",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-20",
+              "CWE-436"
+            ],
+            "cvss": {
+              "score": 4.8,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+            },
+            "range": ">=3.1.3 <3.1.9"
+          },
+          {
+            "source": 1243107,
+            "name": "fast-uri",
+            "dependency": "fast-uri",
+            "title": "fast-uri vulnerable to scheme injection via an unescaped first-segment colon in suffix references",
+            "url": "https://github.com/advisories/GHSA-333x-w4r6-6crp",
+            "severity": "low",
+            "cwe": [
+              "CWE-41",
+              "CWE-116"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": ">=3.0.0 <3.1.9"
+          }
+        ],
+        "effects": [],
+        "range": "3.0.0 - 3.1.8",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "file-type": {
+        "name": "file-type",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1114301,
+            "name": "file-type",
+            "dependency": "file-type",
+            "title": "file-type affected by infinite loop in ASF parser on malformed input with zero-size sub-header",
+            "url": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-835"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=13.0.0 <21.3.1"
+          },
+          {
+            "source": 1114726,
+            "name": "file-type",
+            "dependency": "file-type",
+            "title": "file-type: ZIP Decompression Bomb DoS via [Content_Types].xml entry",
+            "url": "https://github.com/advisories/GHSA-j47w-4g3g-c36v",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400",
+              "CWE-409"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=20.0.0 <=21.3.1"
+          }
+        ],
+        "effects": [
+          "@nestjs/common"
+        ],
+        "range": "13.0.0 - 21.3.1",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "follow-redirects": {
+        "name": "follow-redirects",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1244003,
+            "name": "follow-redirects",
+            "dependency": "follow-redirects",
+            "title": "follow-redirects: Cross-realm sensitiveHeaders arrays are discarded and custom credentials can follow redirects",
+            "url": "https://github.com/advisories/GHSA-mrwp-f3q8-3g9p",
+            "severity": "high",
+            "cwe": [
+              "CWE-201"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": ">=1.16.0 <=1.16.1"
+          }
+        ],
+        "effects": [],
+        "range": "1.16.0 - 1.16.1",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "fork-ts-checker-webpack-plugin": {
+        "name": "fork-ts-checker-webpack-plugin",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "deepmerge",
+          "minimatch"
+        ],
+        "effects": [
+          "@nestjs/cli"
+        ],
+        "range": ">=0.2.9",
+        "nodes": [
+          "node_modules/fork-ts-checker-webpack-plugin"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "glob": {
+        "name": "glob",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          {
+            "source": 1109842,
+            "name": "glob",
+            "dependency": "glob",
+            "title": "glob CLI: Command injection via -c/--cmd executes matches with shell:true",
+            "url": "https://github.com/advisories/GHSA-5j98-mcp5-4vw2",
+            "severity": "high",
+            "cwe": [
+              "CWE-78"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H"
+            },
+            "range": ">=10.2.0 <10.5.0"
+          },
+          {
+            "source": 1244013,
+            "name": "glob",
+            "dependency": "glob",
+            "title": "Glob: AbortSignal cancellation bypass allows post-timeout filesystem traversal",
+            "url": "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=9.0.0 <=14.0.1"
+          },
+          "minimatch"
+        ],
+        "effects": [
+          "@jest/reporters",
+          "@nestjs/cli",
+          "jest-config",
+          "jest-runtime",
+          "test-exclude"
+        ],
+        "range": "3.0.0 - 14.0.1",
+        "nodes": [
+          "node_modules/@jest/reporters/node_modules/glob",
+          "node_modules/glob",
+          "node_modules/glob",
+          "node_modules/glob",
+          "node_modules/glob",
+          "node_modules/glob",
+          "node_modules/jest-config/node_modules/glob",
+          "node_modules/jest-runtime/node_modules/glob",
+          "node_modules/test-exclude/node_modules/glob"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "inquirer": {
+        "name": "inquirer",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          "external-editor"
+        ],
+        "effects": [
+          "@angular-devkit/schematics-cli",
+          "@nestjs/cli"
+        ],
+        "range": "3.0.0 - 8.2.6 || 9.0.0 - 9.3.7",
+        "nodes": [
+          "node_modules/@angular-devkit/schematics-cli/node_modules/inquirer",
+          "node_modules/inquirer"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "jest": {
+        "name": "jest",
+        "severity": "low",
+        "isDirect": true,
+        "via": [
+          "@jest/core",
+          "jest-cli"
+        ],
+        "effects": [
+          "ts-jest"
+        ],
+        "range": ">=25.2.0-alpha.86",
+        "nodes": [
+          "node_modules/jest"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-circus": {
+        "name": "jest-circus",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/expect",
+          "jest-runtime",
+          "jest-snapshot"
+        ],
+        "effects": [
+          "jest-config"
+        ],
+        "range": ">=25.2.4",
+        "nodes": [
+          "node_modules/jest-circus"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-cli": {
+        "name": "jest-cli",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          "@jest/core",
+          "create-jest",
+          "jest-config"
+        ],
+        "effects": [
+          "jest"
+        ],
+        "range": ">=25.2.0-alpha.86",
+        "nodes": [
+          "node_modules/jest-cli"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-config": {
+        "name": "jest-config",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "babel-jest",
+          "deepmerge",
+          "glob",
+          "jest-circus",
+          "jest-runner"
+        ],
+        "effects": [
+          "@jest/core",
+          "create-jest",
+          "jest-cli"
+        ],
+        "range": ">=19.1.0-alpha.eed82034",
+        "nodes": [
+          "node_modules/jest-config"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-resolve-dependencies": {
+        "name": "jest-resolve-dependencies",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "jest-snapshot"
+        ],
+        "effects": [
+          "@jest/core"
+        ],
+        "range": ">=27.0.0-next.0",
+        "nodes": [
+          "node_modules/jest-resolve-dependencies"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-runner": {
+        "name": "jest-runner",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/transform",
+          "jest-runtime"
+        ],
+        "effects": [
+          "@jest/core",
+          "jest-config"
+        ],
+        "range": ">=24.0.0-alpha.0",
+        "nodes": [
+          "node_modules/jest-runner"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-runtime": {
+        "name": "jest-runtime",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/globals",
+          "@jest/transform",
+          "glob",
+          "jest-snapshot"
+        ],
+        "effects": [
+          "@jest/core",
+          "jest-circus",
+          "jest-runner"
+        ],
+        "range": ">=24.0.0-alpha.0",
+        "nodes": [
+          "node_modules/jest-runtime"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "jest-snapshot": {
+        "name": "jest-snapshot",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "@jest/transform"
+        ],
+        "effects": [
+          "@jest/core",
+          "@jest/expect",
+          "jest-circus",
+          "jest-resolve-dependencies",
+          "jest-runtime"
+        ],
+        "range": ">=27.0.0-next.0",
+        "nodes": [
+          "node_modules/jest-snapshot"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "joi": {
+        "name": "joi",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1244007,
+            "name": "joi",
+            "dependency": "joi",
+            "title": "joi: quadratic-time split in `string().email({ multiple: true })` allows denial of service",
+            "url": "https://github.com/advisories/GHSA-4528-x5fx-h6hg",
+            "severity": "high",
+            "cwe": [
+              "CWE-1333"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=18.0.0 <18.3.1"
+          }
+        ],
+        "effects": [],
+        "range": "18.0.0 - 18.3.0",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "lodash": {
+        "name": "lodash",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1115806,
+            "name": "lodash",
+            "dependency": "lodash",
+            "title": "lodash vulnerable to Code Injection via `_.template` imports key names",
+            "url": "https://github.com/advisories/GHSA-r5fr-rjxr-66jc",
+            "severity": "high",
+            "cwe": [
+              "CWE-94"
+            ],
+            "cvss": {
+              "score": 8.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+            },
+            "range": ">=4.0.0 <=4.17.23"
+          },
+          {
+            "source": 1244531,
+            "name": "lodash",
+            "dependency": "lodash",
+            "title": "Lodash has Prototype Pollution Vulnerability in `_.unset`, `_.omit`, and `_.pullAt` functions",
+            "url": "https://github.com/advisories/GHSA-xxjr-mmjv-4gpg",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-1321"
+            ],
+            "cvss": {
+              "score": 6.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+            },
+            "range": ">=4.0.0 <=4.17.22"
+          }
+        ],
+        "effects": [
+          "@nestjs/config"
+        ],
+        "range": "4.0.0 - 4.17.23",
+        "nodes": [
+          "node_modules/lodash"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/config",
+          "version": "12.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "minimatch": {
+        "name": "minimatch",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1244012,
+            "name": "minimatch",
+            "dependency": "minimatch",
+            "title": "minimatch has potential denial of service via globparts amplification",
+            "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-405"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<11.0.1"
+          }
+        ],
+        "effects": [
+          "fork-ts-checker-webpack-plugin",
+          "glob",
+          "test-exclude"
+        ],
+        "range": "<11.0.1",
+        "nodes": [
+          "node_modules/glob/node_modules/minimatch",
+          "node_modules/minimatch"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "multer": {
+        "name": "multer",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1113635,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "Multer vulnerable to Denial of Service via incomplete cleanup",
+            "url": "https://github.com/advisories/GHSA-xf7r-hgr6-v32p",
+            "severity": "high",
+            "cwe": [
+              "CWE-459"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<2.1.0"
+          },
+          {
+            "source": 1113636,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "Multer vulnerable to Denial of Service via resource exhaustion",
+            "url": "https://github.com/advisories/GHSA-v52c-386h-88mc",
+            "severity": "high",
+            "cwe": [
+              "CWE-772"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<2.1.0"
+          },
+          {
+            "source": 1113996,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "Multer Vulnerable to Denial of Service via Uncontrolled Recursion",
+            "url": "https://github.com/advisories/GHSA-5528-5vmv-3xc2",
+            "severity": "high",
+            "cwe": [
+              "CWE-674"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<2.1.1"
+          },
+          {
+            "source": 1121089,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "Multer vulnerable to Denial of Service via deeply nested field names",
+            "url": "https://github.com/advisories/GHSA-72gw-mp4g-v24j",
+            "severity": "high",
+            "cwe": [
+              "CWE-400"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=1.0.0 <2.2.0"
+          },
+          {
+            "source": 1121091,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "Multer vulnerable to Denial of Service via incomplete cleanup of aborted uploads",
+            "url": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-459"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=2.0.0-alpha.1 <2.2.0"
+          },
+          {
+            "source": 1193790,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "multer vulnerable to Denial of Service via crafted multipart field names",
+            "url": "https://github.com/advisories/GHSA-wc9g-mqfw-jrwm",
+            "severity": "high",
+            "cwe": [
+              "CWE-248"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<2.3.0"
+          },
+          {
+            "source": 1193792,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "multer vulnerable to file size limit bypass via async fileFilter race condition",
+            "url": "https://github.com/advisories/GHSA-qvfw-j98x-7q72",
+            "severity": "low",
+            "cwe": [
+              "CWE-362"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": "<2.3.0"
+          },
+          {
+            "source": 1193793,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "multer vulnerable to Denial of Service via oversized array index in field names",
+            "url": "https://github.com/advisories/GHSA-535w-7cp7-47q4",
+            "severity": "high",
+            "cwe": [
+              "CWE-400"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": "<2.3.0"
+          },
+          {
+            "source": 1243083,
+            "name": "multer",
+            "dependency": "multer",
+            "title": "multer vulnerable to Denial of Service via a pending asynchronous fileFilter after request teardown",
+            "url": "https://github.com/advisories/GHSA-q7qp-rjg7-q26m",
+            "severity": "high",
+            "cwe": [
+              "CWE-248",
+              "CWE-404"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=2.0.0 <2.5.0"
+          }
+        ],
+        "effects": [
+          "@nestjs/platform-express"
+        ],
+        "range": "<=2.4.0",
+        "nodes": [
+          "node_modules/multer"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/platform-express",
+          "version": "12.3.3",
+          "isSemVerMajor": true
+        }
+      },
+      "next": {
+        "name": "next",
+        "severity": "critical",
+        "isDirect": true,
+        "via": [
+          {
+            "source": 1112593,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js self-hosted applications vulnerable to DoS via Image Optimizer remotePatterns configuration",
+            "url": "https://github.com/advisories/GHSA-9g9p-9gw9-jx7f",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400",
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=10.0.0 <15.5.10"
+          },
+          {
+            "source": 1112653,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js HTTP request deserialization can lead to DoS when using insecure React Server Components",
+            "url": "https://github.com/advisories/GHSA-h25m-26qc-wcjf",
+            "severity": "high",
+            "cwe": [
+              "CWE-400",
+              "CWE-502"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=13.0.0 <15.0.8"
+          },
+          {
+            "source": 1114897,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: HTTP request smuggling in rewrites",
+            "url": "https://github.com/advisories/GHSA-ggv3-7p47-pfv8",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-444"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=9.5.0 <15.5.13"
+          },
+          {
+            "source": 1114940,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unbounded next/image disk cache growth can exhaust storage",
+            "url": "https://github.com/advisories/GHSA-3x4c-7xq6-9pq8",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-400"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=10.0.0 <15.5.14"
+          },
+          {
+            "source": 1116376,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js has a Denial of Service with Server Components",
+            "url": "https://github.com/advisories/GHSA-q4gf-8mx6-v5v3",
+            "severity": "high",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=13.0.0 <15.5.15"
+          },
+          {
+            "source": 1117931,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js Vulnerable to Denial of Service with Server Components",
+            "url": "https://github.com/advisories/GHSA-8h8q-6873-q5fj",
+            "severity": "high",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=13.0.0 <15.5.16"
+          },
+          {
+            "source": 1118942,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js's Middleware / Proxy redirects can be cache-poisoned",
+            "url": "https://github.com/advisories/GHSA-3g8h-86w9-wvmq",
+            "severity": "low",
+            "cwe": [
+              "CWE-349"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=12.2.0 <15.5.16"
+          },
+          {
+            "source": 1118944,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js vulnerable to cross-site scripting in App Router applications using CSP nonces",
+            "url": "https://github.com/advisories/GHSA-ffhc-5mcf-pf4q",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-79"
+            ],
+            "cvss": {
+              "score": 4.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:C/C:L/I:L/A:N"
+            },
+            "range": ">=13.4.0 <15.5.16"
+          },
+          {
+            "source": 1118946,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js vulnerable to cache poisoning via collisions in React Server Component cache-busting",
+            "url": "https://github.com/advisories/GHSA-vfv6-92ff-j949",
+            "severity": "low",
+            "cwe": [
+              "CWE-328"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": ">=13.4.6 <15.5.16"
+          },
+          {
+            "source": 1118948,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js has cross-site scripting in beforeInteractive scripts with untrusted input",
+            "url": "https://github.com/advisories/GHSA-gx5p-jg67-6x7h",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-79"
+            ],
+            "cvss": {
+              "score": 6.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+            },
+            "range": ">=13.0.0 <15.5.16"
+          },
+          {
+            "source": 1118952,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js has a Denial of Service in the Image Optimization API",
+            "url": "https://github.com/advisories/GHSA-h64f-5h5j-jqjh",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 5.9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=10.0.0 <15.5.16"
+          },
+          {
+            "source": 1118954,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js vulnerable to server-side request forgery in applications using WebSocket upgrades",
+            "url": "https://github.com/advisories/GHSA-c4j6-fc7j-m34r",
+            "severity": "high",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 8.6,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+            },
+            "range": ">=13.4.13 <15.5.16"
+          },
+          {
+            "source": 1118958,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js vulnerable to cache poisoning in React Server Component responses",
+            "url": "https://github.com/advisories/GHSA-wfc6-r584-vfw7",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-436"
+            ],
+            "cvss": {
+              "score": 5.4,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:N/I:L/A:L"
+            },
+            "range": ">=14.2.0 <15.5.16"
+          },
+          {
+            "source": 1118962,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js has a Middleware / Proxy bypass in Pages Router applications using i18n",
+            "url": "https://github.com/advisories/GHSA-36qx-fr4f-26g5",
+            "severity": "high",
+            "cwe": [
+              "CWE-863"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": ">=12.2.0 <15.5.16"
+          },
+          {
+            "source": 1124172,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Denial of Service in App Router using Server Actions",
+            "url": "https://github.com/advisories/GHSA-m99w-x7hq-7vfj",
+            "severity": "high",
+            "cwe": [
+              "CWE-834"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <15.5.21"
+          },
+          {
+            "source": 1124185,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Server-Side Request Forgery in Server Actions on custom servers",
+            "url": "https://github.com/advisories/GHSA-89xv-2m56-2m9x",
+            "severity": "high",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=14.1.1 <15.5.21"
+          },
+          {
+            "source": 1124187,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Cache confusion of response bodies for requests with bodies",
+            "url": "https://github.com/advisories/GHSA-68g3-v927-f742",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-524"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <15.5.21"
+          },
+          {
+            "source": 1124189,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Cache confusion of response bodies for requests with bodies containing invalid UTF-8 byte sequences",
+            "url": "https://github.com/advisories/GHSA-4633-3j49-mh5q",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-116"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <15.5.21"
+          },
+          {
+            "source": 1124191,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unbounded Server Action payload in Edge runtime",
+            "url": "https://github.com/advisories/GHSA-4c39-4ccg-62r3",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <15.5.21"
+          },
+          {
+            "source": 1124193,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Server-Side Request Forgery in rewrites via attacker-controlled destination hostname",
+            "url": "https://github.com/advisories/GHSA-p9j2-gv94-2wf4",
+            "severity": "high",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=12.0.0 <15.5.21"
+          },
+          {
+            "source": 1124197,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unauthenticated disclosure of internal Server Function endpoints",
+            "url": "https://github.com/advisories/GHSA-955p-x3mx-jcvp",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-201"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <15.5.21"
+          },
+          {
+            "source": 1193677,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unauthenticated Remote Code Execution on windows-hosted servers",
+            "url": "https://github.com/advisories/GHSA-p293-qw3h-jr36",
+            "severity": "critical",
+            "cwe": [
+              "CWE-22"
+            ],
+            "cvss": {
+              "score": 9,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:H"
+            },
+            "range": ">=13.4.0 <15.5.24"
+          },
+          {
+            "source": 1193733,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when AVIF files are used",
+            "url": "https://github.com/advisories/GHSA-2xp9-vwfh-vxw4",
+            "severity": "critical",
+            "cwe": [
+              "CWE-1395"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=10.0.0 <15.5.24"
+          },
+          {
+            "source": 1242817,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Unauthenticated Remote Code Execution in Image Optimization API when SVG files are used",
+            "url": "https://github.com/advisories/GHSA-2464-fhr4-w9xw",
+            "severity": "critical",
+            "cwe": [
+              "CWE-1395"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=10.0.0 <=15.5.27"
+          },
+          {
+            "source": 1242819,
+            "name": "next",
+            "dependency": "next",
+            "title": "Next.js: Denial of Service in App Router using Server Actions",
+            "url": "https://github.com/advisories/GHSA-p3m5-59mp-jv5r",
+            "severity": "high",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": ">=13.0.0 <=15.5.27"
+          },
+          "postcss"
+        ],
+        "effects": [],
+        "range": "9.3.4-canary.0 - 16.3.0-preview.10",
+        "nodes": [
+          "node_modules/next"
+        ],
+        "fixAvailable": {
+          "name": "next",
+          "version": "16.4.5",
+          "isSemVerMajor": true
+        }
+      },
+      "picomatch": {
+        "name": "picomatch",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1115551,
+            "name": "picomatch",
+            "dependency": "picomatch",
+            "title": "Picomatch: Method Injection in POSIX Character Classes causes incorrect Glob Matching",
+            "url": "https://github.com/advisories/GHSA-3v7f-55p6-f55p",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-1321"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": ">=4.0.0 <4.0.4"
+          },
+          {
+            "source": 1115554,
+            "name": "picomatch",
+            "dependency": "picomatch",
+            "title": "Picomatch has a ReDoS vulnerability via extglob quantifiers",
+            "url": "https://github.com/advisories/GHSA-c2c7-rcm5-vvqj",
+            "severity": "high",
+            "cwe": [
+              "CWE-1333"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+            },
+            "range": ">=4.0.0 <4.0.4"
+          }
+        ],
+        "effects": [
+          "@angular-devkit/core"
+        ],
+        "range": "4.0.0 - 4.0.3",
+        "nodes": [
+          "node_modules/picomatch"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "postcss": {
+        "name": "postcss",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1117015,
+            "name": "postcss",
+            "dependency": "postcss",
+            "title": "PostCSS has XSS via Unescaped </style> in its CSS Stringify Output",
+            "url": "https://github.com/advisories/GHSA-qx2v-qp2m-jg93",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-79"
+            ],
+            "cvss": {
+              "score": 6.1,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+            },
+            "range": "<8.5.10"
+          },
+          {
+            "source": 1124252,
+            "name": "postcss",
+            "dependency": "postcss",
+            "title": "PostCSS: Arbitrary file read and information disclosure via attacker-controlled sourceMappingURL in CSS comments",
+            "url": "https://github.com/advisories/GHSA-6g55-p6wh-862q",
+            "severity": "high",
+            "cwe": [
+              "CWE-22",
+              "CWE-200"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": "<=8.5.11"
+          },
+          {
+            "source": 1130709,
+            "name": "postcss",
+            "dependency": "postcss",
+            "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+            "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-22",
+              "CWE-200"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<=8.5.22"
+          },
+          {
+            "source": 1139510,
+            "name": "postcss",
+            "dependency": "postcss",
+            "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+            "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849",
+            "severity": "high",
+            "cwe": [
+              "CWE-22"
+            ],
+            "cvss": {
+              "score": 7.5,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+            },
+            "range": "<=8.5.17"
+          }
+        ],
+        "effects": [
+          "next"
+        ],
+        "range": "<=8.5.22",
+        "nodes": [
+          "node_modules/next/node_modules/postcss"
+        ],
+        "fixAvailable": {
+          "name": "next",
+          "version": "16.4.5",
+          "isSemVerMajor": true
+        }
+      },
+      "prisma": {
+        "name": "prisma",
+        "severity": "high",
+        "isDirect": true,
+        "via": [
+          "@prisma/config"
+        ],
+        "effects": [],
+        "range": "6.13.0-dev.1 - 7.10.0 || 8.0.0-rc.3 - 8.1.0-dev.4",
+        "nodes": [
+          "node_modules/prisma"
+        ],
+        "fixAvailable": {
+          "name": "prisma",
+          "version": "7.10.1",
+          "isSemVerMajor": true
+        }
+      },
+      "qs": {
+        "name": "qs",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1119502,
+            "name": "qs",
+            "dependency": "qs",
+            "title": "qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set",
+            "url": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-476"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=6.11.1 <=6.15.1"
+          },
+          {
+            "source": 1158506,
+            "name": "qs",
+            "dependency": "qs",
+            "title": "qs array-limit bypass via bracket-key comma parsing",
+            "url": "https://github.com/advisories/GHSA-x5fp-wj9c-mxmx",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-770"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=6.14.2 <=6.15.3"
+          },
+          {
+            "source": 1158507,
+            "name": "qs",
+            "dependency": "qs",
+            "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+            "url": "https://github.com/advisories/GHSA-4mjr-xmp4-gh2g",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-248",
+              "CWE-703"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=2.2.5 <6.16.0"
+          },
+          {
+            "source": 1243687,
+            "name": "qs",
+            "dependency": "qs",
+            "title": "qs : qs.stringify with arrayFormat 'comma' throws an uncaught TypeError on array elements carrying a non-callable own toString (DoS)",
+            "url": "https://github.com/advisories/GHSA-6pq8-jhm2-2vcw",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-248",
+              "CWE-704"
+            ],
+            "cvss": {
+              "score": 5.3,
+              "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+            },
+            "range": ">=6.7.0 <=6.16.0"
+          }
+        ],
+        "effects": [],
+        "range": "2.2.5 - 6.16.0",
+        "nodes": [
+          "",
+          "node_modules/qs"
+        ],
+        "fixAvailable": true
+      },
+      "test-exclude": {
+        "name": "test-exclude",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          "glob",
+          "minimatch"
+        ],
+        "effects": [
+          "babel-plugin-istanbul"
+        ],
+        "range": "4.2.2 || >=5.0.0",
+        "nodes": [
+          "node_modules/test-exclude"
+        ],
+        "fixAvailable": {
+          "name": "jest",
+          "version": "25.1.0",
+          "isSemVerMajor": true
+        }
+      },
+      "tmp": {
+        "name": "tmp",
+        "severity": "high",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1109537,
+            "name": "tmp",
+            "dependency": "tmp",
+            "title": "tmp allows arbitrary temporary file / directory write via symbolic link `dir` parameter",
+            "url": "https://github.com/advisories/GHSA-52f5-9888-hmc6",
+            "severity": "low",
+            "cwe": [
+              "CWE-59"
+            ],
+            "cvss": {
+              "score": 2.5,
+              "vectorString": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:L/A:N"
+            },
+            "range": "<=0.2.3"
+          },
+          {
+            "source": 1120654,
+            "name": "tmp",
+            "dependency": "tmp",
+            "title": "tmp has Path Traversal via unsanitized prefix/postfix that enables directory escape",
+            "url": "https://github.com/advisories/GHSA-ph9p-34f9-6g65",
+            "severity": "high",
+            "cwe": [
+              "CWE-22"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "<0.2.6"
+          }
+        ],
+        "effects": [
+          "external-editor"
+        ],
+        "range": "<=0.2.5",
+        "nodes": [
+          "node_modules/tmp"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      },
+      "ts-jest": {
+        "name": "ts-jest",
+        "severity": "moderate",
+        "isDirect": true,
+        "via": [
+          "@jest/transform",
+          "babel-jest",
+          "jest"
+        ],
+        "effects": [],
+        "range": ">=25.10.0-alpha.1",
+        "nodes": [
+          "node_modules/ts-jest"
+        ],
+        "fixAvailable": {
+          "name": "ts-jest",
+          "version": "25.5.1",
+          "isSemVerMajor": true
+        }
+      },
+      "vite": {
+        "name": "vite",
+        "severity": "moderate",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1243858,
+            "name": "vite",
+            "dependency": "vite",
+            "title": "Vite: `server.fs.deny` bypassed with queries",
+            "url": "https://github.com/advisories/GHSA-8g5g-mxqh-grgj",
+            "severity": "moderate",
+            "cwe": [
+              "CWE-180",
+              "CWE-284"
+            ],
+            "cvss": {
+              "score": 0,
+              "vectorString": null
+            },
+            "range": "=6.4.4"
+          }
+        ],
+        "effects": [],
+        "range": "6.4.4",
+        "nodes": [
+          ""
+        ],
+        "fixAvailable": true
+      },
+      "webpack": {
+        "name": "webpack",
+        "severity": "low",
+        "isDirect": false,
+        "via": [
+          {
+            "source": 1113041,
+            "name": "webpack",
+            "dependency": "webpack",
+            "title": "webpack buildHttp: allowedUris allow-list bypass via URL userinfo (@) leading to build-time SSRF behavior",
+            "url": "https://github.com/advisories/GHSA-8fgc-7cc6-rx7x",
+            "severity": "low",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N"
+            },
+            "range": ">=5.49.0 <=5.104.0"
+          },
+          {
+            "source": 1113042,
+            "name": "webpack",
+            "dependency": "webpack",
+            "title": "webpack buildHttp HttpUriPlugin allowedUris bypass via HTTP redirects → SSRF + cache persistence",
+            "url": "https://github.com/advisories/GHSA-38r7-794h-5758",
+            "severity": "low",
+            "cwe": [
+              "CWE-918"
+            ],
+            "cvss": {
+              "score": 3.7,
+              "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:L/A:N"
+            },
+            "range": ">=5.49.0 <5.104.0"
+          }
+        ],
+        "effects": [
+          "@nestjs/cli"
+        ],
+        "range": "5.49.0 - 5.104.0",
+        "nodes": [
+          "node_modules/webpack"
+        ],
+        "fixAvailable": {
+          "name": "@nestjs/cli",
+          "version": "12.0.11",
+          "isSemVerMajor": true
+        }
+      }
+    },
+    "metadata": {
+      "vulnerabilities": {
+        "info": 0,
+        "low": 7,
+        "moderate": 28,
+        "high": 18,
+        "critical": 1,
+        "total": 54
+      },
+      "dependencies": {
+        "prod": 207,
+        "dev": 596,
+        "optional": 25,
+        "peer": 0,
+        "peerOptional": 0,
+        "total": 803
+      }
+    }
+  },
+  "unreviewedScripts": [
+    {
+      "name": "@nestjs/core",
+      "version": "10.4.22",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@nestjs\\core",
+      "scripts": {
+        "postinstall": "opencollective || exit 0"
+      }
+    },
+    {
+      "name": "@prisma/client",
+      "version": "6.19.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@prisma\\client",
+      "scripts": {
+        "postinstall": "node scripts/postinstall.js"
+      }
+    },
+    {
+      "name": "@prisma/engines",
+      "version": "6.19.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\@prisma\\engines",
+      "scripts": {
+        "postinstall": "node scripts/postinstall.js"
+      }
+    },
+    {
+      "name": "bcrypt",
+      "version": "6.0.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\bcrypt",
+      "scripts": {
+        "install": "node-gyp rebuild"
+      }
+    },
+    {
+      "name": "electron",
+      "version": "33.4.11",
+      "path": "G:\\footwear-omnichannel\\node_modules\\electron",
+      "scripts": {
+        "postinstall": "node install.js"
+      }
+    },
+    {
+      "name": "esbuild",
+      "version": "0.28.2",
+      "path": "G:\\footwear-omnichannel\\node_modules\\esbuild",
+      "scripts": {
+        "postinstall": "node install.js"
+      }
+    },
+    {
+      "name": "prisma",
+      "version": "6.19.0",
+      "path": "G:\\footwear-omnichannel\\node_modules\\prisma",
+      "scripts": {
+        "preinstall": "node scripts/preinstall-entry.js"
+      }
+    },
+    {
+      "name": "esbuild",
+      "version": "0.25.12",
+      "path": "G:\\footwear-omnichannel\\node_modules\\vite\\node_modules\\esbuild",
+      "scripts": {
+        "postinstall": "node install.js"
+      }
+    }
+  ]
+}

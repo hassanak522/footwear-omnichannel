@@ -1,0 +1,23 @@
+﻿M115-B16D MISSING MIGRATION DISCOVERY
+Mode: READ-ONLY
+
+=== SEARCH ROOT: G:\footwear-omnichannel ===
+SQL files found: 27
+MATCH: G:\footwear-omnichannel\security-checks\M112\M112B8I_snapshot.sql
+TABLES: CashReconciliation, DrawerMovement, FinanceJournal, FinanceSnapshot, SupplierInvoice, PaymentException, SettlementBatch, FinanceExceptionCase
+MATCH: G:\footwear-omnichannel\security-checks\M112\reports\M112B8_schema_drift.sql
+TABLES: CashReconciliation, DrawerMovement, FinanceJournal, FinanceSnapshot, SupplierInvoice, PaymentException, SettlementBatch, FinanceExceptionCase
+MATCH: G:\footwear-omnichannel\security-checks\M113\M113_proposed.sql
+TABLES: StockTransferReceipt
+
+=== SEARCH ROOT: G:\footwear-omnichannel-main ===
+SQL files found: 15
+
+=== SEARCH ROOT: G:\Comprehensive Royal Step ===
+SQL files found: 0
+
+=== SEARCH ROOT: G:\M112_B8I_BACKUP_20261103_204232 ===
+SQL files found: 0
+
+=== GIT MIGRATION HISTORY ===
+6c177f5 2026-10-23 Initial commit

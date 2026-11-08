@@ -1,0 +1,6 @@
+"Check","Status","Detail"
+"TEST DATABASE","PASS","footwear_omnichannel_test"
+"SYNTHETIC LOCATIONS","PASS","Warehouse and Branch A active"
+"TEST VARIANT","PASS","4c49064f-5d8a-40ee-8a1d-b5c2ad7a0e8f"
+"TEST API HEALTH","PASS","HTTP 200 on port 3002"
+"WRITE TESTS","SKIPPED","Preflight mode. No API writes attempted."

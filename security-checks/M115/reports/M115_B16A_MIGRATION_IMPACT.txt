@@ -1,0 +1,393 @@
+﻿M115-B16A MIGRATION IMPACT ANALYSIS
+Mode: READ-ONLY
+
+QA-only migration: 20261104_m112b8i_shift_snapshot
+Migration SHA256: 0ED8E5BE32951BB64FF07FE274CE71F38FA11CD8FFA4C4D6FA552627EABDC681
+
+=== MIGRATION SQL ===
+CREATE TABLE "PosShiftClosingSnapshot" (
+    "id" UUID NOT NULL,
+    "shiftId" UUID NOT NULL,
+    "locationId" UUID NOT NULL,
+    "deviceId" UUID NOT NULL,
+    "cashierId" UUID NOT NULL,
+    "openingCash" DECIMAL(12,2) NOT NULL,
+    "cashSales" DECIMAL(12,2) NOT NULL,
+    "cardSales" DECIMAL(12,2) NOT NULL,
+    "otherSales" DECIMAL(12,2) NOT NULL,
+    "expectedCash" DECIMAL(12,2) NOT NULL,
+    "countedCash" DECIMAL(12,2) NOT NULL,
+    "variance" DECIMAL(12,2) NOT NULL,
+    "drawerAdjustment" DECIMAL(12,2) NOT NULL DEFAULT 0,
+    "approvedMovements" INTEGER NOT NULL DEFAULT 0,
+    "acceptedSales" INTEGER NOT NULL,
+    "conflictedSales" INTEGER NOT NULL,
+    "closedAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "PosShiftClosingSnapshot_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "PosShiftClosingSnapshot_shiftId_key"
+ON "PosShiftClosingSnapshot"("shiftId");
+
+CREATE INDEX "PosShiftClosingSnapshot_locationId_closedAt_idx"
+ON "PosShiftClosingSnapshot"("locationId", "closedAt");
+
+=== COLUMN METADATA DIFFERENCES ===
+
+InputObject                                                                          SideIndicator
+-----------                                                                          -------------
+CashReconciliation|id|uuid|NO|                                                       =>           
+CashReconciliation|shiftId|uuid|NO|                                                  =>           
+CashReconciliation|locationId|uuid|NO|                                               =>           
+CashReconciliation|openingCash|numeric|NO|                                           =>           
+CashReconciliation|recordedCashSales|numeric|NO|                                     =>           
+CashReconciliation|expectedCash|numeric|NO|                                          =>           
+CashReconciliation|countedCash|numeric|NO|                                           =>           
+CashReconciliation|variance|numeric|NO|                                              =>           
+CashReconciliation|status|USER-DEFINED|NO|'SUBMITTED'::"CashReconciliationStatus"    =>           
+CashReconciliation|cashierNote|character varying|NO|                                 =>           
+CashReconciliation|submittedById|uuid|NO|                                            =>           
+CashReconciliation|submittedAt|timestamp without time zone|NO|CURRENT_TIMESTAMP      =>           
+CashReconciliation|reviewedById|uuid|YES|                                            =>           
+CashReconciliation|reviewedAt|timestamp without time zone|YES|                       =>           
+CashReconciliation|reviewNote|character varying|YES|                                 =>           
+DrawerMovement|id|uuid|NO|                                                           =>           
+DrawerMovement|locationId|uuid|NO|                                                   =>           
+DrawerMovement|shiftId|uuid|NO|                                                      =>           
+DrawerMovement|type|USER-DEFINED|NO|                                                 =>           
+DrawerMovement|amount|numeric|NO|                                                    =>           
+DrawerMovement|reason|character varying|NO|                                          =>           
+DrawerMovement|externalReference|character varying|YES|                              =>           
+DrawerMovement|status|USER-DEFINED|NO|'PENDING'::"DrawerMovementStatus"              =>           
+DrawerMovement|createdById|uuid|NO|                                                  =>           
+DrawerMovement|reviewedById|uuid|YES|                                                =>           
+DrawerMovement|reviewNote|character varying|YES|                                     =>           
+DrawerMovement|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP            =>           
+DrawerMovement|reviewedAt|timestamp without time zone|YES|                           =>           
+FinanceExceptionCase|id|uuid|NO|                                                     =>           
+FinanceExceptionCase|locationId|uuid|NO|                                             =>           
+FinanceExceptionCase|sourceType|character varying|NO|                                =>           
+FinanceExceptionCase|sourceId|uuid|NO|                                               =>           
+FinanceExceptionCase|status|USER-DEFINED|NO|'OPEN'::"FinanceExceptionCaseStatus"     =>           
+FinanceExceptionCase|summary|character varying|NO|                                   =>           
+FinanceExceptionCase|resolutionNote|character varying|YES|                           =>           
+FinanceExceptionCase|assignedToId|uuid|YES|                                          =>           
+FinanceExceptionCase|openedById|uuid|NO|                                             =>           
+FinanceExceptionCase|resolvedById|uuid|YES|                                          =>           
+FinanceExceptionCase|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP      =>           
+FinanceExceptionCase|updatedAt|timestamp without time zone|NO|                       =>           
+FinanceExceptionCaseEvent|id|uuid|NO|                                                =>           
+FinanceExceptionCaseEvent|caseId|uuid|NO|                                            =>           
+FinanceExceptionCaseEvent|actorId|uuid|NO|                                           =>           
+FinanceExceptionCaseEvent|action|character varying|NO|                               =>           
+FinanceExceptionCaseEvent|note|character varying|NO|                                 =>           
+FinanceExceptionCaseEvent|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP =>           
+FinanceJournal|id|uuid|NO|                                                           =>           
+FinanceJournal|locationId|uuid|NO|                                                   =>           
+FinanceJournal|externalKey|character varying|NO|                                     =>           
+FinanceJournal|description|character varying|NO|                                     =>           
+FinanceJournal|sourceType|character varying|NO|                                      =>           
+FinanceJournal|sourceId|character varying|YES|                                       =>           
+FinanceJournal|status|USER-DEFINED|NO|'POSTED'::"FinanceJournalStatus"               =>           
+FinanceJournal|createdById|uuid|NO|                                                  =>           
+FinanceJournal|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP            =>           
+FinanceJournal|reversedById|uuid|YES|                                                =>           
+FinanceJournal|reversedAt|timestamp without time zone|YES|                           =>           
+FinanceJournal|reversalReason|character varying|YES|                                 =>           
+FinanceJournalLine|id|uuid|NO|                                                       =>           
+FinanceJournalLine|journalId|uuid|NO|                                                =>           
+FinanceJournalLine|accountCode|character varying|NO|                                 =>           
+FinanceJournalLine|description|character varying|YES|                                =>           
+FinanceJournalLine|debit|numeric|NO|                                                 =>           
+FinanceJournalLine|credit|numeric|NO|                                                =>           
+FinancePeriodLock|id|uuid|NO|                                                        =>           
+FinancePeriodLock|locationId|uuid|NO|                                                =>           
+FinancePeriodLock|periodStart|timestamp without time zone|NO|                        =>           
+FinancePeriodLock|periodEnd|timestamp without time zone|NO|                          =>           
+FinancePeriodLock|reason|character varying|NO|                                       =>           
+FinancePeriodLock|lockedById|uuid|NO|                                                =>           
+FinancePeriodLock|lockedAt|timestamp without time zone|NO|CURRENT_TIMESTAMP          =>           
+FinancePostingBatch|id|uuid|NO|                                                      =>           
+FinancePostingBatch|locationId|uuid|NO|                                              =>           
+FinancePostingBatch|sourceType|character varying|NO|                                 =>           
+FinancePostingBatch|sourceId|uuid|NO|                                                =>           
+FinancePostingBatch|idempotencyKey|character varying|NO|                             =>           
+FinancePostingBatch|status|character varying|NO|'STAGED'::character varying          =>           
+FinancePostingBatch|memo|character varying|NO|                                       =>           
+FinancePostingBatch|createdById|uuid|NO|                                             =>           
+FinancePostingBatch|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP       =>           
+FinancePostingLine|id|uuid|NO|                                                       =>           
+FinancePostingLine|batchId|uuid|NO|                                                  =>           
+FinancePostingLine|accountCode|character varying|NO|                                 =>           
+FinancePostingLine|debit|numeric|NO|                                                 =>           
+FinancePostingLine|credit|numeric|NO|                                                =>           
+FinanceSnapshot|id|uuid|NO|                                                          =>           
+FinanceSnapshot|locationId|uuid|NO|                                                  =>           
+FinanceSnapshot|snapshotDate|timestamp without time zone|NO|                         =>           
+FinanceSnapshot|cashSales|numeric|NO|                                                =>           
+FinanceSnapshot|receivables|numeric|NO|                                              =>           
+FinanceSnapshot|payables|numeric|NO|                                                 =>           
+FinanceSnapshot|estimatedStockValue|numeric|NO|                                      =>           
+FinanceSnapshot|missingCostVariants|integer|NO|0                                     =>           
+FinanceSnapshot|sourceNote|character varying|NO|                                     =>           
+FinanceSnapshot|createdById|uuid|NO|                                                 =>           
+FinanceSnapshot|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+InventoryCostBasis|id|uuid|NO|                                                       =>           
+InventoryCostBasis|locationId|uuid|NO|                                               =>           
+InventoryCostBasis|variantId|uuid|NO|                                                =>           
+InventoryCostBasis|unitCost|numeric|NO|                                              =>           
+InventoryCostBasis|currency|character varying|NO|'PKR'::character varying            =>           
+InventoryCostBasis|sourceNote|character varying|NO|                                  =>           
+InventoryCostBasis|enteredById|uuid|NO|                                              =>           
+InventoryCostBasis|updatedAt|timestamp without time zone|NO|                         =>           
+InventoryCostRevision|id|uuid|NO|                                                    =>           
+InventoryCostRevision|locationId|uuid|NO|                                            =>           
+InventoryCostRevision|variantId|uuid|NO|                                             =>           
+InventoryCostRevision|previousCost|numeric|YES|                                      =>           
+InventoryCostRevision|newCost|numeric|NO|                                            =>           
+InventoryCostRevision|reason|character varying|NO|                                   =>           
+InventoryCostRevision|actorId|uuid|NO|                                               =>           
+InventoryCostRevision|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP     =>           
+LoyaltyLedgerEntry|id|uuid|NO|                                                       =>           
+LoyaltyLedgerEntry|customerId|uuid|NO|                                               =>           
+LoyaltyLedgerEntry|saleId|uuid|YES|                                                  =>           
+LoyaltyLedgerEntry|returnId|uuid|YES|                                                =>           
+LoyaltyLedgerEntry|points|integer|NO|                                                =>           
+LoyaltyLedgerEntry|reason|text|NO|                                                   =>           
+LoyaltyLedgerEntry|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP        =>           
+PaymentException|id|uuid|NO|                                                         =>           
+PaymentException|locationId|uuid|NO|                                                 =>           
+PaymentException|deviceId|uuid|NO|                                                   =>           
+PaymentException|localSaleId|uuid|NO|                                                =>           
+PaymentException|saleId|uuid|YES|                                                    =>           
+PaymentException|status|USER-DEFINED|NO|'OPEN'::"PaymentExceptionStatus"             =>           
+PaymentException|reason|character varying|NO|                                        =>           
+PaymentException|expectedAmount|numeric|YES|                                         =>           
+PaymentException|observedAmount|numeric|YES|                                         =>           
+PaymentException|reportedById|uuid|NO|                                               =>           
+PaymentException|reviewedById|uuid|YES|                                              =>           
+PaymentException|reviewNote|character varying|YES|                                   =>           
+PaymentException|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP          =>           
+PaymentException|updatedAt|timestamp without time zone|NO|                           =>           
+PaymentException|resolvedAt|timestamp without time zone|YES|                         =>           
+PaymentExceptionEvidence|id|uuid|NO|                                                 =>           
+PaymentExceptionEvidence|exceptionId|uuid|NO|                                        =>           
+PaymentExceptionEvidence|kind|USER-DEFINED|NO|                                       =>           
+PaymentExceptionEvidence|reference|character varying|NO|                             =>           
+PaymentExceptionEvidence|note|character varying|NO|                                  =>           
+PaymentExceptionEvidence|createdById|uuid|NO|                                        =>           
+PaymentExceptionEvidence|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP  =>           
+PosShiftClosingSnapshot|id|uuid|NO|                                                  =>           
+PosShiftClosingSnapshot|shiftId|uuid|NO|                                             =>           
+PosShiftClosingSnapshot|locationId|uuid|NO|                                          =>           
+PosShiftClosingSnapshot|deviceId|uuid|NO|                                            =>           
+PosShiftClosingSnapshot|cashierId|uuid|NO|                                           =>           
+PosShiftClosingSnapshot|openingCash|numeric|NO|                                      =>           
+PosShiftClosingSnapshot|cashSales|numeric|NO|                                        =>           
+PosShiftClosingSnapshot|cardSales|numeric|NO|                                        =>           
+PosShiftClosingSnapshot|otherSales|numeric|NO|                                       =>           
+PosShiftClosingSnapshot|expectedCash|numeric|NO|                                     =>           
+PosShiftClosingSnapshot|countedCash|numeric|NO|                                      =>           
+PosShiftClosingSnapshot|variance|numeric|NO|                                         =>           
+PosShiftClosingSnapshot|drawerAdjustment|numeric|NO|0                                =>           
+PosShiftClosingSnapshot|approvedMovements|integer|NO|0                               =>           
+PosShiftClosingSnapshot|acceptedSales|integer|NO|                                    =>           
+PosShiftClosingSnapshot|conflictedSales|integer|NO|                                  =>           
+PosShiftClosingSnapshot|closedAt|timestamp without time zone|NO|                     =>           
+PosShiftClosingSnapshot|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP   =>           
+PromotionRedemption|id|uuid|NO|                                                      =>           
+PromotionRedemption|promotionId|uuid|NO|                                             =>           
+PromotionRedemption|saleId|uuid|NO|                                                  =>           
+PromotionRedemption|customerId|uuid|YES|                                             =>           
+PromotionRedemption|discountAmount|numeric|NO|                                       =>           
+PromotionRedemption|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP       =>           
+RefundRecord|id|uuid|NO|                                                             =>           
+RefundRecord|returnId|uuid|NO|                                                       =>           
+RefundRecord|locationId|uuid|NO|                                                     =>           
+RefundRecord|amount|numeric|NO|                                                      =>           
+RefundRecord|method|text|NO|                                                         =>           
+RefundRecord|status|USER-DEFINED|NO|'REQUESTED'::"RefundRecordStatus"                =>           
+RefundRecord|reference|text|YES|                                                     =>           
+RefundRecord|requestedById|uuid|NO|                                                  =>           
+RefundRecord|reviewedById|uuid|YES|                                                  =>           
+RefundRecord|settledById|uuid|YES|                                                   =>           
+RefundRecord|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP              =>           
+RefundRecord|reviewedAt|timestamp without time zone|YES|                             =>           
+RefundRecord|settledAt|timestamp without time zone|YES|                              =>           
+RetailPromotion|id|uuid|NO|                                                          =>           
+RetailPromotion|code|text|NO|                                                        =>           
+RetailPromotion|title|text|NO|                                                       =>           
+RetailPromotion|type|text|NO|                                                        =>           
+RetailPromotion|value|numeric|NO|                                                    =>           
+RetailPromotion|startsAt|timestamp without time zone|NO|                             =>           
+RetailPromotion|endsAt|timestamp without time zone|NO|                               =>           
+RetailPromotion|status|USER-DEFINED|NO|'DRAFT'::"PromotionStatus"                    =>           
+RetailPromotion|createdById|uuid|NO|                                                 =>           
+RetailPromotion|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+RetailPromotion|updatedAt|timestamp without time zone|NO|                            =>           
+SaleCustomerLink|saleId|uuid|NO|                                                     =>           
+SaleCustomerLink|customerId|uuid|NO|                                                 =>           
+SaleCustomerLink|linkedById|uuid|NO|                                                 =>           
+SaleCustomerLink|linkedAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+SettlementBatch|id|uuid|NO|                                                          =>           
+SettlementBatch|locationId|uuid|NO|                                                  =>           
+SettlementBatch|provider|character varying|NO|                                       =>           
+SettlementBatch|statementReference|character varying|NO|                             =>           
+SettlementBatch|statementDate|timestamp without time zone|NO|                        =>           
+SettlementBatch|createdById|uuid|NO|                                                 =>           
+SettlementBatch|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+SettlementEntry|id|uuid|NO|                                                          =>           
+SettlementEntry|batchId|uuid|NO|                                                     =>           
+SettlementEntry|externalId|character varying|NO|                                     =>           
+SettlementEntry|terminalReference|character varying|NO|                              =>           
+SettlementEntry|grossAmount|numeric|NO|                                              =>           
+SettlementEntry|feeAmount|numeric|NO|                                                =>           
+SettlementEntry|netAmount|numeric|NO|                                                =>           
+SettlementEntry|status|USER-DEFINED|NO|'UNMATCHED'::"SettlementMatchStatus"          =>           
+SettlementEntry|matchedTenderId|uuid|YES|                                            =>           
+SettlementEntry|reviewNote|character varying|YES|                                    =>           
+SettlementEntry|reviewedById|uuid|YES|                                               =>           
+SettlementEntry|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+StockTransferItem|shortageQty|integer|NO|0                                           =>           
+StockTransferReceipt|id|uuid|NO|                                                     =>           
+StockTransferReceipt|transferId|uuid|NO|                                             =>           
+StockTransferReceipt|variantId|uuid|NO|                                              =>           
+StockTransferReceipt|receivedQty|integer|NO|                                         =>           
+StockTransferReceipt|damagedQty|integer|NO|                                          =>           
+StockTransferReceipt|idempotencyKey|text|NO|                                         =>           
+StockTransferReceipt|actorId|uuid|NO|                                                =>           
+StockTransferReceipt|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP      =>           
+SupplierInvoice|id|uuid|NO|                                                          =>           
+SupplierInvoice|purchaseOrderId|uuid|NO|                                             =>           
+SupplierInvoice|supplierId|uuid|NO|                                                  =>           
+SupplierInvoice|warehouseId|uuid|NO|                                                 =>           
+SupplierInvoice|invoiceNumber|character varying|NO|                                  =>           
+SupplierInvoice|invoiceDate|timestamp without time zone|NO|                          =>           
+SupplierInvoice|totalAmount|numeric|NO|                                              =>           
+SupplierInvoice|status|USER-DEFINED|NO|'DRAFT'::"SupplierInvoiceStatus"              =>           
+SupplierInvoice|note|character varying|NO|                                           =>           
+SupplierInvoice|createdById|uuid|NO|                                                 =>           
+SupplierInvoice|reviewedById|uuid|YES|                                               =>           
+SupplierInvoice|reviewedAt|timestamp without time zone|YES|                          =>           
+SupplierInvoice|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP           =>           
+SupplierPayableEvent|id|uuid|NO|                                                     =>           
+SupplierPayableEvent|supplierInvoiceId|uuid|NO|                                      =>           
+SupplierPayableEvent|warehouseId|uuid|NO|                                            =>           
+SupplierPayableEvent|kind|character varying|NO|                                      =>           
+SupplierPayableEvent|amount|numeric|NO|                                              =>           
+SupplierPayableEvent|reference|character varying|NO|                                 =>           
+SupplierPayableEvent|idempotencyKey|character varying|NO|                            =>           
+SupplierPayableEvent|note|character varying|NO|                                      =>           
+SupplierPayableEvent|createdById|uuid|NO|                                            =>           
+SupplierPayableEvent|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP      =>           
+SupplierPaymentRequest|id|uuid|NO|                                                   =>           
+SupplierPaymentRequest|invoiceId|uuid|NO|                                            =>           
+SupplierPaymentRequest|warehouseId|uuid|NO|                                          =>           
+SupplierPaymentRequest|amount|numeric|NO|                                            =>           
+SupplierPaymentRequest|reference|character varying|NO|                               =>           
+SupplierPaymentRequest|idempotencyKey|character varying|NO|                          =>           
+SupplierPaymentRequest|status|character varying|NO|'PENDING'::character varying      =>           
+SupplierPaymentRequest|note|character varying|NO|                                    =>           
+SupplierPaymentRequest|requestedById|uuid|NO|                                        =>           
+SupplierPaymentRequest|reviewedById|uuid|YES|                                        =>           
+SupplierPaymentRequest|reviewedAt|timestamp without time zone|YES|                   =>           
+SupplierPaymentRequest|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP    =>           
+SupplierPaymentSettlement|id|uuid|NO|                                                =>           
+SupplierPaymentSettlement|paymentRequestId|uuid|NO|                                  =>           
+SupplierPaymentSettlement|invoiceId|uuid|NO|                                         =>           
+SupplierPaymentSettlement|warehouseId|uuid|NO|                                       =>           
+SupplierPaymentSettlement|amount|numeric|NO|                                         =>           
+SupplierPaymentSettlement|settledAt|timestamp without time zone|NO|                  =>           
+SupplierPaymentSettlement|bankReference|character varying|NO|                        =>           
+SupplierPaymentSettlement|evidenceNote|character varying|NO|                         =>           
+SupplierPaymentSettlement|recordedById|uuid|NO|                                      =>           
+SupplierPaymentSettlement|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP =>           
+SupplierSettlementReview|id|uuid|NO|                                                 =>           
+SupplierSettlementReview|settlementId|uuid|NO|                                       =>           
+SupplierSettlementReview|warehouseId|uuid|NO|                                        =>           
+SupplierSettlementReview|decision|USER-DEFINED|NO|                                   =>           
+SupplierSettlementReview|evidenceReference|character varying|NO|                     =>           
+SupplierSettlementReview|note|character varying|NO|                                  =>           
+SupplierSettlementReview|reviewerId|uuid|NO|                                         =>           
+SupplierSettlementReview|reviewedAt|timestamp without time zone|NO|CURRENT_TIMESTAMP =>           
+LoyaltyAdjustment|id|uuid|NO|                                                        <=           
+LoyaltyAdjustment|customerId|uuid|NO|                                                <=           
+LoyaltyAdjustment|sourceEntryId|uuid|NO|                                             <=           
+LoyaltyAdjustment|idempotencyKey|text|NO|                                            <=           
+LoyaltyAdjustment|points|integer|NO|                                                 <=           
+LoyaltyAdjustment|reason|text|NO|                                                    <=           
+LoyaltyAdjustment|actorId|uuid|NO|                                                   <=           
+LoyaltyAdjustment|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP         <=           
+LoyaltyEntry|id|uuid|NO|                                                             <=           
+LoyaltyEntry|customerId|uuid|NO|                                                     <=           
+LoyaltyEntry|orderId|uuid|NO|                                                        <=           
+LoyaltyEntry|points|integer|NO|                                                      <=           
+LoyaltyEntry|amount|numeric|NO|                                                      <=           
+LoyaltyEntry|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP              <=           
+LoyaltyRedemption|id|uuid|NO|                                                        <=           
+LoyaltyRedemption|customerId|uuid|NO|                                                <=           
+LoyaltyRedemption|idempotencyKey|text|NO|                                            <=           
+LoyaltyRedemption|points|integer|NO|                                                 <=           
+LoyaltyRedemption|reference|text|NO|                                                 <=           
+LoyaltyRedemption|reason|text|NO|                                                    <=           
+LoyaltyRedemption|actorId|uuid|NO|                                                   <=           
+LoyaltyRedemption|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP         <=           
+OnlineRefundSettlement|id|uuid|NO|                                                   <=           
+OnlineRefundSettlement|returnId|uuid|NO|                                             <=           
+OnlineRefundSettlement|idempotencyKey|text|NO|                                       <=           
+OnlineRefundSettlement|method|text|NO|                                               <=           
+OnlineRefundSettlement|amount|numeric|NO|                                            <=           
+OnlineRefundSettlement|reference|text|NO|                                            <=           
+OnlineRefundSettlement|settledById|uuid|NO|                                          <=           
+OnlineRefundSettlement|settledAt|timestamp without time zone|NO|CURRENT_TIMESTAMP    <=           
+OnlineReturn|id|uuid|NO|                                                             <=           
+OnlineReturn|orderId|uuid|NO|                                                        <=           
+OnlineReturn|idempotencyKey|text|NO|                                                 <=           
+OnlineReturn|reason|text|NO|                                                         <=           
+OnlineReturn|approvedById|uuid|NO|                                                   <=           
+OnlineReturn|merchandiseAmount|numeric|NO|                                           <=           
+OnlineReturn|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP              <=           
+OnlineReturnLine|id|uuid|NO|                                                         <=           
+OnlineReturnLine|returnId|uuid|NO|                                                   <=           
+OnlineReturnLine|variantId|uuid|NO|                                                  <=           
+OnlineReturnLine|quantity|integer|NO|                                                <=           
+OnlineReturnLine|quarantined|boolean|NO|false                                        <=           
+OnlineReturnLine|unitPrice|numeric|NO|                                               <=           
+PosExchange|id|uuid|NO|                                                              <=           
+PosExchange|returnId|uuid|NO|                                                        <=           
+PosExchange|replacementSaleId|uuid|NO|                                               <=           
+PosExchange|idempotencyKey|text|NO|                                                  <=           
+PosExchange|approvedById|uuid|NO|                                                    <=           
+PosExchange|createdAt|timestamp without time zone|NO|CURRENT_TIMESTAMP               <=           
+PosRefundSettlement|id|uuid|NO|                                                      <=           
+PosRefundSettlement|returnId|uuid|NO|                                                <=           
+PosRefundSettlement|idempotencyKey|text|NO|                                          <=           
+PosRefundSettlement|method|USER-DEFINED|NO|                                          <=           
+PosRefundSettlement|amount|numeric|NO|                                               <=           
+PosRefundSettlement|reference|text|YES|                                              <=           
+PosRefundSettlement|settledById|uuid|NO|                                             <=           
+PosRefundSettlement|settledAt|timestamp without time zone|NO|CURRENT_TIMESTAMP       <=           
+PosRefundSettlement|payoutShiftId|uuid|YES|                                          <=           
+
+
+
+
+=== MIGRATION HISTORY DIFFERENCES ===
+
+InputObject                                       SideIndicator
+-----------                                       -------------
+20261104_m112b8i_shift_snapshot|FINISHED          =>           
+20261023120000_loyalty_entry|FINISHED             <=           
+20261023130000_pos_refund_settlement|FINISHED     <=           
+20261023140000_refund_payout_shift|FINISHED       <=           
+20261023150000_loyalty_adjustments|FINISHED       <=           
+20261023160000_pos_exchanges|FINISHED             <=           
+20261023170000_online_returns|FINISHED            <=           
+20261023180000_online_refund_settlements|FINISHED <=           
+20261024120000_loyalty_redemptions|FINISHED       <=           
+20261024130000_refund_balance_guards|FINISHED     <=           
+
+
+

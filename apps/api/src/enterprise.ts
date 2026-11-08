@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { BadRequestException, Body, ConflictException, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
@@ -31,30 +32,44 @@ export class PurchasingController {
    assertLocation(u,order.warehouseId);
    if(order.status==='RECEIVED')throw new ConflictException('Already received');
    if(order.status!=='SUBMITTED')throw new ConflictException('Purchase order not submitted');
-   if(dto.lines.length!==order.lines.length)throw new BadRequestException('Supply a quantity for every order line');
-   for(const line of order.lines){
-    const r=dto.lines.find(x=>x.variantId===line.variantId);
-    if(!r||r.quantity+r.damaged>line.orderedQty)throw new BadRequestException('Receipt exceeds ordered quantity');
+   if(dto.lines.length===0)throw new BadRequestException('No receipt lines');
+   const byVariant=new Map(order.lines.map(l=>[l.variantId,l]));
+   let receivedTotal=0;
+   for(const r of dto.lines){
+    const line=byVariant.get(r.variantId);
+    if(!line)throw new BadRequestException('Variant not on purchase order');
+    if(r.quantity+r.damaged>line.orderedQty-line.receivedQty)throw new BadRequestException('Receipt exceeds remaining quantity');
+    receivedTotal+=r.quantity+r.damaged;
    }
-   for(const line of [...order.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
-    const r=dto.lines.find(x=>x.variantId===line.variantId)!;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${order.warehouseId+':'+line.variantId}))`;
+   if(receivedTotal===0)throw new BadRequestException('Receipt must contain at least one unit');
+   const receiptId=randomUUID();
+   for(const r of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+    const line=byVariant.get(r.variantId)!;
     const qty=r.quantity+r.damaged;
+    if(!qty)continue;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${order.warehouseId+':'+line.variantId}))`;
     await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:order.warehouseId,variantId:line.variantId}},create:{locationId:order.warehouseId,variantId:line.variantId,onHand:qty,quarantined:r.damaged},update:{onHand:{increment:qty},quarantined:{increment:r.damaged},version:{increment:1}}});
-    await tx.purchaseOrderLine.update({where:{id:line.id},data:{receivedQty:qty}});
-    if(qty)await tx.stockMovement.create({data:{locationId:order.warehouseId,variantId:line.variantId,type:'SUPPLIER_RECEIPT',quantityDelta:qty,referenceType:'PURCHASE_ORDER',referenceId:id,idempotencyKey:`purchase:${id}:${line.variantId}`,actorId:u.id,metadata:{damaged:r.damaged}}});
+    await tx.purchaseOrderLine.update({where:{id:line.id},data:{receivedQty:{increment:qty}}});
+    await tx.stockMovement.create({data:{locationId:order.warehouseId,variantId:line.variantId,type:'SUPPLIER_RECEIPT',quantityDelta:qty,referenceType:'PURCHASE_ORDER',referenceId:id,idempotencyKey:`purchase:${id}:${receiptId}:${line.variantId}`,actorId:u.id,metadata:{receiptId,goodQty:r.quantity,damagedQty:r.damaged}}});
    }
-   await tx.purchaseOrder.update({where:{id},data:{status:'RECEIVED',receivedAt:new Date()}});
-   await tx.auditLog.create({
-    data: {
-        actorId: u.id,
-        action: 'PURCHASE_RECEIVED',
-        entityType: 'PurchaseOrder',
-        entityId: id,
-        after: JSON.parse(JSON.stringify({ lines: dto.lines })),
-    },
-   });
-   return {id,status:'RECEIVED'};
+   const complete=order.lines.every(l=>l.receivedQty+(dto.lines.find(r=>r.variantId===l.variantId)?.quantity??0)+(dto.lines.find(r=>r.variantId===l.variantId)?.damaged??0)===l.orderedQty);
+   if(complete)await tx.purchaseOrder.update({where:{id},data:{status:'RECEIVED',receivedAt:new Date()}});
+    await tx.auditLog.create({
+        data: {
+            actorId: u.id,
+            action: 'PURCHASE_PARTIAL_RECEIPT',
+            entityType: 'PurchaseOrder',
+            entityId: id,
+            after: JSON.parse(
+                JSON.stringify({
+                    receiptId,
+                    complete,
+                    lines: dto.lines,
+                })
+            ),
+        },
+    });
+   return {id,receiptId,status:complete?'RECEIVED':'SUBMITTED',remaining:order.lines.map(l=>({variantId:l.variantId,remainingQty:l.orderedQty-l.receivedQty-(dto.lines.find(r=>r.variantId===l.variantId)?.quantity??0)-(dto.lines.find(r=>r.variantId===l.variantId)?.damaged??0)}))};
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
 }

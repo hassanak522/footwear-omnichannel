@@ -1,4 +1,4 @@
-import { Body, Controller, Injectable, Post, UnauthorizedException, UseGuards, ExecutionContext, CanActivate, SetMetadata, ForbiddenException, createParamDecorator } from '@nestjs/common';
+import { Body, Controller, Get, Injectable, Post, UnauthorizedException, UseGuards, ExecutionContext, CanActivate, SetMetadata, ForbiddenException, createParamDecorator } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { AuthGuard } from '@nestjs/passport';
@@ -41,5 +41,5 @@ export class RolesGuard implements CanActivate {
  }
 }
 export const JwtAuthGuard=AuthGuard('jwt');
-@Controller('auth') export class AuthController { constructor(private auth:AuthService){} @Post('login') login(@Body() dto:LoginDto){return this.auth.login(dto);} }
+@Controller('auth') export class AuthController { constructor(private auth:AuthService){} @Post('login') login(@Body() dto:LoginDto){return this.auth.login(dto);} @Get('session') @UseGuards(JwtAuthGuard) session(@CurrentUser() user:Principal){return {authenticated:true};} }
 export function assertLocation(user:Principal, locationId:string){if(!user.roles.includes('SUPER_ADMIN') && !user.locations.includes(locationId))throw new ForbiddenException('Location not assigned');}

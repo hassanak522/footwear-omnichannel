@@ -1,0 +1,11 @@
+6: import { isDeepStrictEqual } from 'node:util';
+7: class AdjustDto { @IsUUID() locationId!:string; @IsUUID() variantId!:string; @IsInt() delta!:number; @IsString() @MinLength(8) idempotencyKey!:string; @IsString() @MinLength(3) reason!:string; }
+8: class ReserveDto { @IsUUID() locationId!:string; @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsEnum(ReservationPurpose) purpose!:ReservationPurpose; @IsString() @MinLength(3) referenceId!:string; @IsString() @MinLength(8) idempotencyKey!:string; }
+9: class ReleaseDto { @IsString() @MinLength(8) idempotencyKey!:string; }
+64: const existing=await tx.stockMovement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+71: const movement=await tx.stockMovement.create({data:{locationId:dto.locationId,variantId:dto.variantId,type:'ADJUSTMENT',quantityDelta:dto.delta,referenceType:'MANUAL_ADJUSTMENT',idempotencyKey:dto.idempotencyKey,actorId:actor.id,notes:dto.reason}});
+83: const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+84: if(prior){if(prior.source!=='INVENTORY_RESERVE' || !isDeepStrictEqual(prior.payload, JSON.parse(JSON.stringify(dto))))throw new ConflictException('Idempotency key reused');return tx.stockReservation.findFirstOrThrow({where:{referenceId:dto.referenceId,locationId:dto.locationId,variantId:dto.variantId,purpose:dto.purpose}});}
+92: await tx.integrationEvent.create({data:{source:'INVENTORY_RESERVE',eventType:'CREATED',idempotencyKey:dto.idempotencyKey,payload:JSON.parse(JSON.stringify(dto)),processedAt:new Date()}});
+107: const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+111: await tx.integrationEvent.create({data:{source:'INVENTORY_RELEASE',eventType:'RELEASED',idempotencyKey:dto.idempotencyKey,payload:{reservationId:id},processedAt:new Date()}});

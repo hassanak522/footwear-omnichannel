@@ -1,0 +1,47 @@
+[
+    {
+        "test":  "EXPLICIT_QA_CONFIRMATION",
+        "pass":  true,
+        "detail":  "Operator must have verified QA DATABASE_URL in API launch terminal"
+    },
+    {
+        "test":  "TOKEN_PROVIDED",
+        "pass":  true,
+        "detail":  "Set M114C_QA_TOKEN in this terminal; do not paste token into chat"
+    },
+    {
+        "test":  "EXPECTED_API_PID",
+        "pass":  true,
+        "detail":  "actual=12164 expected=12164"
+    },
+    {
+        "test":  "API_COMMAND",
+        "pass":  true,
+        "detail":  "Node dist/main.js required"
+    },
+    {
+        "test":  "QA_DATABASE",
+        "pass":  true,
+        "detail":  "psql connects to isolated QA DB"
+    },
+    {
+        "test":  "STOCK_ROW_FOUND",
+        "pass":  true,
+        "detail":  "Stock balance must be present"
+    },
+    {
+        "test":  "STOCK_AVAILABLE",
+        "pass":  true,
+        "detail":  "available=35"
+    },
+    {
+        "test":  "API_HEALTH",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "AUTHORIZED_DEVICE_STATUS",
+        "pass":  false,
+        "detail":  "HTTP 401"
+    }
+]

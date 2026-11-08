@@ -1,0 +1,235 @@
+﻿M115-B16F MIGRATION RECONSTRUCTION PREFLIGHT
+Mode: READ-ONLY
+
+=== M112_SNAPSHOT ===
+SHA256: 13E555B3E1903592A90AD205F845250CCA2CE853A579EC4CD3B8A64B1E1F79BC
+CREATE TABLE targets: 59
+CREATE: AuditLog
+CREATE: Brand
+CREATE: CashReconciliation
+CREATE: Category
+CREATE: DrawerMovement
+CREATE: FinanceExceptionCase
+CREATE: FinanceExceptionCaseEvent
+CREATE: FinanceJournal
+CREATE: FinanceJournalLine
+CREATE: FinancePeriodLock
+CREATE: FinancePostingBatch
+CREATE: FinancePostingLine
+CREATE: FinanceSnapshot
+CREATE: IntegrationEvent
+CREATE: InventoryCostBasis
+CREATE: InventoryCostRevision
+CREATE: Location
+CREATE: LoyaltyLedgerEntry
+CREATE: OnlineOrder
+CREATE: OnlineOrderLine
+CREATE: PaymentException
+CREATE: PaymentExceptionEvidence
+CREATE: PosDevice
+CREATE: PosReturn
+CREATE: PosReturnLine
+CREATE: PosSale
+CREATE: PosSaleLine
+CREATE: PosSaleTender
+CREATE: PosShift
+CREATE: PriceChangeRequest
+CREATE: Product
+CREATE: ProductVariant
+CREATE: PromotionRedemption
+CREATE: PurchaseOrder
+CREATE: PurchaseOrderLine
+CREATE: RefundRecord
+CREATE: ReplenishmentRequest
+CREATE: RetailCustomer
+CREATE: RetailPromotion
+CREATE: Role
+CREATE: SaleCustomerLink
+CREATE: SettlementBatch
+CREATE: SettlementEntry
+CREATE: StockBalance
+CREATE: StockCount
+CREATE: StockCountLine
+CREATE: StockMovement
+CREATE: StockReservation
+CREATE: StockTransfer
+CREATE: StockTransferItem
+CREATE: Supplier
+CREATE: SupplierInvoice
+CREATE: SupplierPayableEvent
+CREATE: SupplierPaymentRequest
+CREATE: SupplierPaymentSettlement
+CREATE: SupplierSettlementReview
+CREATE: User
+CREATE: UserLocation
+CREATE: UserRole
+CREATE TYPE targets: 28
+TYPE: CashReconciliationStatus
+TYPE: CountStatus
+TYPE: DrawerMovementStatus
+TYPE: DrawerMovementType
+TYPE: FinanceExceptionCaseStatus
+TYPE: FinanceJournalStatus
+TYPE: LocationType
+TYPE: OnlineOrderStatus
+TYPE: OnlinePaymentMethod
+TYPE: OnlinePaymentStatus
+TYPE: PaymentEvidenceKind
+TYPE: PaymentExceptionStatus
+TYPE: PosReturnStatus
+TYPE: PosSaleStatus
+TYPE: PosShiftStatus
+TYPE: PosTenderType
+TYPE: PromotionStatus
+TYPE: PurchaseStatus
+TYPE: RefundRecordStatus
+TYPE: ReplenishmentStatus
+TYPE: ReservationPurpose
+TYPE: ReservationStatus
+TYPE: SettlementMatchStatus
+TYPE: SettlementReviewDecision
+TYPE: StockMovementType
+TYPE: SupplierInvoiceStatus
+TYPE: TransferStatus
+TYPE: UserStatus
+ALTER TABLE targets: 26
+ALTER: AuditLog
+ALTER: FinanceJournalLine
+ALTER: FinancePostingLine
+ALTER: OnlineOrder
+ALTER: OnlineOrderLine
+ALTER: PaymentExceptionEvidence
+ALTER: PosDevice
+ALTER: PosReturn
+ALTER: PosReturnLine
+ALTER: PosSale
+ALTER: PosSaleLine
+ALTER: PosSaleTender
+ALTER: PosShift
+ALTER: Product
+ALTER: ProductVariant
+ALTER: PurchaseOrder
+ALTER: PurchaseOrderLine
+ALTER: SettlementEntry
+ALTER: StockBalance
+ALTER: StockCountLine
+ALTER: StockMovement
+ALTER: StockReservation
+ALTER: StockTransfer
+ALTER: StockTransferItem
+ALTER: UserLocation
+ALTER: UserRole
+
+--- RISK INDICATORS ---
+DROP statements: 0
+TRUNCATE statements: 0
+DELETE statements: 0
+UPDATE statements: 0
+INSERT statements: 0
+ALTER TYPE statements: 0
+NOT NULL additions: 0
+
+=== M112_DRIFT ===
+SHA256: EE2A6A798538BA261D4A38191E8993598D902EE2337472D4AE3C2D8936396C51
+CREATE TABLE targets: 26
+CREATE: CashReconciliation
+CREATE: DrawerMovement
+CREATE: FinanceExceptionCase
+CREATE: FinanceExceptionCaseEvent
+CREATE: FinanceJournal
+CREATE: FinanceJournalLine
+CREATE: FinancePeriodLock
+CREATE: FinancePostingBatch
+CREATE: FinancePostingLine
+CREATE: FinanceSnapshot
+CREATE: InventoryCostBasis
+CREATE: InventoryCostRevision
+CREATE: LoyaltyLedgerEntry
+CREATE: PaymentException
+CREATE: PaymentExceptionEvidence
+CREATE: PromotionRedemption
+CREATE: RefundRecord
+CREATE: RetailPromotion
+CREATE: SaleCustomerLink
+CREATE: SettlementBatch
+CREATE: SettlementEntry
+CREATE: SupplierInvoice
+CREATE: SupplierPayableEvent
+CREATE: SupplierPaymentRequest
+CREATE: SupplierPaymentSettlement
+CREATE: SupplierSettlementReview
+CREATE TYPE targets: 12
+TYPE: CashReconciliationStatus
+TYPE: DrawerMovementStatus
+TYPE: DrawerMovementType
+TYPE: FinanceExceptionCaseStatus
+TYPE: FinanceJournalStatus
+TYPE: PaymentEvidenceKind
+TYPE: PaymentExceptionStatus
+TYPE: PromotionStatus
+TYPE: RefundRecordStatus
+TYPE: SettlementMatchStatus
+TYPE: SettlementReviewDecision
+TYPE: SupplierInvoiceStatus
+ALTER TABLE targets: 4
+ALTER: FinanceJournalLine
+ALTER: FinancePostingLine
+ALTER: PaymentExceptionEvidence
+ALTER: SettlementEntry
+
+--- RISK INDICATORS ---
+DROP statements: 0
+TRUNCATE statements: 0
+DELETE statements: 0
+UPDATE statements: 0
+INSERT statements: 0
+ALTER TYPE statements: 0
+NOT NULL additions: 0
+
+=== M113_PROPOSED ===
+SHA256: 475C89E890951FE21D383E85F3385C1687E159F13FE33413F9400F31116A2A53
+CREATE TABLE targets: 1
+CREATE: StockTransferReceipt
+CREATE TYPE targets: 0
+ALTER TABLE targets: 2
+ALTER: StockTransferItem
+ALTER: StockTransferReceipt
+
+--- RISK INDICATORS ---
+DROP statements: 0
+TRUNCATE statements: 0
+DELETE statements: 0
+UPDATE statements: 0
+INSERT statements: 0
+ALTER TYPE statements: 1
+NOT NULL additions: 1
+
+=== SNAPSHOT / DRIFT COMPARISON ===
+Tables created in drift but not snapshot: 0
+Tables created in both scripts: 26
+SHARED: CashReconciliation
+SHARED: DrawerMovement
+SHARED: FinanceExceptionCase
+SHARED: FinanceExceptionCaseEvent
+SHARED: FinanceJournal
+SHARED: FinanceJournalLine
+SHARED: FinancePeriodLock
+SHARED: FinancePostingBatch
+SHARED: FinancePostingLine
+SHARED: FinanceSnapshot
+SHARED: InventoryCostBasis
+SHARED: InventoryCostRevision
+SHARED: LoyaltyLedgerEntry
+SHARED: PaymentException
+SHARED: PaymentExceptionEvidence
+SHARED: PromotionRedemption
+SHARED: RefundRecord
+SHARED: RetailPromotion
+SHARED: SaleCustomerLink
+SHARED: SettlementBatch
+SHARED: SettlementEntry
+SHARED: SupplierInvoice
+SHARED: SupplierPayableEvent
+SHARED: SupplierPaymentRequest
+SHARED: SupplierPaymentSettlement
+SHARED: SupplierSettlementReview

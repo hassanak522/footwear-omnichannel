@@ -1,0 +1,268 @@
+
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\package.json
+LineNumber : 3
+Line       :   "scripts":{"dev":"concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"","build":"tsc --noEmit && vite build","start":"electron ."},
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\package.json
+LineNumber : 5
+Line       :   "dependencies":{"react":"^18.3.1","react-dom":"^18.3.1","sql.js":"^1.13.0","lucide-react":"^0.468.0"},
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\package.json
+LineNumber : 6
+Line       :   "devDependencies":{"@types/node":"^22.10.0","@types/react":"^18.3.0","@types/react-dom":"^18.3.0","@types/sql.js":"^1.4.9","@vitejs/plugin-react":"^4.3.4","concurrently":"^9.1.0","electron":"^33.2.1","typescript":"^5.7.2","vi
+             te":"^6.0.5","wait-on":"^8.0.1"}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\vite.config.ts
+LineNumber : 1
+Line       : import {defineConfig} from 'vite';import react from '@vitejs/plugin-react';export default defineConfig({plugins:[react()],base:'./',server:{port:5173,strictPort:true,host:'127.0.0.1'}});
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\global.d.ts
+LineNumber : 2
+Line       : export type 
+             SalePayload={customerId?:string;deviceId:string;shiftId:string;localSaleId?:string;soldAt?:string;lines:{variantId:string;quantity:number;unitPrice:number}[];tenders:{type:'CASH'|'CARD';amount:number;reference?:string}[]};
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\global.d.ts
+LineNumber : 3
+Line       : declare global{interface Window{pos:{prepareDiscounted:(payload:any)=>Promise<{id:string;payload:any}>;listDiscounted:()=>Promise<any[]>;updateDiscounted:(id:string,status:string,response?:any,error?:string)=>Promise<void>;prin
+             tDiscounted:(id:string)=>Promise<{success:boolean;reason?:string}>;getConfig:(key:string)=>Promise<any>;setConfig:(key:string,value:any)=>Promise<void>;listCatalog:()=>Promise<Variant[]>;replaceCatalog:(items:Variant[])=>Promis
+             e<number>;printReceipt:(id:string)=>Promise<{success:boolean;reason?:string}>;saveSale:(sale:SalePayload)=>Promise<string>;listSales:()=>Promise<any[]>;pendingSales:()=>Promise<{id:string;payload:string;attempts:number}[]>;setS
+             aleResult:(id:string,status:string,error?:string)=>Promise<void>}}}export {};
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 3
+Line       : function App(){const[api,setApi]=useState('http://localhost:3001/api/v1');const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[token,setToken]=useState('');const[device,setDevice]=useState('');const
+             [deviceCode,setDeviceCode]=useState('POS-01');const[branches,setBranches]=useState<{id:string;name:string;type:string;active:boolean}[]>([]);const[location,setLocation]=useState('');const[shift,setShift]=useState('');const[open
+             ing,setOpening]=useState('0');const[items,setItems]=useState<Variant[]>([]);const[cart,setCart]=useState<Line[]>([]);const[query,setQuery]=useState('');const[tender,setTender]=useState<'CASH'|'CARD'|'SPLIT'>('CASH');const[cashA
+             mount,setCashAmount]=useState('0');const[closingCash,setClosingCash]=useState('0');const[reference,setReference]=useState('');const[status,setStatus]=useState('');const[busy,setBusy]=useState(false);const[online,setOnline]=useS
+             tate(navigator.onLine);const[tab,setTab]=useState<'sale'|'history'|'settings'>('sale');const[history,setHistory]=useState<any[]>([]);const[pending,setPending]=useState(0);const syncingRef=useRef(false);const authBlockedRef=useR
+             ef(false);const[autoSync,setAutoSync]=useState(true);const[serverShiftSummary,setServerShiftSummary]=useState<any>(null);const[reviewAcknowledged,setReviewAcknowledged]=useState(false);const[customerQuery,setCustomerQuery]=useS
+             tate('');const[customerMatches,setCustomerMatches]=useState<{id:string;name:string;phone:string}[]>([]);const[selectedCustomer,setSelectedCustomer]=useState<{id:string;name:string;phone:string}|null>(null);const[promoCode,setPr
+             omoCode]=useState('');const[promoQuote,setPromoQuote]=useState<any>(null);const[discountAttempts,setDiscountAttempts]=useState<any[]>([]);
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 4
+Line       : useEffect(()=>{(async()=>{setApi(await window.pos.getConfig('apiUrl')||'http://localhost:3001/api/v1');setDevice(await window.pos.getConfig('deviceId')||'');setLocation(await 
+             window.pos.getConfig('locationId')||'');setShift(await window.pos.getConfig('shiftId')||'');setItems(await window.pos.listCatalog());await refreshHistory();await refreshDiscountAttempts();})();const 
+             yes=()=>setOnline(true),no=()=>setOnline(false);window.addEventListener('online',yes);window.addEventListener('offline',no);return()=>{window.removeEventListener('online',yes);window.removeEventListener('offline',no);};},[]);
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 5
+Line       : async function refreshHistory(){const[h,p]=await Promise.all([window.pos.listSales(),window.pos.pendingSales()]);setHistory(h);setPending(p.length);}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 6
+Line       : async function request(path:string,method='GET',body?:unknown){const res=await fetch(api.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer 
+             '+token}:{})},body:body?JSON.stringify(body):undefined});const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(Array.isArray(data.message)?data.message.join(', '):data.message||'HTTP '+res.status);return data;}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 7
+Line       : async function login(){setBusy(true);try{const data=await request('/auth/login','POST',{email,password});setToken(data.accessToken);authBlockedRef.current=false;setStatus('Logged in. Set branch and device, then open 
+             shift.');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 8
+Line       : async function loadBranches(){setBusy(true);try{const rows=await request('/inventory/locations');const 
+             list=Array.isArray(rows)?rows:(rows?.locations||[]);setBranches(list.filter((r:any)=>r.type==='BRANCH'&&r.active));setStatus('Branches loaded. Select the branch assigned to this terminal.');}catch(e){setStatus('Unable to load 
+             branches: '+String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 9
+Line       : async function registerDevice(){if(!token){setStatus('Sign in before registering a device');return;}if(!location){setStatus('Select a branch first');return;}if(!/^[A-Z0-9_-]{3,50}$/.test(deviceCode)){setStatus('Device code 
+             must be 3–50 uppercase letters, digits, underscores or hyphens');return;}if(device){setStatus('This terminal already has a registered device ID. Do not create another without administrator 
+             approval.');return;}setBusy(true);try{const created=await request('/pos/devices','POST',{code:deviceCode,locationId:location});if(!created?.id)throw new Error('Server did not return a device ID');setDevice(created.id);await 
+             window.pos.setConfig('deviceId',created.id);await window.pos.setConfig('locationId',location);await window.pos.setConfig('apiUrl',api);setStatus('POS device registered and saved. Open a cashier shift 
+             next.');}catch(e){setStatus('Device registration failed: '+String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 10
+Line       : async function openShift(){setBusy(true);try{const r=await request('/pos/shifts/open','POST',{deviceId:device,openingCash:Number(opening)});setShift(r.id);setServerShiftSummary(null);setReviewAcknowledged(false);await 
+             window.pos.setConfig('shiftId',r.id);setStatus('Shift opened successfully');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 11
+Line       : async function cacheCatalog(){setBusy(true);try{const products=await request('/catalog/products');const 
+             variants:Variant[]=products.flatMap((p:any)=>(p.variants||[]).filter((v:any)=>v.active).map((v:any)=>({id:v.id,barcode:v.barcode,sku:v.sku,title:p.title,size:v.size,color:v.color,price:Number(v.price)})));await 
+             window.pos.replaceCatalog(variants);setItems(variants);setStatus(`Cached ${variants.length} variants for offline lookup`);}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 12
+Line       : async function sync(silent=false){if(!token||syncingRef.current||authBlockedRef.current){if(authBlockedRef.current&&!silent)setStatus('Session expired or unauthorized. Sign in again under Setup & shift before 
+             retrying.');return;}syncingRef.current=true;if(!silent)setBusy(true);let ok=0,conflicts=0;try{for(const row of await window.pos.pendingSales()){try{const result=await 
+             request('/pos/sales/sync','POST',JSON.parse(row.payload));if(result.status==='ACCEPTED'){await window.pos.setSaleResult(row.id,'ACCEPTED');ok++;}else if(result.status==='STOCK_CONFLICT'){await 
+             window.pos.setSaleResult(row.id,'STOCK_CONFLICT',result.conflictReason);conflicts++;}else await window.pos.setSaleResult(row.id,'PENDING','Unexpected server status');}catch(e){await 
+             window.pos.setSaleResult(row.id,'PENDING',String(e));if(/Unauthorized|HTTP 401/i.test(String(e))){authBlockedRef.current=true;setStatus('POS sync paused: session unauthorized. Sign in again under Setup & shift. Local sales are 
+             preserved.');}else if(!silent)setStatus('Sync paused: '+String(e));break;}}await refreshHistory();if(!silent||ok||conflicts)if(!authBlockedRef.current)setStatus(`Sync complete: ${ok} accepted, ${conflicts} stock conflicts. 
+             Pending items remain queued.`);}catch(e){if(!silent)setStatus('Sync failed: '+String(e));}finally{syncingRef.current=false;if(!silent)setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 13
+Line       : useEffect(()=>{if(!token||!autoSync)return;const timer=window.setInterval(()=>{if(navigator.onLine&&!authBlockedRef.current)void sync(true);},30000);const onReconnect=()=>{void 
+             sync(true);};window.addEventListener('online',onReconnect);return()=>{window.clearInterval(timer);window.removeEventListener('online',onReconnect);};},[token,api,autoSync]);
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 17
+Line       : async function findCustomers(){if(!token){setStatus('Sign in to search customers');return;}if(customerQuery.trim().length<5){setStatus('Enter at least five phone characters');return;}try{const found=await 
+             request('/checkout-foundation/customers?phone='+encodeURIComponent(customerQuery.trim()));setCustomerMatches(found);setStatus(`Found ${found.length} customer(s).`);}catch(e){setStatus('Customer search failed: '+String(e));}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 18
+Line       : async function checkCheckout(){
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 24
+Line       :   else setStatus('HQ preflight passed at '+new Date(r.checkedAt).toLocaleTimeString()+'. Advisory only: price and stock may change before sync.');
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 25
+Line       :  }catch(e){setStatus('Preflight unavailable: '+String(e)+'. Offline sale is still possible under existing policy.');}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 28
+Line       : async function quotePromotion(){
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 36
+Line       : async function refreshDiscountAttempts(){setDiscountAttempts(await window.pos.listDiscounted());}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 37
+Line       : async function reconcileDiscountAttempt(a:any){
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 42
+Line       :   const r=await request(`/pos/checkout/discounted-status/${encodeURIComponent(payload.deviceId)}/${encodeURIComponent(payload.localSaleId)}`);
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 57
+Line       : async function completeDiscountedSandbox(){
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 92
+Line       : async function complete(){if(!shift||!device||!cart.length){setStatus('Open a shift and add products first');return;}if((tender==='CARD'||tender==='SPLIT')&&!reference.trim()){setStatus('Card payment requires a terminal 
+             reference');return;}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 96
+Line       :  const cardCents=totalCents-cashCents;setBusy(true);try{const payload:SalePayload={...(selectedCustomer?{customerId:selectedCustomer.id}:{}),deviceId:device,shiftId:shift,lines:cart.map(l=>({variantId:l.item.id,quantity:l.qty,u
+             nitPrice:l.item.price})),tenders:[...(cashCents>0?[{type:'CASH' as const,amount:cashCents/100}]:[]),...(cardCents>0?[{type:'CARD' as const,amount:cardCents/100,reference:reference.trim()}]:[])]};const id=await 
+             window.pos.saveSale(payload);setCart([]);setPromoQuote(null);setPromoCode('');setSelectedCustomer(null);setCustomerMatches([]);setCustomerQuery('');setReference('');setCashAmount('0');await refreshHistory();setStatus('Sale 
+             '+id.slice(0,8)+' saved locally. HQ acceptance is separate.');if(token&&!authBlockedRef.current)window.setTimeout(()=>void sync(true),250);}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 103
+Line       : const conflicted=shiftSales.filter(s=>s.status==='STOCK_CONFLICT');
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 104
+Line       : const queued=shiftSales.filter(s=>s.status==='PENDING');
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 106
+Line       : async function loadShiftSummary(){if(!shift||!token){setStatus('Sign in and open a shift to view server reconciliation');return;}try{const summary=await 
+             request(`/pos/shifts/${shift}/summary`);setServerShiftSummary(summary);setStatus('Central shift summary refreshed. Compare with local transactions.');}catch(e){setStatus('Central reconciliation failed: '+String(e));}}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 107
+Line       : async function closeShift(){
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 111
+Line       :  const unresolved=all.filter(s=>{try{return JSON.parse(s.payload).shiftId===shift&&s.status==='PENDING';}catch{return true;}});
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 112
+Line       :  if(unresolved.length){setStatus(`Cannot close: ${unresolved.length} unsynchronized sales. Sign in and sync first.`);return;}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 113
+Line       :  if(all.some(s=>{try{return JSON.parse(s.payload).shiftId===shift&&s.status==='STOCK_CONFLICT';}catch{return false;}})&&!reviewAcknowledged){setStatus('Review stock-conflicted sales and acknowledge them before closing. They 
+             remain unresolved, not accepted.');return;}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 120
+Line       : async function saveSettings(){await Promise.all([window.pos.setConfig('apiUrl',api),window.pos.setConfig('deviceId',device),window.pos.setConfig('locationId',location)]);setStatus('Device settings saved locally');}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 121
+Line       : return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div 
+             className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} 
+             onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} 
+             onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> 
+             Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop · 
+             v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier 
+             shift'}</h1><p>Barcode-first checkout · Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now 
+             {pending>0?`(${pending})`:''}</button></header>{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>×</button></div>}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 122
+Line       : {tab==='settings'&&<div className="settingsgrid"><section className="panel"><h2>1. API login</h2><label>Backend API URL<input value={api} onChange={e=>setApi(e.target.value)}/></label><label>Email<input value={email} 
+             onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button onClick={login} disabled={busy||!email||!password}>Sign in to 
+             central API</button><div className="hint">{token?'Authenticated for this session':'Not signed in'}. Login again after restarting.</div></section><section className="panel"><h2>2. Register branch device</h2><button 
+             className="secondary" onClick={()=>void loadBranches()} disabled={!token||busy}>Load available branches</button><label>Assigned branch<select value={location} disabled={!!device||!!shift} 
+             onChange={e=>setLocation(e.target.value)}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}{location&&!branches.some(b=>b.id===location)&&<option 
+             value={location}>Previously configured branch ({location})</option>}</select></label><label>Device registration code<input value={deviceCode} disabled={!!device} onChange={e=>setDeviceCode(e.target.value.toUpperCase())} 
+             placeholder="BRANCH1-POS01"/></label><button onClick={()=>void registerDevice()} disabled={!token||!location||!!device||busy}>Register this terminal</button><label>Registered POS device UUID<input value={device} 
+             readOnly/></label><button className="secondary" onClick={()=>void saveSettings()} disabled={!device||!location||!!shift}>Save connection settings</button><div className="hint">Register once per physical terminal. The 
+             registered device is bound to its branch; changing branch requires administrator-assisted reprovisioning. Do not delete local sales data.</div></section><section className="panel"><h2>3. Cashier shift</h2><label>Opening cash 
+             (PKR)<input type="number" min="0" value={opening} onChange={e=>setOpening(e.target.value)}/></label><label>Current shift UUID<input value={shift} readOnly/></label><button onClick={openShift} 
+             disabled={busy||!token||!device||!!shift}>Open shift</button><div className="hint">Close requires all local shift sales accepted centrally. Stock conflicts must be reconciled first.</div><button className="secondary" 
+             onClick={refreshHistory}>Refresh reconciliation</button><button className="secondary" onClick={()=>void loadShiftSummary()} disabled={!shift||!token||busy}>Fetch central shift summary</button>{serverShiftSummary&&<div 
+             className="hint">Central accepted sales: {serverShiftSummary.acceptedSales} · Central expected cash: {money(Number(serverShiftSummary.expectedCash))} · Central cash: {money(Number(serverShiftSummary.cashSales))} · Central 
+             card: {money(Number(serverShiftSummary.cardSales))} · Server shift status: {serverShiftSummary.status}</div>}<div className="hint">Local shift transactions: {shiftSales.length} · Accepted: {accepted.length} · Pending: 
+             {queued.length} · Stock conflicts: {conflicted.length}</div>{conflicted.length>0&&<label className="hint"><input type="checkbox" checked={reviewAcknowledged} onChange={e=>setReviewAcknowledged(e.target.checked)}/> I reviewed 
+             {conflicted.length} stock-conflicted sale(s). These are NOT accepted sales and require manager follow-up.</label>}<div className="hint">Accepted cash sales: {money(shiftCash)} · Card sales: {money(shiftCard)} · Unresolved: 
+             {unsettled.length}</div><div className="hint">Expected cash (opening + accepted cash): {money(expectedCash)}</div><label>Counted closing cash (PKR)<input type="number" min="0" step="0.01" value={closingCash} 
+             onChange={e=>setClosingCash(e.target.value)}/></label><div className="hint">Local cash variance: {money(closingVariance)} (excludes cash payouts/returns)</div><button onClick={closeShift} 
+             disabled={busy||!token||!shift||queued.length>0||(conflicted.length>0&&!reviewAcknowledged)}>Close shift on central server</button></section><section className="panel"><h2>4. Offline product catalog</h2><p>Download the active 
+             product variants while connected. Barcodes and prices will remain available offline.</p><div className="bigstat">{items.length}</div><div className="hint">Cached product variants</div><button onClick={cacheCatalog} 
+             disabled={busy||!token}><Package size={16}/> Refresh product catalog</button></section></div>}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 126
+Line       : <p className="hint">This check does not authorize discounts or reserve stock. Offline sales still require reconciliation.</p>
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 135
+Line       : <p className="hint">Customer search needs an internet connection. Once selected, the customer ID is saved with the offline sale and synchronized later. No loyalty points or discounts are applied yet.</p>
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 136
+Line       : </section><section className="panel searchpanel"><h2>Find footwear</h2><div className="search"><Search size={21}/><input autoFocus placeholder="Scan barcode or search product, SKU, size..." value={query} 
+             onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&results.length===1)add(results[0]);}}/></div><div className="hint">Barcode scanners that act as keyboards work in this field. Press Enter for an exact 
+             single match.</div><div className="results">{query&&results.length===0&&<div className="empty">No matching cached products</div>}{results.map(v=><button className="product" key={v.id} onClick={()=>add(v)}><div 
+             className="shoe"><Package size={22}/></div><div className="productinfo"><strong>{v.title}</strong><small>{v.sku} · Size {v.size} · {v.color}</small><small>Barcode: 
+             {v.barcode}</small></div><strong>{money(v.price)}</strong><Plus size={18}/></button>)}{!query&&<div className="empty"><Search size={34}/><h3>Ready to scan</h3><p>Search a product or scan a barcode to add it to the 
+             sale.</p></div>}</div></section><section className="panel cartpanel"><div className="carthead"><h2>Current sale</h2><span>{cart.reduce((s,l)=>s+l.qty,0)} pairs</span></div><div className="cartitems">{cart.length===0?<div 
+             className="empty">Your cart is empty</div>:cart.map(l=><div className="cartline" key={l.item.id}><div className="productinfo"><strong>{l.item.title}</strong><small>{l.item.sku} · {l.item.size} · 
+             {l.item.color}</small><small>{money(l.item.price)} each</small></div><div className="qty"><button onClick={()=>change(l.item.id,-1)}><Minus size={14}/></button>{l.qty}<button onClick={()=>change(l.item.id,1)}><Plus 
+             size={14}/></button></div><strong>{money(l.item.price*l.qty)}</strong><button className="iconbutton" onClick={()=>setCart(old=>old.filter(x=>x.item.id!==l.item.id))}><Trash2 size={16}/></button></div>)}</div><div 
+             className="summary"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Discount / Tax</span><span>Not configured</span></div><div className="grand"><span>Total 
+             due</span><strong>{money(total)}</strong></div><div className="tenders"><button className={tender==='CASH'?'selected':''} onClick={()=>setTender('CASH')}>Cash</button><button className={tender==='CARD'?'selected':''} 
+             onClick={()=>setTender('CARD')}>Card</button><button className={tender==='SPLIT'?'selected':''} onClick={()=>setTender('SPLIT')}>Split</button></div>{tender==='SPLIT'&&<label>Cash portion (PKR)<input type="number" min="0" 
+             max={total} step="0.01" value={cashAmount} onChange={e=>setCashAmount(e.target.value)}/><span className="hint">Card portion: 
+             {money(Math.max(0,total-(Number(cashAmount)||0)))}</span></label>}{(tender==='CARD'||tender==='SPLIT')&&<label>Card reference<input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Approved terminal 
+             reference"/></label>}<button className="secondary" disabled={import.meta.env.VITE_ENABLE_DISCOUNT_SANDBOX!=='true'||busy||!online||!token||!promoQuote?.promotion?.eligible||!cart.length||!shift} onClick={()=>void 
+             completeDiscountedSandbox()}>SANDBOX ONLY · Record discounted test sale</button><p className="hint">Posts real database inventory movement; use test data only. Not approved for real payments.</p><button className="checkout" 
+             onClick={complete} disabled={busy||!cart.length||!shift}>Complete sale · Save locally</button><p className="hint">Offline sales are provisional until HQ accepts them. A stock conflict requires manager reconciliation; a card 
+             reference is not proof of payment authorization.</p></div></section></div>}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 137
+Line       : {tab==='history'&&<section className="panel"><h2>Discounted checkout recovery</h2><button className="secondary" onClick={()=>void refreshDiscountAttempts()}>Refresh attempts</button><div 
+             className="tablewrap"><table><thead><tr><th>Attempt</th><th>Status</th><th>Recorded</th><th>Action</th></tr></thead><tbody>{discountAttempts.map(a=><tr key={a.id}><td>{a.id.slice(0,8)}</td><td>{a.status}</td><td>{new 
+             Date(a.created_at).toLocaleString()}</td><td>{a.status==='ACCEPTED'?<button className="secondary" onClick={async()=>{try{const r=await window.pos.printDiscounted(a.id);if(!r.success)setStatus('Print failed: 
+             '+r.reason)}catch(e){setStatus(String(e))}}}>Print discounted receipt</button>:<button className="secondary" disabled={busy||!token} onClick={()=>void reconcileDiscountAttempt(a)}>Check server 
+             status</button>}</td></tr>)}</tbody></table></div></section>}
+
+Path       : G:\footwear-omnichannel\apps\pos-desktop\src\main.tsx
+LineNumber : 138
+Line       : {tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div className="tablewrap"><table><thead><tr><th>Local 
+             sale</th><th>Created</th><th>Total</th><th>Status</th><th>Details</th><th>Receipt</th></tr></thead><tbody>{history.map(s=><tr key={s.id}><td>{s.id.slice(0,8)}…</td><td>{new 
+             Date(s.created_at).toLocaleString()}</td><td>{money(JSON.parse(s.payload).tenders.reduce((n:number,t:any)=>n+t.amount,0))}</td><td><span className={'status 
+             '+s.status.toLowerCase()}>{s.status}</span></td><td>{s.error||'—'}</td><td><button className="secondary" onClick={async()=>{try{const result=await window.pos.printReceipt(s.id);if(!result.success)setStatus('Print cancelled or 
+             failed: '+(result.reason||''));}catch(e){setStatus(String(e));}}}>Print</button></td></tr>)}</tbody></table>{!history.length&&<div className="empty">No sales saved yet</div>}</div></section>}
+
+
+
+

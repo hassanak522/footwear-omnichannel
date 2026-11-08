@@ -1,0 +1,15 @@
+{
+    "Name":  "@footwear/pos-desktop",
+    "Main":  "electron/main.cjs",
+    "Scripts":  {
+                    "dev":  "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 \u0026\u0026 electron .\"",
+                    "build":  "tsc --noEmit \u0026\u0026 vite build",
+                    "start":  "electron ."
+                },
+    "Dependencies":  [
+                         "react",
+                         "react-dom",
+                         "sql.js",
+                         "lucide-react"
+                     ]
+}

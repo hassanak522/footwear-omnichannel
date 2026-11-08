@@ -1,0 +1,93 @@
+﻿M115-B16M PRISMA MODEL RECOVERY
+Mode: READ-ONLY
+
+=== PRISMA SCHEMA INVENTORY ===
+Schema files found: 4
+SCHEMA: G:\footwear-omnichannel\packages\database\prisma\schema.prisma
+SCHEMA: G:\footwear-omnichannel\security-checks\M113_BACKUP_20261105_190548\schema.prisma
+SCHEMA: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA: G:\M112_B8I_BACKUP_20261103_204232\packages\database\prisma\schema.prisma
+
+=== OPERATIONAL MODEL RECOVERY ===
+
+MODEL: LoyaltyAdjustment
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: LoyaltyEntry
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: LoyaltyRedemption
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: OnlineRefundSettlement
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: OnlineReturn
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: OnlineReturnLine
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: PosExchange
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+MODEL: PosRefundSettlement
+FOUND IN: G:\footwear-omnichannel-main\packages\database\prisma\schema.prisma
+SCHEMA SHA256: F5BECE95465E819211673C05828F282D18F89B623000121C734C952E88D870F1
+
+=== MIGRATION COVERAGE ===
+
+TABLE: LoyaltyAdjustment
+MIGRATION: 20261023150000_loyalty_adjustments
+
+TABLE: LoyaltyEntry
+MIGRATION: 20261023120000_loyalty_entry
+MIGRATION: 20261023150000_loyalty_adjustments
+
+TABLE: LoyaltyRedemption
+MIGRATION: 20261024120000_loyalty_redemptions
+
+TABLE: OnlineRefundSettlement
+MIGRATION: 20261023180000_online_refund_settlements
+MIGRATION: 20261024130000_refund_balance_guards
+
+TABLE: OnlineReturn
+MIGRATION: 20261023170000_online_returns
+MIGRATION: 20261023180000_online_refund_settlements
+MIGRATION: 20261024130000_refund_balance_guards
+
+TABLE: OnlineReturnLine
+MIGRATION: 20261023170000_online_returns
+
+TABLE: PosExchange
+MIGRATION: 20261023160000_pos_exchanges
+
+TABLE: PosRefundSettlement
+MIGRATION: 20261023130000_pos_refund_settlement
+MIGRATION: 20261023140000_refund_payout_shift
+MIGRATION: 20261024130000_refund_balance_guards
+
+=== CURRENT SCHEMA RELATION REFERENCES ===
+
+LoyaltyAdjustment references: 0
+
+LoyaltyEntry references: 0
+
+LoyaltyRedemption references: 0
+
+OnlineRefundSettlement references: 0
+
+OnlineReturn references: 0
+
+OnlineReturnLine references: 0
+
+PosExchange references: 0
+
+PosRefundSettlement references: 0

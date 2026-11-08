@@ -1,0 +1,7 @@
+﻿{
+    "variantId":  "839557a6-bb35-4ef8-8066-dd5cef6f2747",
+    "payload":  "{\r\n    \"idempotencyKey\":  \"M112B8H-3c979527d9b54e48a728c9fd2fd87e5d\",\r\n    \"lines\":  [\r\n                  {\r\n                      \"variantId\":  \"839557a6-bb35-4ef8-8066-dd5cef6f2747\",\r\n                      \"quantity\":  1,\r\n                      \"quarantined\":  false\r\n                  }\r\n              ],\r\n    \"reason\":  \"M112 B8H closed shift refund regression\",\r\n    \"saleId\":  \"80e79bb0-a21c-44f3-9f45-468b0006de2f\"\r\n}",
+    "shiftId":  "2d5f25cc-9367-400e-ae2b-d9ea774207cb",
+    "saleId":  "80e79bb0-a21c-44f3-9f45-468b0006de2f",
+    "idempotencyKey":  "M112B8H-3c979527d9b54e48a728c9fd2fd87e5d"
+}

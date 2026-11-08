@@ -1,0 +1,8 @@
+"Check","Found","Evidence"
+"Serializable transactions","True","STATIC_ONLY"
+"PostgreSQL advisory locking","True","STATIC_ONLY"
+"Stock availability validation","True","STATIC_ONLY"
+"Reservation idempotency lookup","True","STATIC_ONLY"
+"Reservation persistence","True","STATIC_ONLY"
+"Stock balance version increment","True","STATIC_ONLY"
+"Reservation release handling","True","STATIC_ONLY"

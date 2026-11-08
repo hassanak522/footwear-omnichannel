@@ -1,0 +1,4 @@
+accepted_sale|1
+conflict_sale|1
+accepted_movement|1
+conflict_movement|0

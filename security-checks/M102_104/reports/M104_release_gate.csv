@@ -1,0 +1,6 @@
+﻿"Gate","Status","Requirement"
+"Authenticated checkout/order/returns end-to-end","UNVERIFIED","Run isolated staging tests with authorized roles"
+"Concurrent stock reservation and transfer","UNVERIFIED","Exercise parallel transactions on staging DB"
+"Branch isolation for POS and warehouse","UNVERIFIED","Use restricted branch accounts and two locations"
+"Payment, refund, reconciliation and audit","UNVERIFIED","Use test payment flows and verify DB ledger"
+"Prior M101 release gates","UNVERIFIED","Resolve prior unverified release gates"

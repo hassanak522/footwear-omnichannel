@@ -1,0 +1,10 @@
+{
+    "localSaleId":  "d3703457-488a-486c-9908-39c8299e8616",
+    "quantity":  3,
+    "shiftId":  "43f04393-9676-444a-9d3b-6bc805a783c6",
+    "createdAtUTC":  "2026-11-03T11:56:50.9852019Z",
+    "expectedTotal":  3000,
+    "variantId":  "839557a6-bb35-4ef8-8066-dd5cef6f2747",
+    "deviceId":  "1df20f67-b9ca-4d94-ae3c-3c7a54d0e8dc",
+    "saleId":  "4430f9a8-5325-496d-b1f5-d2d1ae8f3488"
+}

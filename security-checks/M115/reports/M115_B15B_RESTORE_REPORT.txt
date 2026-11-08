@@ -1,0 +1,14 @@
+﻿M115-B15B ISOLATED RESTORE
+Status: RESTORE COMPLETED
+Source backup: G:\RoyalStep-DB-Backups\royalstep_operational_20261107_142456.dump
+Backup SHA256: 37928FD9078E323FEAF0152D19772920306EAF7938DBBE0F0531ABEF51BADB1F
+Recovery database: footwear_m115_restore_20261107
+Restore verification:
+BEGIN
+DATABASE|footwear_m115_restore_20261107
+TABLE_COUNT|42
+MIGRATION_COUNT|15
+MIGRATION_STATUS|15|0
+ROLLBACK
+Operational database unchanged by restore procedure.
+QA database unchanged by restore procedure.

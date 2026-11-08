@@ -1,0 +1,112 @@
+[
+    {
+        "test":  "EXPLICIT_QA_CONFIRMATION",
+        "pass":  true,
+        "detail":  "Verify the running API DATABASE_URL independently before execution"
+    },
+    {
+        "test":  "TOKEN_PRESENT",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "API_PID",
+        "pass":  true,
+        "detail":  "actual=12164 expected=12164"
+    },
+    {
+        "test":  "API_COMMAND",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "QA_DB",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "AUTH_SESSION",
+        "pass":  true,
+        "detail":  "HTTP 200"
+    },
+    {
+        "test":  "DEVICE_AUTHORIZED",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "SHIFT_MATCH",
+        "pass":  true,
+        "detail":  "Expected existing open synthetic QA shift"
+    },
+    {
+        "test":  "QA_SHIFT_DB",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "STOCK_ROW",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "STOCK_BUFFER",
+        "pass":  true,
+        "detail":  "available=32"
+    },
+    {
+        "test":  "LOST_RESPONSE_SERVER_COMMIT",
+        "pass":  true,
+        "detail":  "HTTP 201"
+    },
+    {
+        "test":  "LOST_RESPONSE_REPLAY",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "LOST_RESPONSE_EXACTLY_ONCE",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONCURRENT_DUPLICATE_RESPONSES",
+        "pass":  true,
+        "detail":  "responses=4"
+    },
+    {
+        "test":  "CONCURRENT_DUPLICATE_FLAGS",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONCURRENT_DUPLICATE_SINGLE_ID",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONCURRENT_DUPLICATE_EXACTLY_ONCE",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONTENTION_STOCK_ROW",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONTENTION_STOCK_MINIMUM",
+        "pass":  true,
+        "detail":  "available=30"
+    },
+    {
+        "test":  "CONTENTION_HTTP_SUCCESS",
+        "pass":  true,
+        "detail":  ""
+    },
+    {
+        "test":  "CONTENTION_ONE_ACCEPTED_ONE_CONFLICT",
+        "pass":  true,
+        "detail":  ""
+    }
+]

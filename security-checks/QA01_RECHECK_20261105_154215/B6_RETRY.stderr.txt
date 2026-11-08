@@ -1,0 +1,14 @@
+npm notice run footwear-omnichannel@1.0.0 npx
+npm notice run jest --config jest.m112-b6.config.cjs --runInBand --no-coverage
+PASS src/pos-retry.m112-b6.spec.ts (41.96 s)
+  M112-B8I-05M-B6 POS transaction retry
+    √ retries transient P2034 and succeeds (12 ms)
+    √ returns HTTP 409 after six P2034 failures (5 ms)
+    √ does not retry non-P2034 errors (1 ms)
+    √ does not retry other Prisma errors (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        44.138 s
+Ran all test suites.

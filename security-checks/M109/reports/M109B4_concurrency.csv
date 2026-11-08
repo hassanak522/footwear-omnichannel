@@ -1,0 +1,3 @@
+"Request","Status","Body"
+"1","201","{""id"":""c53fcca5-708e-46fd-a244-f433baac38ad"",""locationId"":""87a6cd9a-ff80-41f4-869c-669b63068fce"",""variantId"":""127776de-a3a2-43d9-bd4f-639c16679c3c"",""purpose"":""ONLINE_ORDER"",""status"":""ACTIVE"",""quantity"":1,""referenceId"":""M109-A-1506972c9ceb4afe9681629bfb89c9d9"",""expiresAt"":null,""createdAt"":""2026-10-31T10:22:40.940Z"",""updatedAt"":""2026-10-31T10:22:40.940Z""}"
+"2","500","{""statusCode"":500,""message"":""Internal server error""}"

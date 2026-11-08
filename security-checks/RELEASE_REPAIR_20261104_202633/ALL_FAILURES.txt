@@ -1,0 +1,50 @@
+﻿========== API_BUILD ==========
+TOTAL LOG LINES: 7
+node.exe : npm notice run @footwear/api@1.0.0 build
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run @footwear/api@1.0.0 build:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+========== API_TESTS ==========
+TOTAL LOG LINES: 7
+node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+========== B6_RETRY ==========
+TOTAL LOG LINES: 7
+node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+========== B8_CLOSING ==========
+TOTAL LOG LINES: 7
+node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+========== B8_AUTHORIZATION ==========
+TOTAL LOG LINES: 7
+node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+

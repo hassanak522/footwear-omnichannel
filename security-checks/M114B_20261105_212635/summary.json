@@ -1,0 +1,56 @@
+{
+  "scope": "LOCAL_ONLY",
+  "operationalDatabaseTouched": false,
+  "isolatedUserData": "G:\\footwear-omnichannel\\security-checks\\M114B_20261105_212635\\isolated-electron-userdata",
+  "checks": [
+    {
+      "name": "SAVE_UUID",
+      "result": "PASS"
+    },
+    {
+      "name": "OUTBOX_INSERT",
+      "result": "PASS"
+    },
+    {
+      "name": "DISK_FILE_EXISTS",
+      "result": "PASS"
+    },
+    {
+      "name": "RESTART_PRESERVES_PENDING",
+      "result": "PASS"
+    },
+    {
+      "name": "NETWORK_FAILURE_PRESERVES_OUTBOX",
+      "result": "PASS"
+    },
+    {
+      "name": "RESTART_PRESERVES_RETRY",
+      "result": "PASS"
+    },
+    {
+      "name": "ACCEPTED_REMOVES_OUTBOX",
+      "result": "PASS"
+    },
+    {
+      "name": "ACCEPTED_PRESERVED_IN_HISTORY",
+      "result": "PASS"
+    },
+    {
+      "name": "UNKNOWN_RESULT_REJECTED",
+      "result": "FAIL",
+      "detail": "DEFECT: unknown ID silently accepted"
+    },
+    {
+      "name": "TERMINAL_DOWNGRADE_REJECTED",
+      "result": "FAIL",
+      "detail": "DEFECT: ACCEPTED can be reverted to PENDING"
+    },
+    {
+      "name": "NO_REQUEUE_AFTER_ACCEPTANCE",
+      "result": "PASS",
+      "detail": "not requeued"
+    }
+  ],
+  "passed": 9,
+  "failed": 2
+}

@@ -1,0 +1,202 @@
+﻿
+  apps\api\src\transfers.ts:11: @IsUUID() sourceId!: string; @IsUUID() destinationId!: string;
+  apps\api\src\transfers.ts:12: @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>TransferLine) 
+items!: TransferLine[];
+> apps\api\src\transfers.ts:13: @IsString() @MinLength(8) idempotencyKey!: string;
+  apps\api\src\transfers.ts:14:}
+> apps\api\src\transfers.ts:15:class ActionDto { @IsString() @MinLength(8) idempotencyKey!: string; }
+  apps\api\src\transfers.ts:16:class ReceiptLine { @IsUUID() variantId!: string; @IsInt() @Min(0) receivedQty!: 
+number; @IsInt() @Min(0) damagedQty!: number; }
+  apps\api\src\transfers.ts:17:class ReceiveDto extends ActionDto { @IsArray() @ArrayMinSize(1) 
+@ValidateNested({each:true}) @Type(()=>ReceiptLine) items!: ReceiptLine[]; }
+  apps\api\src\transfers.ts:18:class CloseShortageDto extends ActionDto { @IsString() @MinLength(10) reason!: 
+string; }
+  apps\api\src\transfers.ts:19:
+  apps\api\src\transfers.ts:20:function canonicalJson(value: unknown): string {
+  apps\api\src\transfers.ts:46: }
+  apps\api\src\transfers.ts:47: private async 
+once(tx:Prisma.TransactionClient,key:string,action:string,transferId:string,payload:unknown){
+> apps\api\src\transfers.ts:48:  const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:key}});
+  apps\api\src\transfers.ts:49:  if(prior){if(prior.source!==`TRANSFER_${action}` || 
+canonicalJson(prior.payload)!==canonicalJson({transferId,payload}))throw new ConflictException('Idempotency key 
+reused');return true;}
+  apps\api\src\transfers.ts:50:  return false;
+  apps\api\src\transfers.ts:51: }
+  apps\api\src\transfers.ts:52: private async 
+event(tx:Prisma.TransactionClient,key:string,action:string,transferId:string,payload:unknown){
+> apps\api\src\transfers.ts:53:  await tx.integrationEvent.create({data:{source:`TRANSFER_${action}`,eventType:acti
+on,idempotencyKey:key,payload:JSON.parse(JSON.stringify({transferId,payload})),processedAt:new Date()}});
+  apps\api\src\transfers.ts:54: }
+  apps\api\src\transfers.ts:55: private async 
+audit(tx:Prisma.TransactionClient,u:Principal,action:string,id:string,before:unknown,after:unknown){
+  apps\api\src\transfers.ts:56:  await 
+tx.auditLog.create({data:{actorId:u.id,action,entityType:'StockTransfer',entityId:id,before:before as 
+Prisma.InputJsonValue,after:after as Prisma.InputJsonValue}});
+  apps\api\src\transfers.ts:57: }
+  apps\api\src\transfers.ts:58: async create(dto:CreateTransferDto,u:Principal){
+  apps\api\src\transfers.ts:60:  if(dto.sourceId===dto.destinationId)throw new BadRequestException('Source and 
+destination must differ');
+  apps\api\src\transfers.ts:61:  if(new Set(dto.items.map(i=>i.variantId)).size!==dto.items.length)throw new 
+BadRequestException('Duplicate variants');
+> apps\api\src\transfers.ts:62:  return this.db.$transaction(async tx=>{
+> apps\api\src\transfers.ts:63:   const prior=await 
+tx.integrationEvent.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
+  apps\api\src\transfers.ts:64:   
+if(prior){if(prior.source!=='TRANSFER_CREATE'||canonicalJson(prior.payload)!==canonicalJson(dto))throw new 
+ConflictException('Idempotency key reused');return 
+tx.stockTransfer.findUniqueOrThrow({where:{id:(prior.eventType)},include:{items:true}});}
+  apps\api\src\transfers.ts:65:   const locations=await 
+tx.location.findMany({where:{id:{in:[dto.sourceId,dto.destinationId]},active:true}});
+  apps\api\src\transfers.ts:66:   if(locations.length!==2 || 
+!locations.some(l=>l.id===dto.sourceId&&['WAREHOUSE','BRANCH'].includes(l.type)) || 
+!locations.some(l=>l.id===dto.destinationId&&['BRANCH','ONLINE'].includes(l.type)))throw new 
+BadRequestException('Only active warehouse/branch to branch/online transfers are supported');
+  apps\api\src\transfers.ts:67:   const variants=await 
+tx.productVariant.count({where:{id:{in:dto.items.map(i=>i.variantId)},active:true}});
+  apps\api\src\transfers.ts:68:   if(variants!==dto.items.length)throw new BadRequestException('Unknown or 
+inactive variant');
+  apps\api\src\transfers.ts:69:   const transfer=await tx.stockTransfer.create({data:{transferNumber:`TR-${randomUU
+ID()}`,sourceId:dto.sourceId,destinationId:dto.destinationId,items:{create:dto.items.map(i=>({variantId:i.variantId
+,requestedQty:i.quantity}))}},include:{items:true}});
+> apps\api\src\transfers.ts:70:   await tx.integrationEvent.create({data:{source:'TRANSFER_CREATE',eventType:transf
+er.id,idempotencyKey:dto.idempotencyKey,payload:JSON.parse(JSON.stringify(dto)),processedAt:new Date()}});
+  apps\api\src\transfers.ts:71:   await this.audit(tx,u,'TRANSFER_REQUEST',transfer.id,{}, {status:'REQUESTED'});
+  apps\api\src\transfers.ts:72:   return transfer;
+  apps\api\src\transfers.ts:73:  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, 
+timeout:30000});
+  apps\api\src\transfers.ts:74: }
+  apps\api\src\transfers.ts:75: async approve(id:string,dto:ActionDto,u:Principal){
+  apps\api\src\transfers.ts:76:  this.requireRole(u,'WAREHOUSE_MANAGER','BRANCH_MANAGER');
+> apps\api\src\transfers.ts:77:  return this.db.$transaction(async tx=>{
+  apps\api\src\transfers.ts:78:   const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+> apps\api\src\transfers.ts:79:   if(await this.once(tx,dto.idempotencyKey,'APPROVE',id,{}))return t;
+  apps\api\src\transfers.ts:80:   if(t.status!=='REQUESTED')throw new ConflictException('Transfer must be 
+requested');
+  apps\api\src\transfers.ts:81:   for(const item of 
+[...t.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+  apps\api\src\transfers.ts:82:    const b=await this.lockBalance(tx,t.sourceId,item.variantId);
+  apps\api\src\transfers.ts:83:    
+if(b.onHand-b.reservedOnline-b.reservedReplenish-b.quarantined-b.safetyBuffer<item.requestedQty)throw new 
+ConflictException(`Insufficient stock for ${item.variantId}`);
+  apps\api\src\transfers.ts:84:    await tx.stockBalance.update({where:{id:b.id},data:{reservedReplenish:{increment
+:item.requestedQty},version:{increment:1}}});
+  apps\api\src\transfers.ts:85:   }
+  apps\api\src\transfers.ts:86:   const result=await 
+tx.stockTransfer.update({where:{id},data:{status:'APPROVED'},include:{items:true}});
+> apps\api\src\transfers.ts:87:   await this.event(tx,dto.idempotencyKey,'APPROVE',id,{});await 
+this.audit(tx,u,'TRANSFER_APPROVE',id,{status:t.status},{status:result.status});return result;
+  apps\api\src\transfers.ts:88:  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, 
+timeout:30000});
+  apps\api\src\transfers.ts:89: }
+> apps\api\src\transfers.ts:90: async dispatch(id:string,dto:ActionDto,u:Principal){
+  apps\api\src\transfers.ts:91:  this.requireRole(u,'WAREHOUSE_MANAGER','BRANCH_MANAGER');
+> apps\api\src\transfers.ts:92:  return this.db.$transaction(async tx=>{
+  apps\api\src\transfers.ts:93:   const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+> apps\api\src\transfers.ts:94:   if(await this.once(tx,dto.idempotencyKey,'DISPATCH',id,{}))return t;
+  apps\api\src\transfers.ts:95:   if(t.status!=='APPROVED')throw new ConflictException('Transfer must be 
+approved');
+  apps\api\src\transfers.ts:96:   for(const item of 
+[...t.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+  apps\api\src\transfers.ts:97:    const b=await this.lockBalance(tx,t.sourceId,item.variantId);
+  apps\api\src\transfers.ts:98:    if(b.onHand<item.requestedQty||b.reservedReplenish<item.requestedQty)throw new 
+ConflictException('Reserved stock mismatch');
+  apps\api\src\transfers.ts:99:    await tx.stockBalance.update({where:{id:b.id},data:{onHand:{decrement:item.reque
+stedQty},reservedReplenish:{decrement:item.requestedQty},version:{increment:1}}});
+  apps\api\src\transfers.ts:100:    await 
+tx.stockTransferItem.update({where:{id:item.id},data:{dispatchedQty:item.requestedQty}});
+> apps\api\src\transfers.ts:101:    await tx.stockMovement.create({data:{locationId:t.sourceId,variantId:item.varia
+ntId,type:'TRANSFER_DISPATCH',quantityDelta:-item.requestedQty,referenceType:'STOCK_TRANSFER',referenceId:id,idempo
+tencyKey:`transfer:${id}:dispatch:${item.variantId}`,actorId:u.id}});
+  apps\api\src\transfers.ts:102:   }
+  apps\api\src\transfers.ts:103:   const result=await 
+tx.stockTransfer.update({where:{id},data:{status:'DISPATCHED',dispatchedAt:new Date()},include:{items:true}});
+> apps\api\src\transfers.ts:104:   await this.event(tx,dto.idempotencyKey,'DISPATCH',id,{});await 
+this.audit(tx,u,'TRANSFER_DISPATCH',id,{status:t.status},{status:result.status});return result;
+  apps\api\src\transfers.ts:105:  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, 
+timeout:30000});
+  apps\api\src\transfers.ts:106: }
+> apps\api\src\transfers.ts:107: async receive(id:string,dto:ReceiveDto,u:Principal){
+  apps\api\src\transfers.ts:108:  this.requireRole(u,'BRANCH_MANAGER','WAREHOUSE_MANAGER');
+> apps\api\src\transfers.ts:109:  return this.db.$transaction(async tx=>{
+  apps\api\src\transfers.ts:110:   const t=await this.lockedTransfer(tx,id);this.access(u,t.destinationId);
+> apps\api\src\transfers.ts:111:   if(await this.once(tx,dto.idempotencyKey,'RECEIVE',id,dto.items))return t;
+  apps\api\src\transfers.ts:112:   if(t.status!=='DISPATCHED'&&t.status!=='PARTIALLY_RECEIVED')throw new 
+ConflictException('Transfer is not open for receipt');
+  apps\api\src\transfers.ts:113:   if(dto.items.length!==t.items.length||new 
+Set(dto.items.map(i=>i.variantId)).size!==dto.items.length)throw new BadRequestException('Provide one receipt line 
+for each dispatched variant');
+  apps\api\src\transfers.ts:114:   const expected=new Map(t.items.map(i=>[i.variantId,i]));
+  apps\api\src\transfers.ts:115:   let receivedThisTime=0;
+  apps\api\src\transfers.ts:116:   for(const line of dto.items){
+  apps\api\src\transfers.ts:129:    await tx.stockBalance.update({where:{id:balance.id},data:{onHand:{increment:qua
+ntity},quarantined:{increment:line.damagedQty},version:{increment:1}}});
+  apps\api\src\transfers.ts:130:    await tx.stockTransferItem.update({where:{id:item.id},data:{receivedQty:{increm
+ent:line.receivedQty},damagedQty:{increment:line.damagedQty}}});
+> apps\api\src\transfers.ts:131:    await tx.stockTransferReceipt.create({data:{transferId:id,variantId:line.varian
+tId,receivedQty:line.receivedQty,damagedQty:line.damagedQty,idempotencyKey:dto.idempotencyKey,actorId:u.id}});
+> apps\api\src\transfers.ts:132:    await tx.stockMovement.create({data:{locationId:t.destinationId,variantId:line.
+variantId,type:'TRANSFER_RECEIPT',quantityDelta:quantity,referenceType:'STOCK_TRANSFER',referenceId:id,idempotencyK
+ey:`transfer:${id}:receive:${dto.idempotencyKey}:${line.variantId}`,actorId:u.id,metadata:{damagedQty:line.damagedQ
+ty,receiptKey:dto.idempotencyKey}}});
+  apps\api\src\transfers.ts:133:   }
+  apps\api\src\transfers.ts:134:   const updatedItems=await tx.stockTransferItem.findMany({where:{transferId:id}});
+  apps\api\src\transfers.ts:135:   const 
+complete=updatedItems.every(i=>i.receivedQty+i.damagedQty+i.shortageQty===i.dispatchedQty);
+  apps\api\src\transfers.ts:136:   const status:TransferStatus=complete?'RECEIVED':'PARTIALLY_RECEIVED';
+  apps\api\src\transfers.ts:137:   const result=await 
+tx.stockTransfer.update({where:{id},data:{status,receivedAt:complete?new Date():null},include:{items:true}});
+> apps\api\src\transfers.ts:138:   await this.event(tx,dto.idempotencyKey,'RECEIVE',id,dto.items);
+  apps\api\src\transfers.ts:139:   await 
+this.audit(tx,u,'TRANSFER_RECEIVE',id,{status:t.status},{status,receivedThisTime});
+  apps\api\src\transfers.ts:140:   return result;
+  apps\api\src\transfers.ts:141:  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, 
+timeout:30000});
+  apps\api\src\transfers.ts:142: }
+> apps\api\src\transfers.ts:143: async closeShortage(id:string,dto:CloseShortageDto,u:Principal){
+  apps\api\src\transfers.ts:144:  this.requireRole(u,'WAREHOUSE_MANAGER');
+> apps\api\src\transfers.ts:145:  return this.db.$transaction(async tx=>{
+  apps\api\src\transfers.ts:146:   const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+> apps\api\src\transfers.ts:147:   if(await 
+this.once(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason}))return t;
+  apps\api\src\transfers.ts:148:   if(t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Only partially 
+received transfers can be shortage-closed');
+  apps\api\src\transfers.ts:149:   let outstanding=0;
+  apps\api\src\transfers.ts:150:   for(const item of t.items){
+  apps\api\src\transfers.ts:151:    const 
+missing=item.dispatchedQty-item.receivedQty-item.damagedQty-item.shortageQty;
+  apps\api\src\transfers.ts:152:    if(missing<0)throw new ConflictException('Transfer quantities inconsistent');
+  apps\api\src\transfers.ts:158:   if(outstanding===0)throw new ConflictException('No outstanding quantity');
+  apps\api\src\transfers.ts:159:   const result=await 
+tx.stockTransfer.update({where:{id},data:{status:'SHORTAGE_CLOSED'},include:{items:true}});
+> apps\api\src\transfers.ts:160:   await this.event(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason});
+  apps\api\src\transfers.ts:161:   await this.audit(tx,u,'TRANSFER_SHORTAGE_CLOSE',id,{status:t.status},{status:'SH
+ORTAGE_CLOSED',outstanding,reason:dto.reason});
+  apps\api\src\transfers.ts:162:   return result;
+  apps\api\src\transfers.ts:163:  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, 
+timeout:30000});
+  apps\api\src\transfers.ts:164: }
+  apps\api\src\transfers.ts:165: async list(u:Principal){return this.db.stockTransfer.findMany({where:u.roles.inclu
+des('SUPER_ADMIN')?{}:{OR:[{sourceId:{in:u.locations}},{destinationId:{in:u.locations}}]},include:{items:true},orde
+rBy:{createdAt:'desc'},take:200});}
+  apps\api\src\transfers.ts:169:export class TransfersController {
+  apps\api\src\transfers.ts:170: constructor(private svc:TransfersService){}
+> apps\api\src\transfers.ts:171: @Post() @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') create(@Body() 
+dto:CreateTransferDto,@CurrentUser() u:Principal){return this.svc.create(dto,u);}
+> apps\api\src\transfers.ts:172: @Get() list(@CurrentUser() u:Principal){return this.svc.list(u);}
+> apps\api\src\transfers.ts:173: @Get(':id') get(@Param('id') id:string,@CurrentUser() u:Principal){return 
+this.svc.get(id,u);}
+> apps\api\src\transfers.ts:174: @Post(':id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') 
+approve(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return 
+this.svc.approve(id,dto,u);}
+> apps\api\src\transfers.ts:175: @Post(':id/dispatch') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') 
+dispatch(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return 
+this.svc.dispatch(id,dto,u);}
+> apps\api\src\transfers.ts:176: @Post(':id/receive') @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') 
+receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){return 
+this.svc.receive(id,dto,u);}
+> apps\api\src\transfers.ts:177: @Post(':id/close-shortage') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') 
+closeShortage(@Param('id') id:string,@Body() dto:CloseShortageDto,@CurrentUser() u:Principal){return 
+this.svc.closeShortage(id,dto,u);}
+  apps\api\src\transfers.ts:178:}
+
+

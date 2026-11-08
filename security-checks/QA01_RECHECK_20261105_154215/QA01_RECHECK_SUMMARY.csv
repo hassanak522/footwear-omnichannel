@@ -1,0 +1,6 @@
+"Check","Status","ExitCode","Stdout","Stderr"
+"API_BUILD","PASS","0","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\API_BUILD.stdout.txt","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\API_BUILD.stderr.txt"
+"POS_BUILD","PASS","0","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\POS_BUILD.stdout.txt","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\POS_BUILD.stderr.txt"
+"AUTH_M108_UNIT","PASS","0","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\AUTH_M108_UNIT.stdout.txt","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\AUTH_M108_UNIT.stderr.txt"
+"B6_RETRY","PASS","0","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\B6_RETRY.stdout.txt","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\B6_RETRY.stderr.txt"
+"B8_CLOSING","FAIL","1","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\B8_CLOSING.stdout.txt","G:\footwear-omnichannel\security-checks\QA01_RECHECK_20261105_154215\B8_CLOSING.stderr.txt"

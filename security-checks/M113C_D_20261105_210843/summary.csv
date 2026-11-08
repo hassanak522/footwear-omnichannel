@@ -1,0 +1,4 @@
+"Test","Status","Detail"
+"QA database","PASS","available=3"
+"API health","PASS","HTTP 200 (does not verify DB isolation)"
+"Writes","SKIPPED","Read-only preflight"

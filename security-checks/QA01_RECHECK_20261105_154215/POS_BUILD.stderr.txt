@@ -1,0 +1,2 @@
+npm notice run @footwear/pos-desktop@0.1.0 build
+npm notice run tsc --noEmit && vite build

@@ -1,0 +1,6 @@
+7: import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+23: private access(u:Principal,locationId:string){assertLocation(u,locationId);}
+46: this.requireRole(u,'BRANCH_MANAGER','WAREHOUSE_MANAGER');this.access(u,dto.sourceId); // Destination is an approved location, not necessarily assigned to the requester.
+65: const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+80: const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+97: const t=await this.lockedTransfer(tx,id);this.access(u,t.destinationId);

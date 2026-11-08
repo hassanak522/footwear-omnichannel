@@ -1,0 +1,7 @@
+"Test","Expected","Actual","Result"
+"Cashier A cannot close Branch B shift","403","403","PASS"
+"Cashier B cannot close Branch A shift","403","403","PASS"
+"Manager A cannot close Branch B shift","403","403","PASS"
+"Manager B cannot close Branch A shift","403","403","PASS"
+"Cashier A closes own shift","201","201","PASS"
+"Cashier B closes own shift","201","201","PASS"

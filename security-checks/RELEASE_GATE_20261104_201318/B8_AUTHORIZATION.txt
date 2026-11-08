@@ -1,0 +1,20 @@
+﻿node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run jest --config jest.m112-b8.config.cjs --testMatch **/pos-auth.m112-b8.spec.ts --runInBand
+PASS src/pos-auth.m112-b8.spec.ts (9.297 s)
+  B8 real location authorization
+    ΓêÜ allows an assigned cashier (5 ms)
+    ΓêÜ rejects an unassigned cashier (99 ms)
+    ΓêÜ rejects an unassigned branch manager (2 ms)
+    ΓêÜ allows super admin across branches (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       4 passed, 4 total
+Snapshots:   0 total
+Time:        9.813 s, estimated 90 s
+Ran all test suites.

@@ -1,0 +1,102 @@
+﻿M115-B16L REPLAY VS QA SCHEMA COMPARISON
+Mode: READ-ONLY
+Database verified: footwear_m115_replay_20261107
+Database verified: footwear_omnichannel_test
+
+=== TABLE INVENTORY ===
+Replay tables: 69
+QA tables: 61
+
+=== REPLAY-ONLY TABLES ===
+LoyaltyAdjustment
+LoyaltyEntry
+LoyaltyRedemption
+OnlineRefundSettlement
+OnlineReturn
+OnlineReturnLine
+PosExchange
+PosRefundSettlement
+
+=== QA-ONLY TABLES ===
+
+=== COLUMN DEFINITION COMPARISON ===
+Replay column definitions: 577
+QA column definitions: 519
+Replay-only definitions: 58
+QA-only definitions: 0
+
+--- REPLAY-ONLY COLUMN DEFINITIONS ---
+LoyaltyAdjustment|id|uuid|uuid|NO|
+LoyaltyAdjustment|customerId|uuid|uuid|NO|
+LoyaltyAdjustment|sourceEntryId|uuid|uuid|NO|
+LoyaltyAdjustment|idempotencyKey|text|text|NO|
+LoyaltyAdjustment|points|integer|int4|NO|
+LoyaltyAdjustment|reason|text|text|NO|
+LoyaltyAdjustment|actorId|uuid|uuid|NO|
+LoyaltyAdjustment|createdAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+LoyaltyEntry|id|uuid|uuid|NO|
+LoyaltyEntry|customerId|uuid|uuid|NO|
+LoyaltyEntry|orderId|uuid|uuid|NO|
+LoyaltyEntry|points|integer|int4|NO|
+LoyaltyEntry|amount|numeric|numeric|NO|
+LoyaltyEntry|createdAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+LoyaltyRedemption|id|uuid|uuid|NO|
+LoyaltyRedemption|customerId|uuid|uuid|NO|
+LoyaltyRedemption|idempotencyKey|text|text|NO|
+LoyaltyRedemption|points|integer|int4|NO|
+LoyaltyRedemption|reference|text|text|NO|
+LoyaltyRedemption|reason|text|text|NO|
+LoyaltyRedemption|actorId|uuid|uuid|NO|
+LoyaltyRedemption|createdAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+OnlineRefundSettlement|id|uuid|uuid|NO|
+OnlineRefundSettlement|returnId|uuid|uuid|NO|
+OnlineRefundSettlement|idempotencyKey|text|text|NO|
+OnlineRefundSettlement|method|text|text|NO|
+OnlineRefundSettlement|amount|numeric|numeric|NO|
+OnlineRefundSettlement|reference|text|text|NO|
+OnlineRefundSettlement|settledById|uuid|uuid|NO|
+OnlineRefundSettlement|settledAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+OnlineReturn|id|uuid|uuid|NO|
+OnlineReturn|orderId|uuid|uuid|NO|
+OnlineReturn|idempotencyKey|text|text|NO|
+OnlineReturn|reason|text|text|NO|
+OnlineReturn|approvedById|uuid|uuid|NO|
+OnlineReturn|merchandiseAmount|numeric|numeric|NO|
+OnlineReturn|createdAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+OnlineReturnLine|id|uuid|uuid|NO|
+OnlineReturnLine|returnId|uuid|uuid|NO|
+OnlineReturnLine|variantId|uuid|uuid|NO|
+OnlineReturnLine|quantity|integer|int4|NO|
+OnlineReturnLine|quarantined|boolean|bool|NO|false
+OnlineReturnLine|unitPrice|numeric|numeric|NO|
+PosExchange|id|uuid|uuid|NO|
+PosExchange|returnId|uuid|uuid|NO|
+PosExchange|replacementSaleId|uuid|uuid|NO|
+PosExchange|idempotencyKey|text|text|NO|
+PosExchange|approvedById|uuid|uuid|NO|
+PosExchange|createdAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+PosRefundSettlement|id|uuid|uuid|NO|
+PosRefundSettlement|returnId|uuid|uuid|NO|
+PosRefundSettlement|idempotencyKey|text|text|NO|
+PosRefundSettlement|method|USER-DEFINED|PosTenderType|NO|
+PosRefundSettlement|amount|numeric|numeric|NO|
+PosRefundSettlement|reference|text|text|YES|
+PosRefundSettlement|settledById|uuid|uuid|NO|
+PosRefundSettlement|settledAt|timestamp without time zone|timestamp|NO|CURRENT_TIMESTAMP
+PosRefundSettlement|payoutShiftId|uuid|uuid|YES|
+
+--- QA-ONLY COLUMN DEFINITIONS ---
+
+=== ENUM VALUE COMPARISON ===
+Replay-only enum values: 0
+QA-only enum values: 0
+
+=== CONSTRAINT AND INDEX HEALTH ===
+footwear_m115_replay_20261107 indexes: 179
+footwear_m115_replay_20261107 foreign keys: 55
+footwear_m115_replay_20261107 invalid indexes: 0
+footwear_m115_replay_20261107 unvalidated foreign keys: 0
+footwear_omnichannel_test indexes: 153
+footwear_omnichannel_test foreign keys: 44
+footwear_omnichannel_test invalid indexes: 0
+footwear_omnichannel_test unvalidated foreign keys: 0

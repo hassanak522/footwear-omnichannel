@@ -1,0 +1,32 @@
+﻿M115-B16Q CONSTRAINT AND INDEX AUDIT
+Mode: READ-ONLY
+
+Verified: footwear_m115_replay_20261107
+Verified: footwear_omnichannel_test
+Shared application tables: 61
+
+=== CONSTRAINT COMPARISON ===
+Replay shared-table constraints: 105
+QA shared-table constraints: 105
+Replay-only definitions: 0
+QA-only definitions: 0
+
+=== INDEX COMPARISON ===
+Replay shared-table indexes: 152
+QA shared-table indexes: 152
+Replay-only definitions: 0
+QA-only definitions: 0
+
+=== ENUM ORDER COMPARISON ===
+Replay-only ordered entries: 0
+QA-only ordered entries: 0
+
+=== SUMMARY ===
+Shared tables: 61
+Replay-only constraints: 0
+QA-only constraints: 0
+Replay-only indexes: 0
+QA-only indexes: 0
+Replay-only ordered enum entries: 0
+QA-only ordered enum entries: 0
+Database modifications: NONE

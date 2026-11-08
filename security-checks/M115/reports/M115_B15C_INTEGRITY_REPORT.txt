@@ -1,0 +1,54 @@
+﻿ROYAL STEP M115-B15C DATABASE INTEGRITY VERIFICATION
+Mode: READ-ONLY
+
+=== TABLE INVENTORY AND ROW COUNTS ===
+PASS: Table inventories match.
+PASS: _prisma_migrations | source=15 | restored=15
+PASS: AuditLog | source=38 | restored=38
+PASS: Brand | source=0 | restored=0
+PASS: Category | source=2 | restored=2
+PASS: IntegrationEvent | source=26 | restored=26
+PASS: Location | source=5 | restored=5
+PASS: LoyaltyAdjustment | source=0 | restored=0
+PASS: LoyaltyEntry | source=0 | restored=0
+PASS: LoyaltyRedemption | source=0 | restored=0
+PASS: OnlineOrder | source=2 | restored=2
+PASS: OnlineOrderLine | source=2 | restored=2
+PASS: OnlineRefundSettlement | source=0 | restored=0
+PASS: OnlineReturn | source=0 | restored=0
+PASS: OnlineReturnLine | source=0 | restored=0
+PASS: PosDevice | source=2 | restored=2
+PASS: PosExchange | source=0 | restored=0
+PASS: PosRefundSettlement | source=0 | restored=0
+PASS: PosReturn | source=0 | restored=0
+PASS: PosReturnLine | source=0 | restored=0
+PASS: PosSale | source=6 | restored=6
+PASS: PosSaleLine | source=7 | restored=7
+PASS: PosSaleTender | source=7 | restored=7
+PASS: PosShift | source=4 | restored=4
+PASS: PriceChangeRequest | source=0 | restored=0
+PASS: Product | source=2 | restored=2
+PASS: ProductVariant | source=2 | restored=2
+PASS: PurchaseOrder | source=2 | restored=2
+PASS: PurchaseOrderLine | source=2 | restored=2
+PASS: ReplenishmentRequest | source=0 | restored=0
+PASS: RetailCustomer | source=0 | restored=0
+PASS: Role | source=8 | restored=8
+PASS: StockBalance | source=5 | restored=5
+PASS: StockCount | source=0 | restored=0
+PASS: StockCountLine | source=0 | restored=0
+PASS: StockMovement | source=19 | restored=19
+PASS: StockReservation | source=2 | restored=2
+PASS: StockTransfer | source=5 | restored=5
+PASS: StockTransferItem | source=5 | restored=5
+PASS: Supplier | source=1 | restored=1
+PASS: User | source=8 | restored=8
+PASS: UserLocation | source=7 | restored=7
+PASS: UserRole | source=8 | restored=8
+
+=== MIGRATION HISTORY COMPARISON ===
+PASS: Migration history and checksums match.
+
+=== FOREIGN KEY CONSTRAINT INVENTORY ===
+PASS: Foreign-key inventories and validation flags match.
+PASS: No unvalidated foreign-key constraints detected.

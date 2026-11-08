@@ -1,0 +1,10 @@
+[
+    {
+        "code":  201,
+        "status":  "ACCEPTED"
+    },
+    {
+        "code":  201,
+        "status":  "STOCK_CONFLICT"
+    }
+]

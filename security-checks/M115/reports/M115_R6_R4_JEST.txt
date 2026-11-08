@@ -1,0 +1,14 @@
+﻿PASS src/pos-close.m112-b8.spec.ts (180.807 s)
+  M112-B8 POS shift closure safety
+    âˆš rejects an already CLOSED shift without creating a snapshot (26 ms)
+    âˆš rejects a non-owner cashier (3 ms)
+    âˆš rejects cross-branch access (1 ms)
+    âˆš creates exactly one correct financial snapshot (5 ms)
+    âˆš does not proceed to audit if snapshot creation fails (170 ms)
+    âˆš rejects a second closure after the first closes the shift (2 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       6 passed, 6 total
+Snapshots:   0 total
+Time:        218.897 s
+Ran all test suites.

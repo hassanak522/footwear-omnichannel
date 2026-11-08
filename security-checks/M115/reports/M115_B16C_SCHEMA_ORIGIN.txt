@@ -1,0 +1,50 @@
+﻿M115-B16C SCHEMA ORIGIN AUDIT
+Mode: READ-ONLY
+
+Prisma model count: 61
+
+=== OPERATIONAL MODELS ABSENT FROM PRISMA ===
+LoyaltyAdjustment
+LoyaltyEntry
+LoyaltyRedemption
+OnlineRefundSettlement
+OnlineReturn
+OnlineReturnLine
+PosExchange
+PosRefundSettlement
+
+=== QA TABLES WITHOUT MIGRATION REFERENCES ===
+CashReconciliation
+DrawerMovement
+FinanceExceptionCase
+FinanceExceptionCaseEvent
+FinanceJournal
+FinanceJournalLine
+FinancePeriodLock
+FinancePostingBatch
+FinancePostingLine
+FinanceSnapshot
+InventoryCostBasis
+InventoryCostRevision
+LoyaltyLedgerEntry
+PaymentException
+PaymentExceptionEvidence
+PromotionRedemption
+RefundRecord
+RetailPromotion
+SaleCustomerLink
+SettlementBatch
+SettlementEntry
+StockTransferReceipt
+SupplierInvoice
+SupplierPayableEvent
+SupplierPaymentRequest
+SupplierPaymentSettlement
+SupplierSettlementReview
+
+=== SCHEMA MODIFICATION COMMAND REFERENCES ===
+prisma db push : 0 references
+prisma migrate : 1 references
+CREATE TABLE : 104 references
+ALTER TABLE : 87 references
+DROP TABLE : 0 references

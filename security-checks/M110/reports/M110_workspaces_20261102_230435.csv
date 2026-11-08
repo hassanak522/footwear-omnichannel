@@ -1,0 +1,6 @@
+"Path","Name","Version","Scripts"
+"package.json","footwear-omnichannel","1.0.0","dev, build, lint, test, db:generate, db:migrate, db:seed, db:studio, smoke"
+"apps\api\package.json","@footwear/api","1.0.0","dev, build, start, test"
+"apps\pos-desktop\package.json","@footwear/pos-desktop","0.1.0","dev, build, start"
+"apps\web\package.json","@footwear/web","1.0.0","dev, build, start"
+"packages\database\package.json","@footwear/database","1.0.0","db:generate, db:migrate, db:seed, db:studio, db:validate"

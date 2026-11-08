@@ -1,0 +1,12 @@
+{
+    "transferA":  "c1e3cf81-d2a0-48bf-b4ae-b76e8474f93f",
+    "transferB":  "dba02f42-4473-4b3e-a801-d101aa771b35",
+    "winner":  "dba02f42-4473-4b3e-a801-d101aa771b35",
+    "loser":  "c1e3cf81-d2a0-48bf-b4ae-b76e8474f93f",
+    "createA":  "m113cd-createa-bcce924d167044fdbbcd044b23eb665e",
+    "createB":  "m113cd-createb-cec6407c322c4f6683a53ca022b6a0e6",
+    "approveA":  "m113cd-approvea-88ed23126cd145f490384fe33844c87d",
+    "approveB":  "m113cd-approveb-c4f9675ec1e34c01900da44d8a618c48",
+    "dispatch":  "m113cd-dispatch-006bc4f35ec942aba083416448c292c5",
+    "receive":  "m113cd-receive-3663b7742abc4a3690d808f1f766b910"
+}

@@ -1,0 +1,22 @@
+[
+    {
+        "code":  201,
+        "status":  "ACCEPTED",
+        "duplicate":  true
+    },
+    {
+        "code":  201,
+        "status":  "ACCEPTED",
+        "duplicate":  false
+    },
+    {
+        "code":  201,
+        "status":  "ACCEPTED",
+        "duplicate":  true
+    },
+    {
+        "code":  201,
+        "status":  "ACCEPTED",
+        "duplicate":  true
+    }
+]

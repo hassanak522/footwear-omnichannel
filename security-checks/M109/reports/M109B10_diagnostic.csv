@@ -1,0 +1,6 @@
+"Request","HTTPStatus","Body"
+"1","400","{""message"":[""locationId must be a UUID"",""variantId must be a UUID""],""error"":""Bad Request"",""statusCode"":400}"
+"2","400","{""message"":[""locationId must be a UUID"",""variantId must be a UUID""],""error"":""Bad Request"",""statusCode"":400}"
+"3","400","{""message"":[""locationId must be a UUID"",""variantId must be a UUID""],""error"":""Bad Request"",""statusCode"":400}"
+"4","400","{""message"":[""locationId must be a UUID"",""variantId must be a UUID""],""error"":""Bad Request"",""statusCode"":400}"
+"5","400","{""message"":[""locationId must be a UUID"",""variantId must be a UUID""],""error"":""Bad Request"",""statusCode"":400}"

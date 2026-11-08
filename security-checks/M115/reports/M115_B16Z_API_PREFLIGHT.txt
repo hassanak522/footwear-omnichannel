@@ -1,0 +1,29 @@
+﻿
+
+Check    : API health
+Status   : NO RESPONSE
+Expected : 200
+Result   : REVIEW
+Error    : Unable to connect to the remote server
+
+Check    : Inventory locations without authentication
+Status   : NO RESPONSE
+Expected : 401
+Result   : REVIEW
+Error    : Unable to connect to the remote server
+
+Check    : Inventory balances without authentication
+Status   : NO RESPONSE
+Expected : 401
+Result   : REVIEW
+Error    : Unable to connect to the remote server
+
+Check    : Finance workflow without authentication
+Status   : NO RESPONSE
+Expected : 401/404
+Result   : REVIEW
+Error    : Unable to connect to the remote server
+
+
+
+

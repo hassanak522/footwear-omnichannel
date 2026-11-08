@@ -1,0 +1,3 @@
+"Check","Status","Detail"
+"PREFLIGHT","PASS","QA database accessible; warehouse available=14; API DB isolation must be independently verified"
+"WRITES","SKIPPED","Read-only mode"

@@ -1,0 +1,7 @@
+"Name","Path","Expected","Actual","Result","Error"
+"Health","/health","200","200","PASS",""
+"Store products","/store/products","200","200","PASS",""
+"Orders administration","/orders","401","401","PASS",""
+"Inventory locations","/inventory/locations","401","401","PASS",""
+"Inventory balances","/inventory/balances","401","401","PASS",""
+"Authenticated session","/auth/session","401","401","PASS",""

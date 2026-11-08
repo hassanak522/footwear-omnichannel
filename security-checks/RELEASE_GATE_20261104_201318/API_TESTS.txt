@@ -1,0 +1,487 @@
+﻿node.exe : npm notice run @footwear/api@1.0.0 test
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run @footwear/api@1.0.0 test:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run jest --runInBand --runInBand --passWithNoTests
+PASS dist/pos-close.m112-b8-integration.spec.js (20.366 s)
+PASS dist/pos-close.m112-b8.spec.js
+FAIL src/pos-close.m112-b8.spec.ts
+  ΓùÅ Test suite failed to run
+
+    SyntaxError: G:\footwear-omnichannel\apps\api\src\pos-close.m112-b8.spec.ts: Unexpected token, expected "," 
+(16:14)
+
+    [0m [90m 14 |[39m [36mconst[39m [33mOWNER[39m [33m=[39m 
+[32m'28facca1-2d14-4395-88d2-31d0f6f203ac'[39m[33m;[39m
+     [90m 15 |[39m
+    [31m[1m>[22m[39m[90m 16 |[39m [36mconst[39m dec [33m=[39m (n[33m:[39m number) [33m=>[39m 
+[36mnew[39m [33mPrisma[39m[33m.[39m[33mDecimal[39m(n)[33m;[39m
+     [90m    |[39m               [31m[1m^[22m[39m
+     [90m 17 |[39m
+     [90m 18 |[39m [36mfunction[39m setup(status [33m=[39m [32m'OPEN'[39m) {
+     [90m 19 |[39m   [36mconst[39m shift [33m=[39m {[0m
+
+      at constructor (../../node_modules/@babel/parser/src/parse-error.ts:96:45)
+      at Parser.toParseError [as raise] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1504:19)
+      at Parser.raise [as unexpected] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1544:16)
+      at Parser.unexpected [as expect] (../../node_modules/@babel/parser/src/parser/util.ts:157:12)
+      at Parser.expect [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1828:14)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3222:16)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseVar] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1587:18)
+      at Parser.parseVar [as parseVarStatement] (../../node_modules/@babel/parser/src/parser/statement.ts:1251:10)
+      at Parser.parseVarStatement [as parseStatementContent] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:612:21)
+      at Parser.parseStatementContent [as parseStatementLike] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:482:17)
+      at Parser.parseStatementLike [as parseModuleItem] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:419:17)
+      at Parser.parseModuleItem [as parseBlockOrModuleBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1443:16)
+      at Parser.parseBlockOrModuleBlockBody [as parseBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1417:10)
+      at Parser.parseBlockBody [as parseProgram] (../../node_modules/@babel/parser/src/parser/statement.ts:229:10)
+      at Parser.parseProgram [as parseTopLevel] (../../node_modules/@babel/parser/src/parser/statement.ts:203:25)
+      at Parser.parseTopLevel [as parse] (../../node_modules/@babel/parser/src/parser/index.ts:83:25)
+      at parse (../../node_modules/@babel/parser/src/index.ts:86:38)
+      at parser (../../node_modules/@babel/core/src/parser/index.ts:29:19)
+          at parser.next (<anonymous>)
+      at normalizeFile (../../node_modules/@babel/core/src/transformation/normalize-file.ts:49:24)
+          at normalizeFile.next (<anonymous>)
+      at run (../../node_modules/@babel/core/src/transformation/index.ts:41:36)
+          at run.next (<anonymous>)
+      at transform (../../node_modules/@babel/core/src/transform.ts:29:20)
+          at transform.next (<anonymous>)
+      at evaluateSync (../../node_modules/gensync/index.js:251:28)
+      at sync (../../node_modules/gensync/index.js:89:14)
+      at fn (../../node_modules/@babel/core/src/errors/rewrite-stack-trace.ts:99:14)
+      at transformSync (../../node_modules/@babel/core/src/transform.ts:66:52)
+      at ScriptTransformer.transformSource (../../node_modules/@jest/transform/build/ScriptTransformer.js:545:31)
+      at ScriptTransformer._transformAndBuildScript 
+(../../node_modules/@jest/transform/build/ScriptTransformer.js:674:40)
+      at ScriptTransformer.transform (../../node_modules/@jest/transform/build/ScriptTransformer.js:726:19)
+
+FAIL src/pos-close.m112-b8-integration.spec.ts
+  ΓùÅ Test suite failed to run
+
+    SyntaxError: G:\footwear-omnichannel\apps\api\src\pos-close.m112-b8-integration.spec.ts: Unexpected token, 
+expected "," (16:34)
+
+    [0m [90m 14 |[39m
+     [90m 15 |[39m [36mconst[39m db [33m=[39m [36mnew[39m [33mPrismaClient[39m()[33m;[39m
+    [31m[1m>[22m[39m[90m 16 |[39m [36mconst[39m service [33m=[39m [36mnew[39m [33mPosService[39m(db 
+[36mas[39m unknown [36mas[39m [33mDb[39m)[33m;[39m
+     [90m    |[39m                                   [31m[1m^[22m[39m
+     [90m 17 |[39m
+     [90m 18 |[39m [36mconst[39m principal [33m=[39m {
+     [90m 19 |[39m   id[33m:[39m [33mCASHIER[39m[33m,[39m[0m
+
+      at constructor (../../node_modules/@babel/parser/src/parse-error.ts:96:45)
+      at Parser.toParseError [as raise] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1504:19)
+      at Parser.raise [as unexpected] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1544:16)
+      at Parser.unexpected [as expect] (../../node_modules/@babel/parser/src/parser/util.ts:157:12)
+      at Parser.expect [as parseExprList] (../../node_modules/@babel/parser/src/parser/expression.ts:2757:14)
+      at Parser.parseExprList [as parseNew] (../../node_modules/@babel/parser/src/parser/expression.ts:1985:25)
+      at Parser.parseNew [as parseNewOrNewTarget] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1972:17)
+      at Parser.parseNewOrNewTarget [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1231:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3222:16)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseVar] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1587:18)
+      at Parser.parseVar [as parseVarStatement] (../../node_modules/@babel/parser/src/parser/statement.ts:1251:10)
+      at Parser.parseVarStatement [as parseStatementContent] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:612:21)
+      at Parser.parseStatementContent [as parseStatementLike] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:482:17)
+      at Parser.parseStatementLike [as parseModuleItem] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:419:17)
+      at Parser.parseModuleItem [as parseBlockOrModuleBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1443:16)
+      at Parser.parseBlockOrModuleBlockBody [as parseBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1417:10)
+      at Parser.parseBlockBody [as parseProgram] (../../node_modules/@babel/parser/src/parser/statement.ts:229:10)
+      at Parser.parseProgram [as parseTopLevel] (../../node_modules/@babel/parser/src/parser/statement.ts:203:25)
+      at Parser.parseTopLevel [as parse] (../../node_modules/@babel/parser/src/parser/index.ts:83:25)
+      at parse (../../node_modules/@babel/parser/src/index.ts:86:38)
+      at parser (../../node_modules/@babel/core/src/parser/index.ts:29:19)
+          at parser.next (<anonymous>)
+      at normalizeFile (../../node_modules/@babel/core/src/transformation/normalize-file.ts:49:24)
+          at normalizeFile.next (<anonymous>)
+      at run (../../node_modules/@babel/core/src/transformation/index.ts:41:36)
+          at run.next (<anonymous>)
+      at transform (../../node_modules/@babel/core/src/transform.ts:29:20)
+          at transform.next (<anonymous>)
+      at evaluateSync (../../node_modules/gensync/index.js:251:28)
+      at sync (../../node_modules/gensync/index.js:89:14)
+      at fn (../../node_modules/@babel/core/src/errors/rewrite-stack-trace.ts:99:14)
+      at transformSync (../../node_modules/@babel/core/src/transform.ts:66:52)
+      at ScriptTransformer.transformSource (../../node_modules/@jest/transform/build/ScriptTransformer.js:545:31)
+      at ScriptTransformer._transformAndBuildScript 
+(../../node_modules/@jest/transform/build/ScriptTransformer.js:674:40)
+      at ScriptTransformer.transform (../../node_modules/@jest/transform/build/ScriptTransformer.js:726:19)
+
+FAIL test/m108.auth.spec.ts
+  ΓùÅ Test suite failed to run
+
+    SyntaxError: G:\footwear-omnichannel\apps\api\test\m108.auth.spec.ts: Unexpected token, expected "," (7:24)
+
+    [0m [90m  5 |[39m [36mimport[39m { [33mAuthService[39m[33m,[39m [33mRoles[39m[33m,[39m 
+[33mRolesGuard[39m[33m,[39m assertLocation[33m,[39m [33mJwtStrategy[39m } [36mfrom[39m 
+[32m'../src/auth'[39m[33m;[39m
+     [90m  6 |[39m
+    [31m[1m>[22m[39m[90m  7 |[39m [36mconst[39m principal [33m=[39m (roles[33m:[39mstring[][33m,[39m 
+locations[33m:[39mstring[] [33m=[39m []) [33m=>[39m ({id[33m:[39m[32m'test-user'[39m[33m,[39m 
+email[33m:[39m[32m'test@example.invalid'[39m[33m,[39m roles[33m,[39m locations})[33m;[39m
+     [90m    |[39m                         [31m[1m^[22m[39m
+     [90m  8 |[39m [36mconst[39m context [33m=[39m (user[33m:[39many[33m,[39m 
+handler[33m:[39many[33m,[39m controller[33m:[39many)[33m:[39m[33mExecutionContext[39m [33m=>[39m ({
+     [90m  9 |[39m   getHandler[33m:[39m()[33m=>[39mhandler[33m,[39m 
+getClass[33m:[39m()[33m=>[39mcontroller[33m,[39m
+     [90m 10 |[39m   switchToHttp[33m:[39m()[33m=>[39m({getRequest[33m:[39m()[33m=>[39m({user})})[0m
+
+      at constructor (../../node_modules/@babel/parser/src/parse-error.ts:96:45)
+      at Parser.toParseError [as raise] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1504:19)
+      at Parser.raise [as unexpected] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1544:16)
+      at Parser.unexpected [as expect] (../../node_modules/@babel/parser/src/parser/util.ts:157:12)
+      at Parser.expect [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1828:14)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3222:16)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseVar] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1587:18)
+      at Parser.parseVar [as parseVarStatement] (../../node_modules/@babel/parser/src/parser/statement.ts:1251:10)
+      at Parser.parseVarStatement [as parseStatementContent] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:612:21)
+      at Parser.parseStatementContent [as parseStatementLike] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:482:17)
+      at Parser.parseStatementLike [as parseModuleItem] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:419:17)
+      at Parser.parseModuleItem [as parseBlockOrModuleBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1443:16)
+      at Parser.parseBlockOrModuleBlockBody [as parseBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1417:10)
+      at Parser.parseBlockBody [as parseProgram] (../../node_modules/@babel/parser/src/parser/statement.ts:229:10)
+      at Parser.parseProgram [as parseTopLevel] (../../node_modules/@babel/parser/src/parser/statement.ts:203:25)
+      at Parser.parseTopLevel [as parse] (../../node_modules/@babel/parser/src/parser/index.ts:83:25)
+      at parse (../../node_modules/@babel/parser/src/index.ts:86:38)
+      at parser (../../node_modules/@babel/core/src/parser/index.ts:29:19)
+          at parser.next (<anonymous>)
+      at normalizeFile (../../node_modules/@babel/core/src/transformation/normalize-file.ts:49:24)
+          at normalizeFile.next (<anonymous>)
+      at run (../../node_modules/@babel/core/src/transformation/index.ts:41:36)
+          at run.next (<anonymous>)
+      at transform (../../node_modules/@babel/core/src/transform.ts:29:20)
+          at transform.next (<anonymous>)
+      at evaluateSync (../../node_modules/gensync/index.js:251:28)
+      at sync (../../node_modules/gensync/index.js:89:14)
+      at fn (../../node_modules/@babel/core/src/errors/rewrite-stack-trace.ts:99:14)
+      at transformSync (../../node_modules/@babel/core/src/transform.ts:66:52)
+      at ScriptTransformer.transformSource (../../node_modules/@jest/transform/build/ScriptTransformer.js:545:31)
+      at ScriptTransformer._transformAndBuildScript 
+(../../node_modules/@jest/transform/build/ScriptTransformer.js:674:40)
+      at ScriptTransformer.transform (../../node_modules/@jest/transform/build/ScriptTransformer.js:726:19)
+
+PASS dist/pos-retry.m112-b6.spec.js
+FAIL src/pos-retry.m112-b6.spec.ts
+  ΓùÅ Test suite failed to run
+
+    SyntaxError: G:\footwear-omnichannel\apps\api\src\pos-retry.m112-b6.spec.ts: Unexpected token, expected "," 
+(19:16)
+
+    [0m [90m 17 |[39m     jest[33m.[39mspyOn([33mMath[39m[33m,[39m 
+[32m'random'[39m)[33m.[39mmockReturnValue([35m0[39m)[33m;[39m
+     [90m 18 |[39m     jest[33m.[39mspyOn(global[33m,[39m 
+[32m'setTimeout'[39m)[33m.[39mmockImplementation(
+    [31m[1m>[22m[39m[90m 19 |[39m       ((callback[33m:[39m ([33m...[39margs[33m:[39m unknown[]) 
+[33m=>[39m [36mvoid[39m) [33m=>[39m {
+     [90m    |[39m                 [31m[1m^[22m[39m
+     [90m 20 |[39m         callback()[33m;[39m
+     [90m 21 |[39m         [36mreturn[39m {} [36mas[39m [33mReturnType[39m[33m<[39m[36mtypeof[39m 
+setTimeout[33m>[39m[33m;[39m
+     [90m 22 |[39m       }) [36mas[39m [36mtypeof[39m setTimeout[33m,[39m[0m
+
+      at constructor (../../node_modules/@babel/parser/src/parse-error.ts:96:45)
+      at Parser.toParseError [as raise] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1504:19)
+      at Parser.raise [as unexpected] (../../node_modules/@babel/parser/src/tokenizer/index.ts:1544:16)
+      at Parser.unexpected [as expect] (../../node_modules/@babel/parser/src/parser/util.ts:157:12)
+      at Parser.expect [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1828:14)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3227:12)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseMaybeAssignAllowInOrVoidPattern] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:3341:17)
+      at Parser.parseMaybeAssignAllowInOrVoidPattern [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1852:16)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3227:12)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseMaybeAssignAllowInOrVoidPattern] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:3341:17)
+      at Parser.parseMaybeAssignAllowInOrVoidPattern [as parseExprListItem] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2823:18)
+      at Parser.parseExprListItem [as parseCallExpressionArguments] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1069:14)
+      at Parser.parseCallExpressionArguments [as parseCoverCallAndAsyncArrowHead] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:949:29)
+      at Parser.parseCoverCallAndAsyncArrowHead [as parseSubscript] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:822:19)
+      at Parser.parseSubscript [as parseSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:781:19)
+      at Parser.parseSubscripts [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:748:17)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at Parser.parseMaybeAssign [as parseExpressionBase] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:226:23)
+      at parseExpressionBase (../../node_modules/@babel/parser/src/parser/expression.ts:217:39)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3222:16)
+      at Parser.allowInAnd [as parseExpression] (../../node_modules/@babel/parser/src/parser/expression.ts:217:17)
+      at Parser.parseExpression [as parseStatementContent] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:688:23)
+      at Parser.parseStatementContent [as parseStatementLike] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:482:17)
+      at Parser.parseStatementLike [as parseStatementListItem] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:431:17)
+      at Parser.parseStatementListItem [as parseBlockOrModuleBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1444:16)
+      at Parser.parseBlockOrModuleBlockBody [as parseBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1417:10)
+      at Parser.parseBlockBody [as parseBlock] (../../node_modules/@babel/parser/src/parser/statement.ts:1385:10)
+      at Parser.parseBlock [as parseFunctionBody] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2651:24)
+      at Parser.parseFunctionBody [as parseArrowExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2592:10)
+      at Parser.parseArrowExpression [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1877:12)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (../../node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3227:12)
+      at Parser.allowInAnd [as parseMaybeAssignAllowIn] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at Parser.parseMaybeAssignAllowIn [as parseMaybeAssignAllowInOrVoidPattern] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:3341:17)
+      at Parser.parseMaybeAssignAllowInOrVoidPattern [as parseExprListItem] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2823:18)
+      at Parser.parseExprListItem [as parseCallExpressionArguments] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1069:14)
+      at Parser.parseCallExpressionArguments [as parseCoverCallAndAsyncArrowHead] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:949:29)
+      at Parser.parseCoverCallAndAsyncArrowHead [as parseSubscript] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:822:19)
+      at Parser.parseSubscript [as parseSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:781:19)
+      at Parser.parseSubscripts [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:748:17)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at Parser.parseMaybeAssign [as parseExpressionBase] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:226:23)
+      at parseExpressionBase (../../node_modules/@babel/parser/src/parser/expression.ts:217:39)
+      at Parser.callback [as allowInAnd] (../../node_modules/@babel/parser/src/parser/expression.ts:3222:16)
+      at Parser.allowInAnd [as parseExpression] (../../node_modules/@babel/parser/src/parser/expression.ts:217:17)
+      at Parser.parseExpression [as parseStatementContent] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:688:23)
+      at Parser.parseStatementContent [as parseStatementLike] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:482:17)
+      at Parser.parseStatementLike [as parseStatementListItem] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:431:17)
+      at Parser.parseStatementListItem [as parseBlockOrModuleBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1444:16)
+      at Parser.parseBlockOrModuleBlockBody [as parseBlockBody] 
+(../../node_modules/@babel/parser/src/parser/statement.ts:1417:10)
+      at Parser.parseBlockBody [as parseBlock] (../../node_modules/@babel/parser/src/parser/statement.ts:1385:10)
+      at Parser.parseBlock [as parseFunctionBody] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2651:24)
+      at Parser.parseFunctionBody [as parseArrowExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:2592:10)
+      at Parser.parseArrowExpression [as parseParenAndDistinguishExpression] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1877:12)
+      at Parser.parseParenAndDistinguishExpression [as parseExprAtom] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:1197:21)
+      at Parser.parseExprAtom [as parseExprSubscripts] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:742:23)
+      at Parser.parseExprSubscripts [as parseUpdate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:721:21)
+      at Parser.parseUpdate [as parseMaybeUnary] (../../node_modules/@babel/parser/src/parser/expression.ts:683:23)
+      at Parser.parseMaybeUnary [as parseMaybeUnaryOrPrivate] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:417:14)
+      at Parser.parseMaybeUnaryOrPrivate [as parseExprOps] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:429:23)
+      at Parser.parseExprOps [as parseMaybeConditional] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:384:23)
+      at Parser.parseMaybeConditional [as parseMaybeAssign] 
+(../../node_modules/@babel/parser/src/parser/expression.ts:301:21)
+
+PASS dist/pos-auth.m112-b8.spec.js
+FAIL src/pos-auth.m112-b8.spec.ts
+  ΓùÅ Test suite failed to run
+
+    Jest encountered an unexpected token
+
+    Jest failed to parse a file. This happens e.g. when your code or its dependencies use non-standard JavaScript 
+syntax, or when Jest is not configured to support such syntax.
+
+    Out of the box Jest supports Babel, which will be used to transform your files into valid JS based on your 
+Babel configuration.
+
+    By default "node_modules" folder is ignored by transformers.
+
+    Here's what you can do:
+     ΓÇó If you are trying to use ECMAScript Modules, see https://jestjs.io/docs/ecmascript-modules for how to 
+enable it.
+     ΓÇó If you are trying to use TypeScript, see https://jestjs.io/docs/getting-started#using-typescript
+     ΓÇó To have some of your "node_modules" files transformed, you can specify a custom "transformIgnorePatterns" 
+in your config.
+     ΓÇó If you need a custom transformation specify a "transform" option in your config.
+     ΓÇó If you simply want to mock your non-JS modules (e.g. binary assets) you can stub them out with the 
+"moduleNameMapper" config option.
+
+    You'll find more details and examples of these config options in the docs:
+    https://jestjs.io/docs/configuration
+    For information about custom transformations, see:
+    https://jestjs.io/docs/code-transformation
+
+    Details:
+
+    G:\footwear-omnichannel\apps\api\src\pos-auth.m112-b8.spec.ts:1
+    ({"Object.<anonymous>":function(module,exports,require,__dirname,__filename,jest){import { ForbiddenException 
+} from '@nestjs/common';
+                                                                                      ^^^^^^
+
+    SyntaxError: Cannot use import statement outside a module
+
+      at Runtime.createScriptFromCode (../../node_modules/jest-runtime/build/index.js:1505:14)
+
+Test Suites: 5 failed, 4 passed, 9 total
+Tests:       18 passed, 18 total
+Snapshots:   0 total
+Time:        27.539 s
+Ran all test suites.
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path G:\footwear-omnichannel\apps\api
+npm error workspace @footwear/api@1.0.0
+npm error location G:\footwear-omnichannel\apps\api
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c jest --runInBand --runInBand --passWithNoTests

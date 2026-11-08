@@ -3,15 +3,64 @@ import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'cla
 import { Prisma, ReservationPurpose } from '@prisma/client';
 import { Db } from './db';
 import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
+import { isDeepStrictEqual } from 'node:util';
 class AdjustDto { @IsUUID() locationId!:string; @IsUUID() variantId!:string; @IsInt() delta!:number; @IsString() @MinLength(8) idempotencyKey!:string; @IsString() @MinLength(3) reason!:string; }
 class ReserveDto { @IsUUID() locationId!:string; @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsEnum(ReservationPurpose) purpose!:ReservationPurpose; @IsString() @MinLength(3) referenceId!:string; @IsString() @MinLength(8) idempotencyKey!:string; }
 class ReleaseDto { @IsString() @MinLength(8) idempotencyKey!:string; }
+
+async function withInventoryTransactionRetry<T>(
+  operation: () => Promise<T>,
+): Promise<T> {
+  const maxAttempts = 6;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      const prismaCode =
+        error instanceof Prisma.PrismaClientKnownRequestError
+          ? error.code
+          : 'NON_PRISMA_KNOWN_ERROR';
+
+      console.error('[M109_DIAGNOSTIC]', {
+        attempt,
+        code: prismaCode,
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+
+      const isRetryable =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2034';
+
+      if (!isRetryable) {
+        throw error;
+      }
+
+      if (attempt === maxAttempts) {
+        throw new ConflictException(
+          'Inventory is busy. Please retry the operation.',
+        );
+      }
+
+      const backoffMs = Math.min(1600, 100 * Math.pow(2, attempt - 1));
+      const jitterMs = Math.floor(Math.random() * 100);
+
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, backoffMs + jitterMs),
+      );
+    }
+  }
+
+  throw new ConflictException('Inventory transaction could not complete');
+}
+
 @Injectable()
 export class InventoryService {
  constructor(private db:Db){}
  async adjust(dto:AdjustDto,actor:Principal){
   assertLocation(actor,dto.locationId);
-  return this.db.$transaction(async tx=>{
+  return withInventoryTransactionRetry(() =>
+    this.db.$transaction(async tx => {
    const existing=await tx.stockMovement.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
    if(existing){if(existing.referenceType!=='MANUAL_ADJUSTMENT' || existing.locationId!==dto.locationId || existing.variantId!==dto.variantId || existing.quantityDelta!==dto.delta)throw new ConflictException('Idempotency key reused with different request');return existing;}
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.locationId + ':' + dto.variantId}))`;
@@ -22,13 +71,17 @@ export class InventoryService {
    const movement=await tx.stockMovement.create({data:{locationId:dto.locationId,variantId:dto.variantId,type:'ADJUSTMENT',quantityDelta:dto.delta,referenceType:'MANUAL_ADJUSTMENT',idempotencyKey:dto.idempotencyKey,actorId:actor.id,notes:dto.reason}});
    await tx.auditLog.create({data:{actorId:actor.id,action:'STOCK_ADJUST',entityType:'StockBalance',entityId:balance.id,before:{onHand:balance.onHand},after:{onHand:next,reason:dto.reason}}});
    return movement;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+   }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000,
+   }),
+  );
  }
  async reserve(dto:ReserveDto,actor:Principal){
   assertLocation(actor,dto.locationId);
-  return this.db.$transaction(async tx=>{
+  return withInventoryTransactionRetry(() =>
+   this.db.$transaction(async tx => {
    const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
-   if(prior){if(prior.source!=='INVENTORY_RESERVE' || JSON.stringify(prior.payload)!==JSON.stringify(dto))throw new ConflictException('Idempotency key reused');return tx.stockReservation.findFirstOrThrow({where:{referenceId:dto.referenceId,locationId:dto.locationId,variantId:dto.variantId,purpose:dto.purpose}});}
+   if(prior){if(prior.source!=='INVENTORY_RESERVE' || !isDeepStrictEqual(prior.payload, JSON.parse(JSON.stringify(dto))))throw new ConflictException('Idempotency key reused');return tx.stockReservation.findFirstOrThrow({where:{referenceId:dto.referenceId,locationId:dto.locationId,variantId:dto.variantId,purpose:dto.purpose}});}
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dto.locationId + ':' + dto.variantId}))`;
    const location=await tx.location.findUniqueOrThrow({where:{id:dto.locationId}});
    if(dto.purpose==='ONLINE_ORDER' && location.type!=='WAREHOUSE')throw new BadRequestException('Online stock must be allocated from warehouse');
@@ -38,10 +91,14 @@ export class InventoryService {
    await tx.stockBalance.update({where:{id:b.id},data:{[dto.purpose==='ONLINE_ORDER'?'reservedOnline':'reservedReplenish']:{increment:dto.quantity},version:{increment:1}}});
    await tx.integrationEvent.create({data:{source:'INVENTORY_RESERVE',eventType:'CREATED',idempotencyKey:dto.idempotencyKey,payload:JSON.parse(JSON.stringify(dto)),processedAt:new Date()}});
    return reservation;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+   }, { 
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000,
+   }),
+  );
  }
  async release(id:string,dto:ReleaseDto,actor:Principal){
-  return this.db.$transaction(async tx=>{
+  return withInventoryTransactionRetry(() =>
+   this.db.$transaction(async tx => {
    const reservation=await tx.stockReservation.findUniqueOrThrow({where:{id}});assertLocation(actor,reservation.locationId);
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${reservation.locationId + ':' + reservation.variantId}))`;
    const current=await tx.stockReservation.findUniqueOrThrow({where:{id}});
@@ -53,7 +110,10 @@ export class InventoryService {
    await tx.stockBalance.update({where:{locationId_variantId:{locationId:current.locationId,variantId:current.variantId}},data:{[current.purpose==='ONLINE_ORDER'?'reservedOnline':'reservedReplenish']:{decrement:current.quantity},version:{increment:1}}});
    await tx.integrationEvent.create({data:{source:'INVENTORY_RELEASE',eventType:'RELEASED',idempotencyKey:dto.idempotencyKey,payload:{reservationId:id},processedAt:new Date()}});
    return result;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+   }, {
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15000,
+   }),
+  );
  }
 }
 @Controller('inventory') @UseGuards(JwtAuthGuard,RolesGuard)

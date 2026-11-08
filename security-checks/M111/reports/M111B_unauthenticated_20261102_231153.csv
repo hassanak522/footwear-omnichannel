@@ -1,0 +1,3 @@
+"Name","Path","Status","Result"
+"Inventory locations","/inventory/locations","401","PASS"
+"Inventory balances","/inventory/balances","401","PASS"

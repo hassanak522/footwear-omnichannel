@@ -1,0 +1,16 @@
+[
+    {
+        "Code":  500,
+        "Error":  "The remote server returned an error: (500) Internal Server Error.",
+        "PSComputerName":  "localhost",
+        "RunspaceId":  "2024ffa1-04aa-413f-bfdc-23399f5ee1ce",
+        "PSShowComputerName":  false
+    },
+    {
+        "Code":  201,
+        "Error":  "",
+        "PSComputerName":  "localhost",
+        "RunspaceId":  "0b5700d5-34cf-4c0e-be23-c73ca93c33a8",
+        "PSShowComputerName":  false
+    }
+]

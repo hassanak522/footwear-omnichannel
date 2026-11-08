@@ -1,0 +1,229 @@
+﻿M115-B12 MIGRATION EVIDENCE RECOVERY
+Mode: READ-ONLY
+
+=== GIT STATUS ===
+ M apps/api/package.json
+ M apps/api/src/auth.ts
+ M apps/api/src/enterprise.ts
+ M apps/api/src/inventory.ts
+ M apps/api/src/module.ts
+ M apps/api/src/pos.ts
+ M apps/api/src/retail-extensions.ts
+ M apps/api/src/transfers.ts
+ M apps/pos-desktop/electron/main.cjs
+ M apps/pos-desktop/electron/preload.cjs
+ M apps/pos-desktop/src/global.d.ts
+ M apps/pos-desktop/src/main.tsx
+ M apps/web/app/admin/page.tsx
+ M apps/web/app/branch/page.tsx
+ M package-lock.json
+ M packages/database/prisma/schema.prisma
+?? APPLY_M112B8I_04.ps1
+?? FIX_M113_SERIALIZATION_RETRY.ps1
+?? FIX_M113_TRANSACTION_TIMEOUT.ps1
+?? FIX_M114B_SALE_STATUS.ps1
+?? FIX_QA01_B8_TEST_MOCK.ps1
+?? FIX_QA02_TRANSFER_IDEMPOTENCY.ps1
+?? INSTALL_M42_44.ps1
+?? M112B8I_04_SOURCE_INSPECTION.txt
+?? M114B_PACKAGE/
+?? M114C_SYNC_PACKAGE/
+?? M114D_PACKAGE/
+?? MILESTONE15_INSTALL.md
+?? MILESTONE18_INSTALL_AND_TEST.md
+?? MILESTONE28B_INSTALL.md
+?? MILESTONE31B_INSTALL.md
+?? MILESTONE31_INSTALL.md
+?? MILESTONE32C_INSTALL.md
+?? MILESTONE32D_INSTALL.md
+?? MILESTONE32_INSTALL.md
+?? MILESTONE33_INSTALL.md
+?? MILESTONE36_INSTALL.md
+?? MILESTONES16_17_INSTALL.md
+?? MILESTONES19_20_21_INSTALL.md
+?? MILESTONES22_23_24_INSTALL.md
+?? MILESTONES25_26_27_INSTALL.md
+?? MILESTONES28_29_30_INSTALL.md
+?? MILESTONES29B_30B_INSTALL.md
+?? MILESTONES34_35_INSTALL.md
+?? MILESTONES37_38_INSTALL.md
+?? MILESTONES39_40_41_INSTALL.md
+?? MILESTONES42_44_INSTALL.md
+?? MILESTONES45_47_INSTALL.md
+?? MILESTONES48_50_INSTALL.md
+?? MILESTONES51_53_INSTALL.md
+?? RESUME_QA02_EXISTING_TRANSFER.ps1
+?? RUN_M112B8I_04D_READONLY.ps1
+?? RUN_M113A_REMAINING_RECEIPT.ps1
+?? RUN_M113B_SHORTAGE_CLOSURE.ps1
+?? RUN_M113B_SHORTAGE_CLOSURE_FIXED.ps1
+?? RUN_M113C_CONCURRENT_RECEIPT.ps1
+?? RUN_M113C_FINAL_RACES.ps1
+?? RUN_M113C_FINAL_RACES_FIXED.ps1
+?? RUN_M113C_SCENARIO_D.ps1
+?? RUN_M114C_PREFLIGHT.ps1
+?? RUN_QA01_RECHECK.ps1
+?? RUN_QA02B_EDGE_CASES.ps1
+?? RUN_QA02_DATA_COVERAGE.ps1
+?? RUN_QA02_LIVE_READINESS.ps1
+?? RUN_QA02_LIVE_TRANSFERS.ps1
+?? RUN_QA02_RETAIL_READONLY.ps1
+?? RUN_QA02_TRANSFER_PREFLIGHT.ps1
+?? RUN_RELEASE_GATE.ps1
+?? SCHEMA_APPEND.prisma.txt
+?? apps/api/jest.config.cjs
+?? apps/api/jest.m108.config.cjs
+?? apps/api/jest.m112-b6.config.cjs
+?? apps/api/jest.m112-b8-integration.config.cjs
+?? apps/api/jest.m112-b8.config.cjs
+?? apps/api/scripts/m114e-final-audit.cjs
+?? apps/api/scripts/reset-m112-cashiers.ts
+?? apps/api/scripts/reset-m112-manager-b.ts
+?? apps/api/scripts/reset-m112-manager.ts
+?? apps/api/src/cash-reconciliation.ts
+?? apps/api/src/checkout-foundation.ts
+?? apps/api/src/customer-finance.ts
+?? apps/api/src/finance-audit-read.ts
+?? apps/api/src/finance-audit.ts
+?? apps/api/src/finance-casework.ts
+?? apps/api/src/finance-command-center.ts
+?? apps/api/src/finance-controls-v2.ts
+?? apps/api/src/finance-controls-v2.ts.backup_20261027_203337
+?? apps/api/src/finance-controls.ts
+?? apps/api/src/finance-extension.ts
+?? apps/api/src/finance-extension.ts.backup_20261027_203337
+?? apps/api/src/finance-guardrails.ts
+?? apps/api/src/finance-management.ts
+?? apps/api/src/finance-operations.ts
+?? apps/api/src/finance-reconciliation.ts
+?? apps/api/src/finance-verification.ts
+?? apps/api/src/module.ts.backup_20261027_162355
+?? apps/api/src/module.ts.backup_20261027_174947
+?? apps/api/src/module.ts.backup_20261027_180351
+?? apps/api/src/module.ts.backup_20261027_195728
+?? apps/api/src/module.ts.backup_20261027_201243
+?? apps/api/src/module.ts.backup_20261027_203337
+?? apps/api/src/module.ts.backup_20261027_203753
+?? apps/api/src/module.ts.backup_20261027_204830
+?? apps/api/src/module.ts.backup_20261027_205842
+?? apps/api/src/module.ts.backup_20261027_210416
+?? apps/api/src/module.ts.backup_20261027_211617
+?? apps/api/src/payment-exceptions.ts
+?? apps/api/src/payment-reports.ts
+?? apps/api/src/pos-auth.m112-b8.spec.ts
+?? apps/api/src/pos-close.m112-b8-integration.spec.ts
+?? apps/api/src/pos-close.m112-b8.spec.ts
+?? apps/api/src/pos-close.m112-b8.spec.ts.QA01.bak
+?? apps/api/src/pos-retry.m112-b6.spec.ts
+?? apps/api/src/pos-review.ts
+?? apps/api/src/pos.ts.M112B8I05M_B3.bak
+?? apps/api/src/pos.ts.b10-backup
+?? apps/api/src/retail-finance.ts
+?? apps/api/src/retail-finance.ts.backup_20261027_162355
+?? apps/api/src/retail-ops.ts
+?? apps/api/src/transfers.ts.qa02-backup-20261105_163650
+?? apps/api/test/
+?? apps/pos-desktop/electron/main.cjs.M114E11C_BACKUP
+?? apps/pos-desktop/electron/main.cjs.M114E11C_FAILED_SWITCH_BACKUP
+?? apps/pos-desktop/electron/main.cjs.M114E11H_BACKUP
+?? apps/pos-desktop/electron/main.cjs.M114E5_20261106_011022.bak
+?? apps/pos-desktop/electron/main.cjs.M114E7_20261106_162933.bak
+?? apps/pos-desktop/electron/main.cjs.M114E8_20261106_163830.bak
+?? apps/pos-desktop/electron/main.cjs.M114E_BACKUP
+?? apps/pos-desktop/electron/preload.cjs.M114E11H_BACKUP
+?? apps/pos-desktop/src/main.tsx.M114E11H_BACKUP
+?? apps/pos-desktop/src/main.tsx.M114E_BACKUP
+?? apps/web/app/admin/advanced/
+?? apps/web/app/admin/customer-finance/
+?? apps/web/app/admin/finance-casework/
+?? apps/web/app/admin/finance-command-center/
+?? apps/web/app/admin/finance-controls/
+?? apps/web/app/admin/finance-login/
+?? apps/web/app/admin/finance-nav.tsx
+?? apps/web/app/admin/finance-operations/
+?? apps/web/app/admin/finance-reconciliation/
+?? apps/web/app/admin/payment-reconciliation/
+?? apps/web/app/admin/retail/
+?? apps/web/app/api/
+?? apps/web/middleware.ts
+?? "audit-reports (2).zip"
+?? audit-reports.zip
+?? audit-reports/
+?? packages/database/prisma/migrations/20261104_m112b8i_shift_snapshot/
+?? packages/database/prisma/schema.prisma.backup_20261027_162355
+?? packages/database/prisma/schema.prisma.backup_20261027_174947
+?? packages/database/prisma/schema.prisma.backup_20261027_180351
+?? packages/database/prisma/schema.prisma.backup_20261027_201243
+?? packages/database/prisma/schema.prisma.backup_20261027_203753
+?? packages/database/prisma/schema.prisma.backup_20261027_204830
+?? packages/database/prisma/schema.prisma.backup_20261027_210416
+?? patch-backups/
+?? security-checks/
+
+=== GIT BRANCHES ===
+* main
+  remotes/origin/main
+
+=== GIT REMOTES ===
+origin
+
+=== MIGRATION HISTORY CHECKSUMS ===
+BEGIN
+footwear_omnichannel
+20261017093820|d9da2f3e284037427a99b1e1f550a523b0c6009721040e0c75a75d9f96acc05d|FINISHED
+20261017162436|b3f90110e2d4c73f4f150431bb725d266dbcf1cfd3c9b7cf2563e308f3aaa155|FINISHED
+20261018133424|574b90691cbdd55f230ebecc8db1171a04817df1d75d2e79aac9fbcb6781f0bf|FINISHED
+20261018180405_initial_full_platform|e4af62149252d594a9c7a666b0e93fdb5f10909a7a55beb80e281afe876b9171|FINISHED
+20261023114234_m12_m14_enterprise_foundation|ba2f95118eb69be41cc2e69011e4aa5aa992058a4f77bc90b035bc0d3d99ef28|FINISHED
+20261023120000_loyalty_entry|e798d3871bf5fec34934d3bdd7a6dbbb2d0b35a5c086bcb7baf5e675c8782426|FINISHED
+20261023130000_pos_refund_settlement|a06bab2590ac06a8ce1b5541db093cf706ea6a25213c1b4fd2532564f0582c2e|FINISHED
+20261023140000_refund_payout_shift|48442c3d8ac45e3494f3dc48909855daf163d6b43611eb50f9f505892225e2d4|FINISHED
+20261023150000_loyalty_adjustments|f2ffb59081fc4e9ad947a9c7948ed89e1007f562afe5d695fd36596da643fedf|FINISHED
+20261023160000_pos_exchanges|d764278ca3221502b89772f868e039978b6af8a777de8d91e7009a23a40ac09d|FINISHED
+20261023163826_milestone15_branch_operations|bb062eabca721c516d865771d397eb1f57feb43f0f4c3d112f813f132625c385|FINISHED
+20261023170000_online_returns|c50ec6cbac3eceedd718014bd5d797765310ac4098e94f88a458fcfe36fe6181|FINISHED
+20261023180000_online_refund_settlements|79bb2365efd95a245d14981232491ce9789da8b3fab03dd6e4df061a5849707f|FINISHED
+20261024120000_loyalty_redemptions|db27248906eb6eab37faab4849371656a54fb62d30ce056ca84c02bc851491ef|FINISHED
+20261024130000_refund_balance_guards|b6b8acebcc075dc2892b3e70546fcd689f44dd2659982c592787dfc8af44a77e|FINISHED
+ROLLBACK
+
+=== GIT OBJECT SEARCH ===
+NOT FOUND IN GIT HISTORY: 20261023120000_loyalty_entry
+NOT FOUND IN GIT HISTORY: 20261023130000_pos_refund_settlement
+NOT FOUND IN GIT HISTORY: 20261023140000_refund_payout_shift
+NOT FOUND IN GIT HISTORY: 20261023150000_loyalty_adjustments
+NOT FOUND IN GIT HISTORY: 20261023160000_pos_exchanges
+NOT FOUND IN GIT HISTORY: 20261023170000_online_returns
+NOT FOUND IN GIT HISTORY: 20261023180000_online_refund_settlements
+NOT FOUND IN GIT HISTORY: 20261024120000_loyalty_redemptions
+NOT FOUND IN GIT HISTORY: 20261024130000_refund_balance_guards
+
+=== OTHER LOCAL MIGRATION DIRECTORIES ===
+POSSIBLE PROJECT/BACKUP: G:\Comprehensive Royal Step
+POSSIBLE PROJECT/BACKUP: G:\footwear-next15-results
+POSSIBLE PROJECT/BACKUP: G:\footwear-omnichannel
+POSSIBLE PROJECT/BACKUP: G:\footwear-omnichannel-main
+POSSIBLE PROJECT/BACKUP: G:\footwear-security-next15-test
+POSSIBLE PROJECT/BACKUP: G:\M112_B8I_BACKUP_20261103_204232
+POSSIBLE PROJECT/BACKUP: G:\royal-m42-44-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m45-47-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m48-50-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m51-53-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m54-56-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m57-59-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m60-62-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m63-65-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m66-68-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m69-71-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m72-74-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m75-77-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m78-80-audit
+POSSIBLE PROJECT/BACKUP: G:\royal-m78-80-diagnostic
+POSSIBLE PROJECT/BACKUP: G:\royal-m81-83-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m84-86-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m87-89-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m90-92-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m93-95-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m96-98-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-m99-101-patch
+POSSIBLE PROJECT/BACKUP: G:\royal-step-N

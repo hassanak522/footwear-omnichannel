@@ -1,0 +1,40 @@
+﻿BEGIN
+   section   |           value           
+-------------+---------------------------
+ DB_IDENTITY | footwear_omnichannel_test
+(1 row)
+
+  section  |             location_id              |        code        | location_type | active 
+-----------+--------------------------------------+--------------------+---------------+--------
+ LOCATIONS | 87a6cd9a-ff80-41f4-869c-669b63068fce | M109-TEST-WH       | WAREHOUSE     | true
+ LOCATIONS | 46d6e7fe-8733-422e-83db-bd6b40bdb7d1 | M111_TEST_BRANCH_B | BRANCH        | true
+ LOCATIONS | 0b0cc789-66ce-462b-9f94-f3ab33739975 | M112_POS_BRANCH_A  | BRANCH        | true
+(3 rows)
+
+    section    |             location_id              |              variant_id              | onHand | reservedOnline | reservedReplenish | quarantined | safetyBuffer | available 
+---------------+--------------------------------------+--------------------------------------+--------+----------------+-------------------+-------------+--------------+-----------
+ VARIANT_STOCK | 0b0cc789-66ce-462b-9f94-f3ab33739975 | 839557a6-bb35-4ef8-8066-dd5cef6f2747 |      2 |              0 |                 0 |           1 |            0 |         1
+ VARIANT_STOCK | 46d6e7fe-8733-422e-83db-bd6b40bdb7d1 | 839557a6-bb35-4ef8-8066-dd5cef6f2747 |     20 |              0 |                 0 |           0 |            0 |        20
+ VARIANT_STOCK | 87a6cd9a-ff80-41f4-869c-669b63068fce | 127776de-a3a2-43d9-bd4f-639c16679c3c |      1 |              1 |                 0 |           0 |            0 |         0
+ VARIANT_STOCK | 87a6cd9a-ff80-41f4-869c-669b63068fce | 4c49064f-5d8a-40ee-8a1d-b5c2ad7a0e8f |      1 |              0 |                 0 |           0 |            0 |         1
+ VARIANT_STOCK | 87a6cd9a-ff80-41f4-869c-669b63068fce | b36dc564-aebd-48d1-8543-3f80f804a1cd |     10 |             10 |                 0 |           0 |            0 |         0
+(5 rows)
+
+       section        |             location_id              | assigned_users 
+----------------------+--------------------------------------+----------------
+ LOCATION_ASSIGNMENTS | 0b0cc789-66ce-462b-9f94-f3ab33739975 |              2
+ LOCATION_ASSIGNMENTS | 46d6e7fe-8733-422e-83db-bd6b40bdb7d1 |              3
+ LOCATION_ASSIGNMENTS | 87a6cd9a-ff80-41f4-869c-669b63068fce |              1
+(3 rows)
+
+     section     | count 
+-----------------+-------
+ ACTIVE_VARIANTS |     4
+(1 row)
+
+     section     | count 
+-----------------+-------
+ TRANSFER_COUNTS |     0
+(1 row)
+
+COMMIT

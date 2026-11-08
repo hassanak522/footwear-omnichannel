@@ -1,0 +1,4 @@
+"Test","Expected","Actual","Result"
+"B8G-04 Cross-branch sales access","403","403","PASS"
+"B8G-05 Unauthorized refund","403","403","PASS"
+"B8G-06 Cross-branch replay","403","403","PASS"

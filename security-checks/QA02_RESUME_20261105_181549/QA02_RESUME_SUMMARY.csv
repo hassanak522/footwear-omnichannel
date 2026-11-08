@@ -1,0 +1,3 @@
+"Check","Status","Detail"
+"ISOLATED DB AND TRANSFER","PASS","Current status REQUESTED; exact original event present"
+"WRITES","SKIPPED","Run with -Execute -ConfirmApiUsesTestDatabase after verifying API process environment"

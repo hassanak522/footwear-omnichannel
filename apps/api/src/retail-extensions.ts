@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards, ForbiddenException, ConflictException } from '@nestjs/common';
 import { IsEmail, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
@@ -27,6 +29,39 @@ export class ReplenishmentController {
   if(!src.active||!dst.active||dst.type!=='BRANCH'||!['BRANCH','WAREHOUSE'].includes(src.type))throw new BadRequestException('Invalid locations');
   return this.db.replenishmentRequest.create({data:{...d,requestedById:u.id}});
  }
+ // Atomic conversion: exactly one linked transfer for each approved request.
+ @Post('requests/:id/create-transfer') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async createLinkedTransfer(@Param('id') id:string,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "ReplenishmentRequest" WHERE id = ${id}::uuid FOR UPDATE`;
+   const r=await tx.replenishmentRequest.findUniqueOrThrow({where:{id}});
+   assertLocation(u,r.sourceId);
+   if(r.status==='FULFILLED' || r.transferId)throw new ConflictException('Transfer already linked to request');
+   if(r.status!=='APPROVED')throw new ConflictException('Request must be approved');
+   const transfer=await tx.stockTransfer.create({data:{transferNumber:`TR-${randomUUID()}`,sourceId:r.sourceId,destinationId:r.destinationId,items:{create:[{variantId:r.variantId,requestedQty:r.quantity}]}},include:{items:true}});
+   await tx.replenishmentRequest.update({where:{id},data:{transferId:transfer.id}});
+   await tx.auditLog.create({data:{actorId:u.id,action:'REPLENISHMENT_TRANSFER_CREATED',entityType:'ReplenishmentRequest',entityId:id,after:{transferId:transfer.id}}});
+   return {requestId:id,transfer};
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+ }
+ @Post('requests/:id/refresh-status') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async refreshStatus(@Param('id') id:string,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "ReplenishmentRequest" WHERE id = ${id}::uuid FOR UPDATE`;
+   const r=await tx.replenishmentRequest.findUniqueOrThrow({where:{id}});
+   if(!u.roles.includes('SUPER_ADMIN')&&!u.locations.includes(r.sourceId)&&!u.locations.includes(r.destinationId))throw new ForbiddenException('Not assigned to either location');
+   if(!r.transferId)throw new ConflictException('No linked transfer');
+   const t=await tx.stockTransfer.findUniqueOrThrow({where:{id:r.transferId},include:{items:true}});
+   if(t.status!=='RECEIVED')return {requestId:id,status:r.status,transferStatus:t.status};
+   const line=t.items.find(i=>i.variantId===r.variantId);
+   if(!line || line.receivedQty<r.quantity) return {requestId:id,status:r.status,transferStatus:t.status,receivedQty:line?.receivedQty??0};
+   if(r.status!=='FULFILLED'){
+    await tx.replenishmentRequest.update({where:{id},data:{status:'FULFILLED'}});
+    await tx.auditLog.create({data:{actorId:u.id,action:'REPLENISHMENT_FULFILLED',entityType:'ReplenishmentRequest',entityId:id,after:{transferId:t.id}}});
+   }
+   return {requestId:id,status:'FULFILLED',transferStatus:t.status};
+  });
+ }
  @Post('requests/:id/reject') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async reject(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
   return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
@@ -35,6 +70,6 @@ export class ReplenishmentController {
  @Post('requests/:id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async approve(@Param('id') id:string,@CurrentUser() u:Principal){
   const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
   if(r.status!=='REQUESTED')throw new ConflictException('Already reviewed');
-  return this.db.replenishmentRequest.update({where:{id},data:{status:'APPROVED',reviewedAt:new Date()}});
+  return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'APPROVED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
  }
 }

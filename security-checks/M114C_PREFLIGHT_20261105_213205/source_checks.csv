@@ -1,0 +1,6 @@
+"Check","Pass"
+"Sync endpoint","True"
+"Idempotent localSaleId","True"
+"Serialization retry","True"
+"Offline outbox","True"
+"Local sale persistence","True"

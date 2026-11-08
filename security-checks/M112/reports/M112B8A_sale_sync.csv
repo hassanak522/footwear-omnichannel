@@ -1,0 +1,9 @@
+"Test","Expected","Actual","SaleStatus","Result","SaleId","Duplicate"
+"Cashier B denied Branch A device","403","403","","PASS",,
+"Reject mismatched shift and device","400","400","","PASS",,
+"Reject incorrect tender total","400","400","","PASS",,
+"Accept valid Branch A sale","201","201","ACCEPTED","PASS","fd12567d-f2f7-4dce-9bfd-42e11ec0abca","False"
+"Recognize identical sale retry","201","201","ACCEPTED","PASS","fd12567d-f2f7-4dce-9bfd-42e11ec0abca","True"
+"Reject changed payload on duplicate ID","409","409","","PASS",,
+"Reject cross-branch duplicate replay","403","403","","PASS",,
+"Reject future-dated sale","400","400","","PASS",,

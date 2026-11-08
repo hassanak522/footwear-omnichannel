@@ -1,0 +1,57 @@
+﻿M115-B16Y RECORD-LEVEL PRESERVATION AUDIT
+Mode: READ-ONLY
+
+Verified: footwear_m115_restore_20261107
+Verified: footwear_m115_deploy_b16w_20261107
+
+=== CONTENT FINGERPRINT COMPARISON ===
+PASS: AuditLog
+PASS: Brand
+PASS: Category
+PASS: IntegrationEvent
+PASS: Location
+PASS: LoyaltyAdjustment
+PASS: LoyaltyEntry
+PASS: LoyaltyRedemption
+PASS: OnlineOrder
+PASS: OnlineOrderLine
+PASS: OnlineRefundSettlement
+PASS: OnlineReturn
+PASS: OnlineReturnLine
+PASS: PosDevice
+PASS: PosExchange
+PASS: PosRefundSettlement
+PASS: PosReturn
+PASS: PosReturnLine
+PASS: PosSale
+PASS: PosSaleLine
+PASS: PosSaleTender
+PASS: PosShift
+PASS: PriceChangeRequest
+PASS: Product
+PASS: ProductVariant
+PASS: PurchaseOrder
+PASS: PurchaseOrderLine
+PASS: ReplenishmentRequest
+PASS: RetailCustomer
+PASS: Role
+PASS: StockBalance
+PASS: StockCount
+PASS: StockCountLine
+PASS: StockMovement
+PASS: StockReservation
+PASS: StockTransfer
+DIFFERENCE: StockTransferItem
+  Baseline: 5|aa6602d30e868642350b52cf143b6c0b
+  Deployed: 5|5dafdecaa008c1943a3bdb2541097709
+PASS: Supplier
+PASS: User
+PASS: UserLocation
+PASS: UserRole
+
+=== SUMMARY ===
+Original business tables: 41
+Matching content fingerprints: 40
+Different content fingerprints: 1
+Database modifications: NONE
+Overall: REVIEW REQUIRED

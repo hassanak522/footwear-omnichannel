@@ -1,0 +1,7 @@
+"Check","Status","ExitCode"
+"API_BUILD","PASS","0"
+"API_TESTS","PASS","0"
+"B6_RETRY","PASS","0"
+"B8_CLOSING","PASS","0"
+"B8_AUTHORIZATION","PASS","0"
+"DEPENDENCY_AUDIT","FAIL","1"

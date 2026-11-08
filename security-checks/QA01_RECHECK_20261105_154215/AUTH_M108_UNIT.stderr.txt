@@ -1,0 +1,19 @@
+npm notice run footwear-omnichannel@1.0.0 npx
+npm notice run jest --config jest.m108.config.cjs --runInBand --no-coverage
+PASS test/m108.auth.spec.ts (65.123 s)
+  M108 authorization unit tests
+    √ denies unassigned location (137 ms)
+    √ allows assigned location (1 ms)
+    √ allows super admin across locations (3 ms)
+    √ denies cashier where branch manager is required (5 ms)
+    √ allows branch manager for matching role (3 ms)
+    √ denies missing principal on restricted handler (3 ms)
+    √ rejects invalid login password (31 ms)
+    √ rejects inactive user even with correct password (3 ms)
+    √ issues token for valid login (7 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       9 passed, 9 total
+Snapshots:   0 total
+Time:        69.506 s
+Ran all test suites.

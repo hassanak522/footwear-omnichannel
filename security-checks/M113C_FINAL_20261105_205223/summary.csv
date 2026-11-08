@@ -1,0 +1,2 @@
+"Check","Result","Detail"
+"QA DATABASE","PASS","Warehouse available=12; isolated database queried directly"

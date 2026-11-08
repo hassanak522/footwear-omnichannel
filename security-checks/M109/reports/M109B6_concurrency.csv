@@ -1,0 +1,3 @@
+"Request","Status","Body"
+"1","409","{""message"":""Insufficient available stock"",""error"":""Conflict"",""statusCode"":409}"
+"2","201","{""id"":""bd3e540f-7183-4edc-8e86-91f1ee791cfd"",""locationId"":""87a6cd9a-ff80-41f4-869c-669b63068fce"",""variantId"":""4c49064f-5d8a-40ee-8a1d-b5c2ad7a0e8f"",""purpose"":""ONLINE_ORDER"",""status"":""ACTIVE"",""quantity"":1,""referenceId"":""M109-B6-B-1e5aca8a870641db9c0352a0ad03d8dc"",""expiresAt"":null,""createdAt"":""2026-10-31T11:55:02.522Z"",""updatedAt"":""2026-10-31T11:55:02.522Z""}"

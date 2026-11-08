@@ -15,10 +15,36 @@ class CreateTransferDto {
 class ActionDto { @IsString() @MinLength(8) idempotencyKey!: string; }
 class ReceiptLine { @IsUUID() variantId!: string; @IsInt() @Min(0) receivedQty!: number; @IsInt() @Min(0) damagedQty!: number; }
 class ReceiveDto extends ActionDto { @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReceiptLine) items!: ReceiptLine[]; }
+class CloseShortageDto extends ActionDto { @IsString() @MinLength(10) reason!: string; }
 
+function canonicalJson(value: unknown): string {
+ const normalize = (input: any): any => {
+  if (Array.isArray(input)) return input.map(normalize);
+  if (input !== null && typeof input === 'object') {
+   const result: Record<string, any> = {};
+   for (const key of Object.keys(input).sort()) result[key] = normalize(input[key]);
+   return result;
+  }
+  return input;
+ };
+ return JSON.stringify(normalize(value));
+}
 @Injectable()
 export class TransfersService {
  constructor(private db: Db) {}
+ private async retrySerializable<T>(operation:()=>Promise<T>):Promise<T>{
+  for(let attempt=0;attempt<3;attempt++){
+   try{return await operation();}
+   catch(error){
+    const e=error as {code?:string;meta?:{code?:string}};
+    const retryable=e?.code==='P2034'||(e?.code==='P2010'&&e?.meta?.code==='40001');
+    if(!retryable)throw error;
+    if(attempt===2)throw new ConflictException('Concurrent transfer update; retry request');
+    await new Promise(resolve=>setTimeout(resolve,75*(attempt+1)));
+   }
+  }
+  throw new ConflictException('Concurrent transfer update; retry request');
+ }
  private requireRole(u:Principal,...roles:string[]){if(!u.roles.includes('SUPER_ADMIN')&&!roles.some(r=>u.roles.includes(r)))throw new ForbiddenException('Insufficient role');}
  private access(u:Principal,locationId:string){assertLocation(u,locationId);}
  private async lockedTransfer(tx:Prisma.TransactionClient,id:string){
@@ -33,7 +59,7 @@ export class TransfersService {
  }
  private async once(tx:Prisma.TransactionClient,key:string,action:string,transferId:string,payload:unknown){
   const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:key}});
-  if(prior){if(prior.source!==`TRANSFER_${action}` || JSON.stringify(prior.payload)!==JSON.stringify({transferId,payload}))throw new ConflictException('Idempotency key reused');return true;}
+  if(prior){if(prior.source!==`TRANSFER_${action}` || canonicalJson(prior.payload)!==canonicalJson({transferId,payload}))throw new ConflictException('Idempotency key reused');return true;}
   return false;
  }
  private async event(tx:Prisma.TransactionClient,key:string,action:string,transferId:string,payload:unknown){
@@ -46,9 +72,9 @@ export class TransfersService {
   this.requireRole(u,'BRANCH_MANAGER','WAREHOUSE_MANAGER');this.access(u,dto.sourceId); // Destination is an approved location, not necessarily assigned to the requester.
   if(dto.sourceId===dto.destinationId)throw new BadRequestException('Source and destination must differ');
   if(new Set(dto.items.map(i=>i.variantId)).size!==dto.items.length)throw new BadRequestException('Duplicate variants');
-  return this.db.$transaction(async tx=>{
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const prior=await tx.integrationEvent.findUnique({where:{idempotencyKey:dto.idempotencyKey}});
-   if(prior){if(prior.source!=='TRANSFER_CREATE'||JSON.stringify(prior.payload)!==JSON.stringify(dto))throw new ConflictException('Idempotency key reused');return tx.stockTransfer.findUniqueOrThrow({where:{id:(prior.eventType)},include:{items:true}});}
+   if(prior){if(prior.source!=='TRANSFER_CREATE'||canonicalJson(prior.payload)!==canonicalJson(dto))throw new ConflictException('Idempotency key reused');return tx.stockTransfer.findUniqueOrThrow({where:{id:(prior.eventType)},include:{items:true}});}
    const locations=await tx.location.findMany({where:{id:{in:[dto.sourceId,dto.destinationId]},active:true}});
    if(locations.length!==2 || !locations.some(l=>l.id===dto.sourceId&&['WAREHOUSE','BRANCH'].includes(l.type)) || !locations.some(l=>l.id===dto.destinationId&&['BRANCH','ONLINE'].includes(l.type)))throw new BadRequestException('Only active warehouse/branch to branch/online transfers are supported');
    const variants=await tx.productVariant.count({where:{id:{in:dto.items.map(i=>i.variantId)},active:true}});
@@ -57,11 +83,11 @@ export class TransfersService {
    await tx.integrationEvent.create({data:{source:'TRANSFER_CREATE',eventType:transfer.id,idempotencyKey:dto.idempotencyKey,payload:JSON.parse(JSON.stringify(dto)),processedAt:new Date()}});
    await this.audit(tx,u,'TRANSFER_REQUEST',transfer.id,{}, {status:'REQUESTED'});
    return transfer;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
  async approve(id:string,dto:ActionDto,u:Principal){
   this.requireRole(u,'WAREHOUSE_MANAGER','BRANCH_MANAGER');
-  return this.db.$transaction(async tx=>{
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
    if(await this.once(tx,dto.idempotencyKey,'APPROVE',id,{}))return t;
    if(t.status!=='REQUESTED')throw new ConflictException('Transfer must be requested');
@@ -72,11 +98,11 @@ export class TransfersService {
    }
    const result=await tx.stockTransfer.update({where:{id},data:{status:'APPROVED'},include:{items:true}});
    await this.event(tx,dto.idempotencyKey,'APPROVE',id,{});await this.audit(tx,u,'TRANSFER_APPROVE',id,{status:t.status},{status:result.status});return result;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
  async dispatch(id:string,dto:ActionDto,u:Principal){
   this.requireRole(u,'WAREHOUSE_MANAGER','BRANCH_MANAGER');
-  return this.db.$transaction(async tx=>{
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
    if(await this.once(tx,dto.idempotencyKey,'DISPATCH',id,{}))return t;
    if(t.status!=='APPROVED')throw new ConflictException('Transfer must be approved');
@@ -89,30 +115,65 @@ export class TransfersService {
    }
    const result=await tx.stockTransfer.update({where:{id},data:{status:'DISPATCHED',dispatchedAt:new Date()},include:{items:true}});
    await this.event(tx,dto.idempotencyKey,'DISPATCH',id,{});await this.audit(tx,u,'TRANSFER_DISPATCH',id,{status:t.status},{status:result.status});return result;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
  async receive(id:string,dto:ReceiveDto,u:Principal){
   this.requireRole(u,'BRANCH_MANAGER','WAREHOUSE_MANAGER');
-  return this.db.$transaction(async tx=>{
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const t=await this.lockedTransfer(tx,id);this.access(u,t.destinationId);
    if(await this.once(tx,dto.idempotencyKey,'RECEIVE',id,dto.items))return t;
-   if(t.status!=='DISPATCHED')throw new ConflictException('Transfer must be dispatched');
+   if(t.status!=='DISPATCHED'&&t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Transfer is not open for receipt');
    if(dto.items.length!==t.items.length||new Set(dto.items.map(i=>i.variantId)).size!==dto.items.length)throw new BadRequestException('Provide one receipt line for each dispatched variant');
    const expected=new Map(t.items.map(i=>[i.variantId,i]));
-   for(const line of dto.items){const item=expected.get(line.variantId);if(!item||line.receivedQty+line.damagedQty>item.dispatchedQty)throw new BadRequestException('Invalid receipt quantities');}
-   let variance=false;
+   let receivedThisTime=0;
+   for(const line of dto.items){
+    const item=expected.get(line.variantId);
+    if(!item)throw new BadRequestException('Unknown receipt variant');
+    const remaining=item.dispatchedQty-item.receivedQty-item.damagedQty-item.shortageQty;
+    if(line.receivedQty+line.damagedQty>remaining)throw new ConflictException('Receipt exceeds outstanding quantity');
+    receivedThisTime+=line.receivedQty+line.damagedQty;
+   }
+   if(receivedThisTime===0)throw new BadRequestException('Receipt must contain at least one unit');
    for(const line of [...dto.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     const item=expected.get(line.variantId)!;
-    const b=await this.lockBalance(tx,t.destinationId,line.variantId);
-    if(line.receivedQty+line.damagedQty!==item.dispatchedQty)variance=true;
-    await tx.stockBalance.update({where:{id:b.id},data:{onHand:{increment:line.receivedQty+line.damagedQty},quarantined:{increment:line.damagedQty},version:{increment:1}}});
-    await tx.stockTransferItem.update({where:{id:item.id},data:{receivedQty:line.receivedQty,damagedQty:line.damagedQty}});
-    if(line.receivedQty+line.damagedQty>0)await tx.stockMovement.create({data:{locationId:t.destinationId,variantId:line.variantId,type:'TRANSFER_RECEIPT',quantityDelta:line.receivedQty+line.damagedQty,referenceType:'STOCK_TRANSFER',referenceId:id,idempotencyKey:`transfer:${id}:receive:${line.variantId}`,actorId:u.id,metadata:{damagedQty:line.damagedQty}}});
+    const quantity=line.receivedQty+line.damagedQty;
+    if(quantity===0)continue;
+    const balance=await this.lockBalance(tx,t.destinationId,line.variantId);
+    await tx.stockBalance.update({where:{id:balance.id},data:{onHand:{increment:quantity},quarantined:{increment:line.damagedQty},version:{increment:1}}});
+    await tx.stockTransferItem.update({where:{id:item.id},data:{receivedQty:{increment:line.receivedQty},damagedQty:{increment:line.damagedQty}}});
+    await tx.stockTransferReceipt.create({data:{transferId:id,variantId:line.variantId,receivedQty:line.receivedQty,damagedQty:line.damagedQty,idempotencyKey:dto.idempotencyKey,actorId:u.id}});
+    await tx.stockMovement.create({data:{locationId:t.destinationId,variantId:line.variantId,type:'TRANSFER_RECEIPT',quantityDelta:quantity,referenceType:'STOCK_TRANSFER',referenceId:id,idempotencyKey:`transfer:${id}:receive:${dto.idempotencyKey}:${line.variantId}`,actorId:u.id,metadata:{damagedQty:line.damagedQty,receiptKey:dto.idempotencyKey}}});
    }
-   const status:TransferStatus=variance?'PARTIALLY_RECEIVED':'RECEIVED';
-   const result=await tx.stockTransfer.update({where:{id},data:{status,receivedAt:new Date()},include:{items:true}});
-   await this.event(tx,dto.idempotencyKey,'RECEIVE',id,dto.items);await this.audit(tx,u,'TRANSFER_RECEIVE',id,{status:t.status},{status,variance});return result;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
+   const updatedItems=await tx.stockTransferItem.findMany({where:{transferId:id}});
+   const complete=updatedItems.every(i=>i.receivedQty+i.damagedQty+i.shortageQty===i.dispatchedQty);
+   const status:TransferStatus=complete?'RECEIVED':'PARTIALLY_RECEIVED';
+   const result=await tx.stockTransfer.update({where:{id},data:{status,receivedAt:complete?new Date():null},include:{items:true}});
+   await this.event(tx,dto.idempotencyKey,'RECEIVE',id,dto.items);
+   await this.audit(tx,u,'TRANSFER_RECEIVE',id,{status:t.status},{status,receivedThisTime});
+   return result;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
+ }
+ async closeShortage(id:string,dto:CloseShortageDto,u:Principal){
+  this.requireRole(u,'WAREHOUSE_MANAGER');
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
+   const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
+   if(await this.once(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason}))return t;
+   if(t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Only partially received transfers can be shortage-closed');
+   let outstanding=0;
+   for(const item of t.items){
+    const missing=item.dispatchedQty-item.receivedQty-item.damagedQty-item.shortageQty;
+    if(missing<0)throw new ConflictException('Transfer quantities inconsistent');
+    if(missing>0){
+     outstanding+=missing;
+     await tx.stockTransferItem.update({where:{id:item.id},data:{shortageQty:{increment:missing}}});
+    }
+   }
+   if(outstanding===0)throw new ConflictException('No outstanding quantity');
+   const result=await tx.stockTransfer.update({where:{id},data:{status:'SHORTAGE_CLOSED'},include:{items:true}});
+   await this.event(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason});
+   await this.audit(tx,u,'TRANSFER_SHORTAGE_CLOSE',id,{status:t.status},{status:'SHORTAGE_CLOSED',outstanding,reason:dto.reason});
+   return result;
+  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
  async list(u:Principal){return this.db.stockTransfer.findMany({where:u.roles.includes('SUPER_ADMIN')?{}:{OR:[{sourceId:{in:u.locations}},{destinationId:{in:u.locations}}]},include:{items:true},orderBy:{createdAt:'desc'},take:200});}
  async get(id:string,u:Principal){const t=await this.db.stockTransfer.findUnique({where:{id},include:{items:true,source:true,destination:true}});if(!t)throw new BadRequestException('Transfer not found');if(!u.roles.includes('SUPER_ADMIN')&&!u.locations.some(l=>l===t.sourceId||l===t.destinationId))throw new ForbiddenException();return t;}
@@ -126,4 +187,5 @@ export class TransfersController {
  @Post(':id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') approve(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.approve(id,dto,u);}
  @Post(':id/dispatch') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') dispatch(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.dispatch(id,dto,u);}
  @Post(':id/receive') @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){return this.svc.receive(id,dto,u);}
+ @Post(':id/close-shortage') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') closeShortage(@Param('id') id:string,@Body() dto:CloseShortageDto,@CurrentUser() u:Principal){return this.svc.closeShortage(id,dto,u);}
 }

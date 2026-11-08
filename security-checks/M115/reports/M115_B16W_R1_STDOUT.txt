@@ -1,0 +1,20 @@
+Prisma schema loaded from packages\database\prisma\schema.prisma
+Datasource "db": PostgreSQL database "footwear_m115_deploy_b16w_20261107", schema "public" at "127.0.0.1:5433"
+
+18 migrations found in prisma/migrations
+
+Applying migration `20261104_m112b8i_shift_snapshot`
+Applying migration `20261107160000_m115_m112_schema_reconciliation`
+Applying migration `20261107161000_m115_m113_transfer_reconciliation`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20261104_m112b8i_shift_snapshot/
+    └─ migration.sql
+  └─ 20261107160000_m115_m112_schema_reconciliation/
+    └─ migration.sql
+  └─ 20261107161000_m115_m113_transfer_reconciliation/
+    └─ migration.sql
+      
+All migrations have been successfully applied.

@@ -1,0 +1,7 @@
+"Test","Expected","Actual","Result","Error"
+"Warehouse inventory locations","200","200","PASS",""
+"Warehouse inventory balances","200","200","PASS",""
+"Warehouse finance comparison","403","403","PASS",""
+"Warehouse finance exposure","403","403","PASS",""
+"Warehouse POS sales","403","403","PASS",""
+"Warehouse cash reconciliation","403","403","PASS",""

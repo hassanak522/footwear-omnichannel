@@ -1,0 +1,117 @@
+npm notice run footwear-omnichannel@1.0.0 npx
+npm notice run jest --config jest.m112-b8.config.cjs --runInBand --no-coverage
+FAIL src/pos-close.m112-b8.spec.ts (15.733 s)
+  M112-B8 POS shift closure safety
+    × rejects an already CLOSED shift without creating a snapshot (9 ms)
+    × rejects a non-owner cashier (2 ms)
+    × rejects cross-branch access (1 ms)
+    × creates exactly one correct financial snapshot (1 ms)
+    × does not proceed to audit if snapshot creation fails (40 ms)
+    × rejects a second closure after the first closes the shift (1 ms)
+
+  ● M112-B8 POS shift closure safety › rejects an already CLOSED shift without creating a snapshot
+
+    expect(received).rejects.toBeInstanceOf(expected)
+
+    Expected constructor: ConflictException
+    Received constructor: TypeError
+
+    [0m [90m 72 |[39m     [36mawait[39m expect(
+     [90m 73 |[39m       service[33m.[39mcloseShift([33mSHIFT[39m[33m,[39m { closingCash[33m:[39m [35m11000[39m }[33m,[39m principal([[32m'CASHIER'[39m]))
+    [31m[1m>[22m[39m[90m 74 |[39m     )[33m.[39mrejects[33m.[39mtoBeInstanceOf([33mConflictException[39m)[33m;[39m
+     [90m    |[39m               [31m[1m^[22m[39m
+     [90m 75 |[39m
+     [90m 76 |[39m     expect(tx[33m.[39mposShift[33m.[39mupdate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 77 |[39m     expect(tx[33m.[39mposShiftClosingSnapshot[33m.[39mcreate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m[0m
+
+      at Object.toBeInstanceOf (../../node_modules/expect/build/index.js:218:22)
+      at Object.<anonymous> (src/pos-close.m112-b8.spec.ts:74:15)
+
+  ● M112-B8 POS shift closure safety › rejects a non-owner cashier
+
+    expect(received).rejects.toBeInstanceOf(expected)
+
+    Expected constructor: ForbiddenException
+    Received constructor: TypeError
+
+    [0m [90m 87 |[39m         principal([[32m'CASHIER'[39m][33m,[39m [32m'different-user'[39m)
+     [90m 88 |[39m       )
+    [31m[1m>[22m[39m[90m 89 |[39m     )[33m.[39mrejects[33m.[39mtoBeInstanceOf([33mForbiddenException[39m)[33m;[39m
+     [90m    |[39m               [31m[1m^[22m[39m
+     [90m 90 |[39m
+     [90m 91 |[39m     expect(tx[33m.[39mposShift[33m.[39mupdate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 92 |[39m     expect(tx[33m.[39mposShiftClosingSnapshot[33m.[39mcreate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m[0m
+
+      at Object.toBeInstanceOf (../../node_modules/expect/build/index.js:218:22)
+      at Object.<anonymous> (src/pos-close.m112-b8.spec.ts:89:15)
+
+  ● M112-B8 POS shift closure safety › rejects cross-branch access
+
+    expect(received).rejects.toBeInstanceOf(expected)
+
+    Expected constructor: ForbiddenException
+    Received constructor: TypeError
+
+    [0m [90m 102 |[39m     [36mawait[39m expect(
+     [90m 103 |[39m       service[33m.[39mcloseShift([33mSHIFT[39m[33m,[39m { closingCash[33m:[39m [35m11000[39m }[33m,[39m principal([[32m'BRANCH_MANAGER'[39m]))
+    [31m[1m>[22m[39m[90m 104 |[39m     )[33m.[39mrejects[33m.[39mtoBeInstanceOf([33mForbiddenException[39m)[33m;[39m
+     [90m     |[39m               [31m[1m^[22m[39m
+     [90m 105 |[39m
+     [90m 106 |[39m     expect(tx[33m.[39mposShift[33m.[39mupdate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+     [90m 107 |[39m     expect(tx[33m.[39mposShiftClosingSnapshot[33m.[39mcreate)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m[0m
+
+      at Object.toBeInstanceOf (../../node_modules/expect/build/index.js:218:22)
+      at Object.<anonymous> (src/pos-close.m112-b8.spec.ts:104:15)
+
+  ● M112-B8 POS shift closure safety › creates exactly one correct financial snapshot
+
+    TypeError: tx.posShift.findUnique is not a function
+
+    [0m [90m 146 |[39m [32m  `[39m[33m;[39m
+     [90m 147 |[39m
+    [31m[1m>[22m[39m[90m 148 |[39m   [36mconst[39m shift [33m=[39m [36mawait[39m tx[33m.[39mposShift[33m.[39mfindUnique({where[33m:[39m{id}})[33m;[39m
+     [90m     |[39m                                   [31m[1m^[22m[39m
+     [90m 149 |[39m   [36mif[39m ([33m![39mshift) [36mthrow[39m [36mnew[39m [33mNotFoundException[39m([32m'POS shift not found'[39m)[33m;[39m
+     [90m 150 |[39m   [36mthis[39m[33m.[39mbranchAccess(u[33m,[39mshift[33m.[39mlocationId)[33m;[39m
+     [90m 151 |[39m[0m
+
+      at db.$transaction.isolationLevel (src/pos.ts:148:35)
+
+  ● M112-B8 POS shift closure safety › does not proceed to audit if snapshot creation fails
+
+    expect(received).rejects.toThrow(expected)
+
+    Expected substring: "Synthetic snapshot failure"
+    Received message:   "tx.posShift.findUnique is not a function"
+
+        [0m [90m 146 |[39m [32m  `[39m[33m;[39m
+         [90m 147 |[39m
+        [31m[1m>[22m[39m[90m 148 |[39m   [36mconst[39m shift [33m=[39m [36mawait[39m tx[33m.[39mposShift[33m.[39mfindUnique({where[33m:[39m{id}})[33m;[39m
+         [90m     |[39m                                   [31m[1m^[22m[39m
+         [90m 149 |[39m   [36mif[39m ([33m![39mshift) [36mthrow[39m [36mnew[39m [33mNotFoundException[39m([32m'POS shift not found'[39m)[33m;[39m
+         [90m 150 |[39m   [36mthis[39m[33m.[39mbranchAccess(u[33m,[39mshift[33m.[39mlocationId)[33m;[39m
+         [90m 151 |[39m[0m
+
+      at db.$transaction.isolationLevel (src/pos.ts:148:35)
+      at Object.toThrow (../../node_modules/expect/build/index.js:218:22)
+      at Object.<anonymous> (src/pos-close.m112-b8.spec.ts:145:15)
+
+  ● M112-B8 POS shift closure safety › rejects a second closure after the first closes the shift
+
+    TypeError: tx.posShift.findUnique is not a function
+
+    [0m [90m 146 |[39m [32m  `[39m[33m;[39m
+     [90m 147 |[39m
+    [31m[1m>[22m[39m[90m 148 |[39m   [36mconst[39m shift [33m=[39m [36mawait[39m tx[33m.[39mposShift[33m.[39mfindUnique({where[33m:[39m{id}})[33m;[39m
+     [90m     |[39m                                   [31m[1m^[22m[39m
+     [90m 149 |[39m   [36mif[39m ([33m![39mshift) [36mthrow[39m [36mnew[39m [33mNotFoundException[39m([32m'POS shift not found'[39m)[33m;[39m
+     [90m 150 |[39m   [36mthis[39m[33m.[39mbranchAccess(u[33m,[39mshift[33m.[39mlocationId)[33m;[39m
+     [90m 151 |[39m[0m
+
+      at db.$transaction.isolationLevel (src/pos.ts:148:35)
+
+Test Suites: 1 failed, 1 total
+Tests:       6 failed, 6 total
+Snapshots:   0 total
+Time:        17.707 s, estimated 41 s
+Ran all test suites.

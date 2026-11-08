@@ -1,0 +1,8 @@
+"Test","Expected","Actual","Result","ReturnId"
+"Cashier cannot approve return","403","403","PASS",
+"Foreign manager denied return","403","403","PASS",
+"Manager A approves return","201","201","PASS","d1b5b047-e4b4-440c-9d80-d1f93e0e181e"
+"Identical return retry","201","201","PASS","d1b5b047-e4b4-440c-9d80-d1f93e0e181e"
+"Foreign manager denied existing key","403","403","PASS",
+"Reject key reused for different sale","409","409","PASS",
+"Reject excessive return quantity","409","409","PASS",

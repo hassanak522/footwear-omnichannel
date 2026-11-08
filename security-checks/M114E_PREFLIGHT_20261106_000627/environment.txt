@@ -1,0 +1,4 @@
+Node: v24.17.0
+NPM: 12.2.0
+POS directory exists: True
+QA API reachable: True

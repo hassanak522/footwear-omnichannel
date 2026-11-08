@@ -1,0 +1,22 @@
+﻿node.exe : npm notice run footwear-omnichannel@1.0.0 npx
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run ...annel@1.0.0 npx:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run jest --config jest.m112-b8.config.cjs --runInBand
+PASS src/pos-close.m112-b8.spec.ts (26.624 s)
+  M112-B8 POS shift closure safety
+    ΓêÜ rejects an already CLOSED shift without creating a snapshot (7 ms)
+    ΓêÜ rejects a non-owner cashier (5 ms)
+    ΓêÜ rejects cross-branch access (1 ms)
+    ΓêÜ creates exactly one correct financial snapshot (4 ms)
+    ΓêÜ does not proceed to audit if snapshot creation fails (25 ms)
+    ΓêÜ rejects a second closure after the first closes the shift (2 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       6 passed, 6 total
+Snapshots:   0 total
+Time:        38.055 s, estimated 49 s
+Ran all test suites.

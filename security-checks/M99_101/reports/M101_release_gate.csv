@@ -1,0 +1,8 @@
+"Gate","Status","Evidence"
+"M93 authorization inventory reviewed","UNVERIFIED","Review M93 controller audit manually"
+"M94/M97 authenticated branch isolation","UNVERIFIED","Requires assigned and other REAL branch UUIDs with restricted test account"
+"M96 write-route authorization review","UNVERIFIED","Review route review CSV and service checks"
+"M98 durable finance audit events","UNVERIFIED","Inspect audit persistence and actor/location metadata"
+"M99 API contract inventory","INVENTORIED","Static source inventory only"
+"M100 signed-out session regression","PASS","M100_session_regression.txt - all signed-out checks passed"
+"Authorized functional finance workflows","UNVERIFIED","Test with safe staging data and authorized accounts"

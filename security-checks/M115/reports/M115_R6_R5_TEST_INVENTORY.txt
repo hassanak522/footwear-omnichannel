@@ -1,0 +1,4 @@
+G:\footwear-omnichannel\apps\api\src\pos-close.m112-b8.spec.ts
+G:\footwear-omnichannel\apps\api\src\pos-close.m112-b8-integration.spec.ts
+G:\footwear-omnichannel\apps\api\src\pos-retry.m112-b6.spec.ts
+G:\footwear-omnichannel\apps\api\src\pos-auth.m112-b8.spec.ts

@@ -1,0 +1,46 @@
+﻿========================================
+M115-B16Z-R1 API CONNECTIVITY DIAGNOSTICS
+========================================
+Mode: READ-ONLY
+
+=== NODE PROCESSES ===
+No Node.js processes detected.
+
+=== TCP PORT CHECKS ===
+NOT LISTENING: Port 3000
+NOT LISTENING: Port 3001
+NOT LISTENING: Port 3002
+NOT LISTENING: Port 4000
+NOT LISTENING: Port 5000
+NOT LISTENING: Port 5173
+
+=== API PACKAGE ===
+API package: FOUND
+Package name: @footwear/api
+Script dev: nest start --watch
+Script build: nest build
+Script start: node dist/main.js
+
+=== API ENTRY POINT ===
+FOUND: apps\api\src\main.ts
+Line 7: app.setGlobalPrefix('api/v1');
+Line 18: await app.listen(Number(process.env.PORT || 3001));
+Line 19: console.log(`API listening on http://localhost:${process.env.PORT || 3001}/api/v1`);
+
+=== ENVIRONMENT FILES ===
+FOUND: .env
+FOUND: apps\api\.env
+NOT FOUND: apps\api\.env.local
+
+=== HTTP CONNECTIVITY ===
+UNREACHABLE: http://127.0.0.1:3001/api/v1/health
+Reason: Unable to connect to the remote server
+UNREACHABLE: http://localhost:3001/api/v1/health
+Reason: Unable to connect to the remote server
+UNREACHABLE: http://127.0.0.1:3000/api/v1/health
+Reason: Unable to connect to the remote server
+
+=== DIAGNOSTIC COMPLETE ===
+Application files modified: NONE
+Database modifications: NONE
+Migrations executed: NONE

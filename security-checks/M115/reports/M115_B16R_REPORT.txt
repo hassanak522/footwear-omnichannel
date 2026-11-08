@@ -1,0 +1,13 @@
+M115-B16R PRISMA-TO-POSTGRESQL DIFF
+Mode: READ-ONLY
+Schema SHA256: A54239EB277445FE9DD7B338418EAD1D398674D59E6BCFB1BC4BFAD39E081859
+Database: footwear_m115_replay_20261107
+Prisma diff exit code: 0
+CREATE TABLE statements: 0
+DROP TABLE statements: 0
+ALTER TABLE statements: 2
+CREATE INDEX statements: 0
+DROP INDEX statements: 1
+SQL diff: G:\footwear-omnichannel\security-checks\M115\reports\M115_B16R_PRISMA_DIFF.sql
+Database modifications: NONE
+Migrations executed: NONE

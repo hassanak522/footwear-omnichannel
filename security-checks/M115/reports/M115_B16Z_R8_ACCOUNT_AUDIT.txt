@@ -1,0 +1,46 @@
+﻿BEGIN
+SET
+ check_type |             result              
+------------+---------------------------------
+ DATABASE   | footwear_m115_api_b16z_20261107
+(1 row)
+
+ check_type  | status | user_count 
+-------------+--------+------------
+ USER_STATUS | ACTIVE |          8
+(1 row)
+
+ check_type |       code        | assigned_users 
+------------+-------------------+----------------
+ ROLE       | BRANCH_MANAGER    |              7
+ ROLE       | CASHIER           |              0
+ ROLE       | ECOMMERCE_MANAGER |              0
+ ROLE       | FINANCE           |              0
+ ROLE       | MANAGEMENT_VIEWER |              0
+ ROLE       | SUPER_ADMIN       |              1
+ ROLE       | SUPPORT           |              0
+ ROLE       | WAREHOUSE_MANAGER |              0
+(8 rows)
+
+ check_type |   code    | location_type | active | assigned_users 
+------------+-----------+---------------+--------+----------------
+ LOCATION   | BR-KHI-01 | BRANCH        | t      |              3
+ LOCATION   | BR-KHI-02 | BRANCH        | t      |              2
+ LOCATION   | BR-KHI-03 | BRANCH        | t      |              1
+ LOCATION   | BR-KHI-04 | BRANCH        | t      |              1
+ LOCATION   | WH-KHI-01 | WAREHOUSE     | t      |              0
+(5 rows)
+
+   check_type    |           email            | user_status |     roles      |   locations   
+-----------------+----------------------------+-------------+----------------+---------------
+ USER_ASSIGNMENT | a1@gmail.com               | ACTIVE      | BRANCH_MANAGER | BR-KHI-01
+ USER_ASSIGNMENT | a@gmail.com                | ACTIVE      | BRANCH_MANAGER | BR-KHI-01
+ USER_ASSIGNMENT | abdullahjangkhan@gmail.com | ACTIVE      | SUPER_ADMIN    | (no location)
+ USER_ASSIGNMENT | b1a@gmail.com              | ACTIVE      | BRANCH_MANAGER | BR-KHI-01
+ USER_ASSIGNMENT | b2a@gmail.com              | ACTIVE      | BRANCH_MANAGER | BR-KHI-02
+ USER_ASSIGNMENT | b@gmail.com                | ACTIVE      | BRANCH_MANAGER | BR-KHI-02
+ USER_ASSIGNMENT | c@gmail.com                | ACTIVE      | BRANCH_MANAGER | BR-KHI-03
+ USER_ASSIGNMENT | d@gmail.com                | ACTIVE      | BRANCH_MANAGER | BR-KHI-04
+(8 rows)
+
+ROLLBACK

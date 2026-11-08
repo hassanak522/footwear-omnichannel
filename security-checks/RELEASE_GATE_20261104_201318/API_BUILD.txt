@@ -1,0 +1,25 @@
+﻿node.exe : npm notice run @footwear/api@1.0.0 build
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Users\acer\AppData\Roaming\n ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm notice run @footwear/api@1.0.0 build:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm notice run nest build
+[96msrc/pos-close.m112-b8.spec.ts[0m:[93m131[0m:[93m42[0m - [91merror[0m[90m TS2493: [0mTuple type '[fn: 
+(t: { $executeRaw: Mock<any, any, any>; posShift: { findUniqueOrThrow: Mock<any, any, any>; update: Mock<any, any, 
+any>; }; posSale: { findMany: Mock<any, any, any>; }; drawerMovement: { ...; }; posShiftClosingSnapshot: { ...; }; 
+auditLog: { ...; }; }) => Promise<...>]' of length '1' has no element at index '1'.
+
+[7m131[0m     expect(db.$transaction.mock.calls[0][1]).toMatchObject({
+[7m   [0m [91m                                         ~[0m
+
+Found 1 error(s).
+
+npm error Lifecycle script `build` failed with error:
+npm error code 1
+npm error path G:\footwear-omnichannel\apps\api
+npm error workspace @footwear/api@1.0.0
+npm error location G:\footwear-omnichannel\apps\api
+npm error command failed
+npm error command C:\Windows\system32\cmd.exe /d /s /c nest build

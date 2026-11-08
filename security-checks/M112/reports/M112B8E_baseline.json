@@ -1,0 +1,9 @@
+{
+    "Database":  "footwear_omnichannel_test",
+    "Sales":  1,
+    "Returns":  1,
+    "ReturnLines":  1,
+    "Movements":  2,
+    "Balances":  5,
+    "CapturedAtUTC":  "2026-11-03T11:43:39.5877948Z"
+}
