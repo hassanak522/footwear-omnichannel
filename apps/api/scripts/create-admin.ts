@@ -1,7 +1,7 @@
+import { PrismaClient } from '@prisma/client';
 import { config } from 'dotenv';
 config({ path: 'apps/api/.env' });
 config({ path: '.env' });
-import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 const db=new PrismaClient();
 async function main(){
