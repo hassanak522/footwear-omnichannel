@@ -119,6 +119,81 @@ export class PurchasingController {
    timeout:15000
   });
  }
+ // R3-D1 PURCHASE ORDER RECEIPT HISTORY
+ @Get('orders/:id/receipts')
+ async receiptHistory(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
+  const order=await this.db.purchaseOrder.findUnique({
+   where:{id},
+   include:{supplier:true,lines:true}
+  });
+
+  if(!order)throw new NotFoundException('Purchase order not found');
+
+  assertLocation(u,order.warehouseId);
+
+  const movements=await this.db.stockMovement.findMany({
+   where:{
+    locationId:order.warehouseId,
+    referenceType:'PURCHASE_ORDER',
+    referenceId:id,
+    type:'SUPPLIER_RECEIPT'
+   },
+   orderBy:{createdAt:'asc'}
+  });
+
+  const receipts=new Map<string,{
+   receiptId:string;
+   createdAt:Date;
+   lines:Array<{
+    variantId:string;
+    goodQty:number;
+    damagedQty:number;
+    totalQty:number;
+   }>;
+  }>();
+
+  for(const movement of movements){
+   const metadata=movement.metadata as Record<string,unknown>|null;
+   const receiptId=String(metadata?.receiptId || movement.id);
+
+   if(!receipts.has(receiptId)){
+    receipts.set(receiptId,{
+     receiptId,
+     createdAt:movement.createdAt,
+     lines:[]
+    });
+   }
+
+   const goodQty=Number(metadata?.goodQty ?? 0);
+   const damagedQty=Number(metadata?.damagedQty ?? 0);
+
+   receipts.get(receiptId)!.lines.push({
+    variantId:movement.variantId,
+    goodQty,
+    damagedQty,
+    totalQty:movement.quantityDelta
+   });
+  }
+
+  return {
+   orderId:order.id,
+   reference:order.reference,
+   status:order.status,
+   supplier:order.supplier,
+   warehouseId:order.warehouseId,
+   receipts:Array.from(receipts.values()),
+   totals:{
+    ordered:order.lines.reduce((sum,line)=>sum+line.orderedQty,0),
+    received:order.lines.reduce((sum,line)=>sum+line.receivedQty,0),
+    remaining:order.lines.reduce(
+     (sum,line)=>sum+line.orderedQty-line.receivedQty,0
+    )
+   }
+  };
+ }
  @Post('orders/:id/receive') async receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
   return this.db.$transaction(async tx=>{

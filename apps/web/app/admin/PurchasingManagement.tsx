@@ -100,6 +100,10 @@ export default function PurchasingManagement() {
   ]);
 
   const [receipts, setReceipts] = useState<Record<string, Receipt[]>>({});
+  // R3-D2 RECEIPT HISTORY
+  const [receiptHistory, setReceiptHistory] = useState<Record<string, any>>({});
+  const [historyLoading, setHistoryLoading] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     const results = await Promise.allSettled([
@@ -328,6 +332,35 @@ export default function PurchasingManagement() {
     }
   };
 
+  async function toggleReceiptHistory(order: Item) {
+    if (historyOpen[order.id]) {
+      setHistoryOpen(current => ({ ...current, [order.id]: false }));
+      return;
+    }
+
+    setHistoryLoading(order.id);
+    setError('');
+
+    try {
+      const history = await request(
+        `/purchasing/orders/${order.id}/receipts`
+      );
+
+      setReceiptHistory(current => ({
+        ...current,
+        [order.id]: history,
+      }));
+
+      setHistoryOpen(current => ({
+        ...current,
+        [order.id]: true,
+      }));
+    } catch (e: any) {
+      setError(e.message || 'Could not load receipt history');
+    } finally {
+      setHistoryLoading(null);
+    }
+  }
   const cancelOrder = async (order: Item) => {
     if (!window.confirm(`Cancel purchase order ${order.reference}?`)) return;
 
@@ -621,6 +654,90 @@ export default function PurchasingManagement() {
                 </table>
               </div>
 
+              <div style={{ marginTop: 12 }}>
+                <button
+                  style={buttonStyle}
+                  disabled={historyLoading === order.id}
+                  onClick={() => toggleReceiptHistory(order)}
+                >
+                  {historyLoading === order.id
+                    ? 'Loading history...'
+                    : historyOpen[order.id]
+                      ? 'Hide receipt history'
+                      : 'View receipt history'}
+                </button>
+
+                {historyOpen[order.id] && receiptHistory[order.id] && (
+                  <div style={{ ...panelStyle, marginTop: 12 }}>
+                    <h4>Goods receipt history</h4>
+
+                    <div style={{
+                      display: 'flex',
+                      gap: 20,
+                      flexWrap: 'wrap',
+                      marginBottom: 12,
+                    }}>
+                      <span>
+                        <strong>Ordered:</strong>{' '}
+                        {receiptHistory[order.id].totals?.ordered ?? 0}
+                      </span>
+                      <span>
+                        <strong>Received:</strong>{' '}
+                        {receiptHistory[order.id].totals?.received ?? 0}
+                      </span>
+                      <span>
+                        <strong>Remaining:</strong>{' '}
+                        {receiptHistory[order.id].totals?.remaining ?? 0}
+                      </span>
+                    </div>
+
+                    {(receiptHistory[order.id].receipts || []).length === 0 && (
+                      <p>No goods receipts have been recorded for this order.</p>
+                    )}
+
+                    {(receiptHistory[order.id].receipts || []).map(
+                      (receipt: any) => (
+                        <div key={receipt.receiptId} style={{
+                          borderTop: '1px solid #cbd5e1',
+                          paddingTop: 12,
+                          marginTop: 12,
+                        }}>
+                          <strong>Receipt: {receipt.receiptId}</strong>
+
+                          <p>
+                            {receipt.createdAt
+                              ? new Date(receipt.createdAt).toLocaleString()
+                              : 'Date unavailable'}
+                          </p>
+
+                          <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', textAlign: 'left' }}>
+                              <thead>
+                                <tr>
+                                  <th>Variant</th>
+                                  <th>Good</th>
+                                  <th>Damaged</th>
+                                  <th>Total</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(receipt.lines || []).map((line: any) => (
+                                  <tr key={line.variantId}>
+                                    <td>{variantLabel(line.variantId)}</td>
+                                    <td>{line.goodQty}</td>
+                                    <td>{line.damagedQty}</td>
+                                    <td>{line.totalQty}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
               {order.status === 'SUBMITTED' && (
                 <button style={{ ...buttonStyle, marginTop: 12 }}
                   disabled={busy}
