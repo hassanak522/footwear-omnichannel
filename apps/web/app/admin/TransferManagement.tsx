@@ -136,6 +136,12 @@ export default function TransferManagement() {
 
   const [receipt, setReceipt] = useState<ReceiptLine[]>([]);
   const [shortageReason, setShortageReason] = useState('');
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelRequest, setCancelRequest] = useState<{
+    transferId: string;
+    reason: string;
+    key: string;
+  } | null>(null);
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('ALL');
@@ -393,6 +399,70 @@ export default function TransferManagement() {
     );
   }
 
+  async function cancelTransfer() {
+    if (!selectedId || !details) return;
+
+    const reason = cancelReason.trim();
+
+    if (reason.length < 10) {
+      setError('Cancellation reason must contain at least 10 characters.');
+      return;
+    }
+
+    if (!['REQUESTED', 'APPROVED'].includes(details.status)) {
+      setError('This transfer can no longer be cancelled.');
+      return;
+    }
+
+    if (!window.confirm(
+      'Cancel this transfer? Approved reservations will be released.'
+    )) {
+      return;
+    }
+
+    const existing =
+      cancelRequest?.transferId === selectedId &&
+      cancelRequest?.reason === reason
+        ? cancelRequest
+        : null;
+
+    const pending = existing || {
+      transferId: selectedId,
+      reason,
+      key: crypto.randomUUID(),
+    };
+
+    setCancelRequest(pending);
+    setBusy(true);
+    setError('');
+    setNotice('');
+
+    try {
+      await request(
+        `/transfers/${encodeURIComponent(selectedId)}/cancel`,
+        'POST',
+        {
+          reason,
+          idempotencyKey: pending.key,
+        },
+      );
+
+      const updated = await request(
+        `/transfers/${encodeURIComponent(selectedId)}`,
+      );
+
+      setDetails(updated);
+      await load();
+
+      setCancelRequest(null);
+      setCancelReason('');
+      setNotice('Transfer cancelled successfully.');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   function closeShortage() {
     if (!selectedId) return;
 
@@ -662,7 +732,7 @@ export default function TransferManagement() {
 
           <p>
             <strong>{details.transferNumber}</strong>
-            {' — '}
+            {' â€” '}
             {details.status}
           </p>
 
@@ -670,7 +740,7 @@ export default function TransferManagement() {
             {locationMap.get(details.sourceId)?.name ||
               details.source?.name ||
               details.sourceId}
-            {' → '}
+            {' â†’ '}
             {locationMap.get(details.destinationId)?.name ||
               details.destination?.name ||
               details.destinationId}
@@ -711,6 +781,39 @@ export default function TransferManagement() {
             </table>
           </div>
 
+          {['REQUESTED', 'APPROVED'].includes(details.status) && (
+            <div style={panel}>
+              <h4>Cancel transfer</h4>
+
+              <p className="muted">
+                Requested transfers can be cancelled without stock changes.
+                Approved transfers release their reserved source stock.
+                Dispatched transfers cannot be cancelled.
+              </p>
+
+              <label>
+                Cancellation reason
+                <textarea
+                  style={input}
+                  rows={3}
+                  value={cancelReason}
+                  onChange={e => {
+                    setCancelReason(e.target.value);
+                    setCancelRequest(null);
+                  }}
+                  placeholder="Explain why this transfer is being cancelled"
+                />
+              </label>
+
+              <button
+                style={button}
+                disabled={busy || cancelReason.trim().length < 10}
+                onClick={cancelTransfer}
+              >
+                Cancel transfer
+              </button>
+            </div>
+          )}
           {details.status === 'REQUESTED' && (
             <button
               style={button}

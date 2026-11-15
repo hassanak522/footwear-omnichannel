@@ -15,6 +15,9 @@ class CreateTransferDto {
 class ActionDto { @IsString() @MinLength(8) idempotencyKey!: string; }
 class ReceiptLine { @IsUUID() variantId!: string; @IsInt() @Min(0) receivedQty!: number; @IsInt() @Min(0) damagedQty!: number; }
 class ReceiveDto extends ActionDto { @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReceiptLine) items!: ReceiptLine[]; }
+class CancelTransferDto extends ActionDto {
+ @IsString() @MinLength(10) reason!: string;
+}
 class CloseShortageDto extends ActionDto { @IsString() @MinLength(10) reason!: string; }
 
 function canonicalJson(value: unknown): string {
@@ -153,6 +156,64 @@ export class TransfersService {
    return result;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
+ async cancel(id:string,dto:CancelTransferDto,u:Principal){
+  this.requireRole(u,'WAREHOUSE_MANAGER','BRANCH_MANAGER');
+
+  return this.retrySerializable(()=>this.db.$transaction(async tx=>{
+   const t=await this.lockedTransfer(tx,id);
+   this.access(u,t.sourceId);
+
+   const reason=dto.reason.trim();
+
+   if(reason.length<10)
+    throw new BadRequestException('Cancellation reason must contain at least 10 characters');
+
+   const payload={reason};
+
+   if(await this.once(tx,dto.idempotencyKey,'CANCEL',id,payload))
+    return t;
+
+   if(t.status!=='REQUESTED'&&t.status!=='APPROVED')
+    throw new ConflictException('Only requested or approved transfers can be cancelled');
+
+   if(t.status==='APPROVED'){
+    for(const item of [...t.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
+     const balance=await this.lockBalance(tx,t.sourceId,item.variantId);
+
+     if(balance.reservedReplenish<item.requestedQty)
+      throw new ConflictException('Reserved stock mismatch; cancellation stopped');
+
+     await tx.stockBalance.update({
+      where:{id:balance.id},
+      data:{
+       reservedReplenish:{decrement:item.requestedQty},
+       version:{increment:1}
+      }
+     });
+    }
+   }
+
+   const result=await tx.stockTransfer.update({
+    where:{id},
+    data:{status:'CANCELLED'},
+    include:{items:true}
+   });
+
+   await this.event(tx,dto.idempotencyKey,'CANCEL',id,payload);
+
+   await this.audit(
+    tx,u,'TRANSFER_CANCEL',id,
+    {status:t.status},
+    {status:'CANCELLED',reason}
+   );
+
+   return result;
+  },{
+   isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+   maxWait:10000,
+   timeout:30000
+  }));
+ }
  async closeShortage(id:string,dto:CloseShortageDto,u:Principal){
   this.requireRole(u,'WAREHOUSE_MANAGER');
   return this.retrySerializable(()=>this.db.$transaction(async tx=>{
@@ -187,5 +248,9 @@ export class TransfersController {
  @Post(':id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') approve(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.approve(id,dto,u);}
  @Post(':id/dispatch') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') dispatch(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.dispatch(id,dto,u);}
  @Post(':id/receive') @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){return this.svc.receive(id,dto,u);}
+ @Post(':id/cancel') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ cancel(@Param('id') id:string,@Body() dto:CancelTransferDto,@CurrentUser() u:Principal){
+  return this.svc.cancel(id,dto,u);
+ }
  @Post(':id/close-shortage') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') closeShortage(@Param('id') id:string,@Body() dto:CloseShortageDto,@CurrentUser() u:Principal){return this.svc.closeShortage(id,dto,u);}
 }
