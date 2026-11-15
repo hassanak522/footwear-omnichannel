@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards, ForbiddenException, ConflictException } from '@nestjs/common';
-import { IsEmail, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
+import { BadRequestException, Body, Controller, Get, Param, Post, Patch, Query, UseGuards, ForbiddenException, ConflictException } from '@nestjs/common';
+import { IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Min, MinLength } from 'class-validator';
 import * as bcrypt from 'bcryptjs';
 import { Db } from './db';
 import { CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard, assertLocation } from './auth';
@@ -15,6 +15,305 @@ export class StaffController {
   if(loc.type!=='BRANCH')throw new BadRequestException('Branch required');
   const role=await this.db.role.findUniqueOrThrow({where:{code:'BRANCH_MANAGER'}});
   return this.db.user.create({data:{email:d.email.toLowerCase(),name:d.name,passwordHash:await bcrypt.hash(d.password,12),roles:{create:{roleId:role.id}},locations:{create:{locationId:d.locationId}}},select:{id:true,email:true,name:true}});
+ }
+}
+class CreateManagedStaffDto {
+ @IsEmail() email!:string;
+ @IsString() @MinLength(2) name!:string;
+ @IsString() @MinLength(10) password!:string;
+ @IsIn(['WAREHOUSE_MANAGER','BRANCH_MANAGER','CASHIER']) role!:string;
+ @IsUUID() locationId!:string;
+}
+class UpdateManagedStaffDto {
+ @IsOptional() @IsEmail() email?:string;
+ @IsOptional() @IsString() @MinLength(2) name?:string;
+ @IsOptional() @IsIn(['WAREHOUSE_MANAGER','BRANCH_MANAGER','CASHIER']) role?:string;
+ @IsOptional() @IsUUID() locationId?:string;
+ @IsOptional() @IsIn(['ACTIVE','DISABLED']) status?:'ACTIVE'|'DISABLED';
+}
+class ResetManagedPasswordDto {
+ @IsString() @MinLength(10) password!:string;
+}
+@Controller('staff-management')
+@UseGuards(JwtAuthGuard,RolesGuard)
+@Roles('SUPER_ADMIN')
+export class StaffManagementController {
+ constructor(private db:Db){}
+
+ private readonly allowedRoles=[
+  'WAREHOUSE_MANAGER',
+  'BRANCH_MANAGER',
+  'CASHIER'
+ ];
+
+ private async validateAssignment(role:string,locationId:string){
+  if(!this.allowedRoles.includes(role)){
+   throw new BadRequestException('Unsupported staff role');
+  }
+
+  const location=await this.db.location.findUnique({
+   where:{id:locationId}
+  });
+
+  if(!location || !location.active){
+   throw new BadRequestException('Invalid or inactive location');
+  }
+
+  const expectedType=role==='WAREHOUSE_MANAGER'
+   ? 'WAREHOUSE'
+   : 'BRANCH';
+
+  if(location.type!==expectedType){
+   throw new BadRequestException(
+    `${role} requires a ${expectedType} location`
+   );
+  }
+
+  const dbRole=await this.db.role.findUnique({
+   where:{code:role}
+  });
+
+  if(!dbRole){
+   throw new BadRequestException('Role not configured');
+  }
+
+  return dbRole;
+ }
+
+ private readonly select={
+  id:true,
+  email:true,
+  name:true,
+  status:true,
+  roles:{select:{role:{select:{id:true,code:true,name:true}}}},
+  locations:{select:{location:{select:{id:true,code:true,name:true,type:true}}}}
+ } as const;
+
+ @Get('users')
+ list(){
+  return this.db.user.findMany({
+   select:this.select,
+   orderBy:{name:'asc'}
+  });
+ }
+
+ @Post('users')
+ async create(
+  @Body() dto:CreateManagedStaffDto,
+  @CurrentUser() actor:Principal
+ ){
+  const email=dto.email.trim().toLowerCase();
+  const name=dto.name.trim();
+
+  if(name.length<2){
+   throw new BadRequestException('Invalid staff name');
+  }
+
+  const role=await this.validateAssignment(
+   dto.role,dto.locationId
+  );
+
+  const exists=await this.db.user.findUnique({
+   where:{email}
+  });
+
+  if(exists){
+   throw new ConflictException('Email already registered');
+  }
+
+  const passwordHash=await bcrypt.hash(dto.password,12);
+
+  return this.db.$transaction(async tx=>{
+   const user=await tx.user.create({
+    data:{
+     email,
+     name,
+     passwordHash,
+     roles:{create:{roleId:role.id}},
+     locations:{create:{locationId:dto.locationId}}
+    },
+    select:this.select
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:actor.id,
+     action:'STAFF_CREATED',
+     entityType:'User',
+     entityId:user.id,
+     after:{
+      email,
+      name,
+      role:dto.role,
+      locationId:dto.locationId
+     }
+    }
+   });
+
+   return user;
+  });
+ }
+
+ @Patch('users/:id')
+ async update(
+  @Param('id') id:string,
+  @Body() dto:UpdateManagedStaffDto,
+  @CurrentUser() actor:Principal
+ ){
+  const existing=await this.db.user.findUnique({
+   where:{id},
+   include:{
+    roles:{include:{role:true}},
+    locations:true
+   }
+  });
+
+  if(!existing){
+   throw new BadRequestException('Staff account not found');
+  }
+
+  if(existing.roles.some(r=>r.role.code==='SUPER_ADMIN')){
+   throw new ForbiddenException(
+    'Super Administrator accounts require separate privileged management'
+   );
+  }
+
+  if(
+   (dto.role!==undefined || dto.locationId!==undefined) &&
+   (existing.roles.length!==1 || existing.locations.length!==1)
+  ){
+   throw new ConflictException(
+    'Multi-assignment accounts require dedicated access management'
+   );
+  }
+
+  const currentRole=existing.roles[0]?.role.code;
+  const currentLocation=existing.locations[0]?.locationId;
+
+  const role=dto.role||currentRole;
+  const locationId=dto.locationId||currentLocation;
+
+  if(!role || !locationId){
+   throw new BadRequestException('Role and location required');
+  }
+
+  const dbRole=await this.validateAssignment(role,locationId);
+
+  const email=dto.email===undefined
+   ? existing.email
+   : dto.email.trim().toLowerCase();
+
+  const name=dto.name===undefined
+   ? existing.name
+   : dto.name.trim();
+
+  if(name.length<2){
+   throw new BadRequestException('Invalid staff name');
+  }
+
+  if(email!==existing.email){
+   const duplicate=await this.db.user.findUnique({
+    where:{email}
+   });
+
+   if(duplicate){
+    throw new ConflictException('Email already registered');
+   }
+  }
+
+  return this.db.$transaction(async tx=>{
+   await tx.user.update({
+    where:{id},
+    data:{
+     email,
+     name,
+     ...(dto.status?{status:dto.status}:{})
+    }
+   });
+
+   if(dto.role || dto.locationId){
+    await tx.userRole.deleteMany({where:{userId:id}});
+    await tx.userLocation.deleteMany({where:{userId:id}});
+
+    await tx.userRole.create({
+     data:{userId:id,roleId:dbRole.id}
+    });
+
+    await tx.userLocation.create({
+     data:{userId:id,locationId}
+    });
+   }
+
+   await tx.auditLog.create({
+    data:{
+     actorId:actor.id,
+     action:'STAFF_UPDATED',
+     entityType:'User',
+     entityId:id,
+     before:{
+      email:existing.email,
+      name:existing.name,
+      status:existing.status,
+      roles:existing.roles.map(r=>r.role.code),
+      locations:existing.locations.map(l=>l.locationId)
+     },
+     after:{
+      email,
+      name,
+      status:dto.status||existing.status,
+      role,
+      locationId
+     }
+    }
+   });
+
+   return tx.user.findUnique({
+    where:{id},
+    select:this.select
+   });
+  });
+ }
+
+ @Post('users/:id/reset-password')
+ async resetPassword(
+  @Param('id') id:string,
+  @Body() dto:ResetManagedPasswordDto,
+  @CurrentUser() actor:Principal
+ ){
+  const user=await this.db.user.findUnique({
+   where:{id},
+   include:{roles:{include:{role:true}}}
+  });
+
+  if(!user){
+   throw new BadRequestException('Staff account not found');
+  }
+
+  if(user.roles.some(r=>r.role.code==='SUPER_ADMIN')){
+   throw new ForbiddenException(
+    'Super Administrator password reset requires separate authorization'
+   );
+  }
+
+  const passwordHash=await bcrypt.hash(dto.password,12);
+
+  await this.db.$transaction(async tx=>{
+   await tx.user.update({
+    where:{id},
+    data:{passwordHash}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:actor.id,
+     action:'STAFF_PASSWORD_RESET',
+     entityType:'User',
+     entityId:id
+    }
+   });
+  });
+
+  return {success:true};
  }
 }
 class RequestDto { @IsUUID() sourceId!:string; @IsUUID() destinationId!:string; @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsOptional() @IsString() note?:string; }
