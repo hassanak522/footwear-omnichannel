@@ -34,6 +34,14 @@ async function api(path:string,method='GET',body?:unknown){
 }
 
 export default function CatalogManagement(){
+ const [newCategory,setNewCategory]=useState({name:'',slug:''});
+ const [newProduct,setNewProduct]=useState({
+  title:'',slug:'',categoryId:'',description:''
+ });
+ const [newVariant,setNewVariant]=useState({
+  productId:'',sku:'',barcode:'',size:'',color:'',price:'',cost:''
+ });
+ const [showCreate,setShowCreate]=useState(false);
  const [products,setProducts]=useState<Product[]>([]);
  const [categories,setCategories]=useState<Option[]>([]);
  const [search,setSearch]=useState('');
@@ -76,6 +84,63 @@ export default function CatalogManagement(){
     (statusFilter==='active'?p.active:!p.active));
  }),[products,search,categoryFilter,statusFilter]);
 
+ async function createCategory(e:React.FormEvent){
+  e.preventDefault();
+  setBusy(true);setError('');setSuccess('');
+  try{
+   await api('/catalog/categories','POST',newCategory);
+   await load();
+   setNewCategory({name:'',slug:''});
+   setSuccess('Category created');
+  }catch(e:any){setError(e.message);}
+  finally{setBusy(false);}
+ }
+
+ async function createProduct(e:React.FormEvent){
+  e.preventDefault();
+  setBusy(true);setError('');setSuccess('');
+  try{
+   await api('/catalog/products','POST',newProduct);
+   await load();
+   setNewProduct({
+    title:'',slug:'',categoryId:'',description:''
+   });
+   setSuccess('Product created');
+  }catch(e:any){setError(e.message);}
+  finally{setBusy(false);}
+ }
+
+ async function createVariant(e:React.FormEvent){
+  e.preventDefault();
+  setBusy(true);setError('');setSuccess('');
+  try{
+   const price=Number(newVariant.price);
+   const cost=newVariant.cost===''?undefined:Number(newVariant.cost);
+
+   if(newVariant.price.trim()===''||
+      !Number.isFinite(price)||price<0||
+      (cost!==undefined&&(!Number.isFinite(cost)||cost<0))){
+    throw new Error('Enter valid non-negative prices');
+   }
+
+   await api('/catalog/variants','POST',{
+    productId:newVariant.productId,
+    sku:newVariant.sku,
+    barcode:newVariant.barcode,
+    size:newVariant.size,
+    color:newVariant.color,
+    price,
+    ...(cost===undefined?{}:{cost})
+   });
+
+   await load();
+   setNewVariant({
+    productId:'',sku:'',barcode:'',size:'',color:'',price:'',cost:''
+   });
+   setSuccess('Variant created');
+  }catch(e:any){setError(e.message);}
+  finally{setBusy(false);}
+ }
  function startProduct(p:Product){
   setEditingVariant(null);
   setEditingProduct(p);
@@ -161,6 +226,68 @@ export default function CatalogManagement(){
   {error&&<p role="alert" className="error">{error}</p>}
   {success&&<p role="status">{success}</p>}
 
+  {/* R2-C2 CREATE FORMS */}
+  <div className="row">
+   <h3>Catalog setup</h3>
+   <button type="button" className="secondary"
+    onClick={()=>setShowCreate(v=>!v)}>
+    {showCreate?'Hide creation forms':'+ Add Category / Product / Variant'}
+   </button>
+  </div>
+
+  {showCreate&&<div className="stack">
+   <form className="card stack" onSubmit={createCategory}>
+    <h3>1. Add category</h3>
+    <label>Category name<input required minLength={2}
+     value={newCategory.name}
+     onChange={e=>setNewCategory({...newCategory,name:e.target.value})}/></label>
+    <label>Category slug<input required minLength={2}
+     placeholder="mens-footwear"
+     value={newCategory.slug}
+     onChange={e=>setNewCategory({...newCategory,slug:e.target.value})}/></label>
+    <button disabled={busy}>Create category</button>
+   </form>
+
+   <form className="card stack" onSubmit={createProduct}>
+    <h3>2. Add product</h3>
+    <label>Product title<input required minLength={2}
+     value={newProduct.title}
+     onChange={e=>setNewProduct({...newProduct,title:e.target.value})}/></label>
+    <label>Product slug<input required minLength={2}
+     value={newProduct.slug}
+     onChange={e=>setNewProduct({...newProduct,slug:e.target.value})}/></label>
+    <label>Category<select required value={newProduct.categoryId}
+     onChange={e=>setNewProduct({...newProduct,categoryId:e.target.value})}>
+     <option value="">Select category</option>
+     {categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+    </select></label>
+    <label>Description<textarea
+     value={newProduct.description}
+     onChange={e=>setNewProduct({...newProduct,description:e.target.value})}/></label>
+    <button disabled={busy}>Create product</button>
+   </form>
+
+   <form className="card stack" onSubmit={createVariant}>
+    <h3>3. Add variant / SKU</h3>
+    <label>Product<select required value={newVariant.productId}
+     onChange={e=>setNewVariant({...newVariant,productId:e.target.value})}>
+     <option value="">Select product</option>
+     {products.map(p=><option key={p.id} value={p.id}>{p.title}</option>)}
+    </select></label>
+    {(['sku','barcode','size','color','price','cost'] as const).map(k=>
+     <label key={k}>{k.toUpperCase()}
+      <input
+       required={k!=='cost'}
+       type={k==='price'||k==='cost'?'number':'text'}
+       min={k==='price'||k==='cost'?0:undefined}
+       step={k==='price'||k==='cost'?'0.01':undefined}
+       value={newVariant[k]}
+       onChange={e=>setNewVariant({...newVariant,[k]:e.target.value})}/>
+     </label>
+    )}
+    <button disabled={busy}>Create variant</button>
+   </form>
+  </div>}
   <div className="row">
    <input aria-label="Search products"
     placeholder="Search product, SKU or barcode"
