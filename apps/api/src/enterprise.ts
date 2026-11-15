@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, Body, ConflictException, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsBoolean, IsEmail, IsInt, IsNumber, IsOptional, IsString, IsUUID, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { Prisma } from '@prisma/client';
@@ -7,6 +7,13 @@ import { Db } from './db';
 import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
 const guards=[JwtAuthGuard,RolesGuard];
 class SupplierDto { @IsString() @MinLength(2) code!:string; @IsString() @MinLength(2) name!:string; @IsOptional() @IsString() phone?:string; @IsOptional() @IsEmail() email?:string; }
+class UpdateSupplierDto {
+ @IsOptional() @IsString() @MinLength(2) code?:string;
+ @IsOptional() @IsString() @MinLength(2) name?:string;
+ @IsOptional() @IsString() phone?:string;
+ @IsOptional() @IsEmail() email?:string;
+ @IsOptional() @IsBoolean() active?:boolean;
+}
 class PoLine { @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsNumber({maxDecimalPlaces:2}) @Min(0) unitCost!:number; }
 class PoDto { @IsUUID() supplierId!:string; @IsUUID() warehouseId!:string; @IsString() @MinLength(5) reference!:string; @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>PoLine) lines!:PoLine[]; }
 class ReceiveLine { @IsUUID() variantId!:string; @IsInt() @Min(0) quantity!:number; @IsInt() @Min(0) damaged!:number; }
@@ -16,13 +23,101 @@ export class PurchasingController {
  constructor(private db:Db){}
  @Get('suppliers') suppliers(){return this.db.supplier.findMany({orderBy:{name:'asc'}});}
  @Post('suppliers') supplier(@Body() dto:SupplierDto){return this.db.supplier.create({data:dto});}
+ // R3-B1 SUPPLIER MANAGEMENT
+ @Patch('suppliers/:id')
+ async updateSupplier(
+  @Param('id') id:string,
+  @Body() dto:UpdateSupplierDto
+ ){
+  const existing=await this.db.supplier.findUnique({where:{id}});
+  if(!existing)throw new NotFoundException('Supplier not found');
+
+  const data:Prisma.SupplierUpdateInput={};
+
+  if(dto.code!==undefined)data.code=dto.code.trim();
+  if(dto.name!==undefined)data.name=dto.name.trim();
+  if(dto.phone!==undefined)data.phone=dto.phone.trim();
+  if(dto.email!==undefined)data.email=dto.email.trim();
+  if(dto.active!==undefined)data.active=dto.active;
+
+  if(dto.code!==undefined && dto.code.trim().length<2)
+   throw new BadRequestException('Supplier code too short');
+
+  if(dto.name!==undefined && dto.name.trim().length<2)
+   throw new BadRequestException('Supplier name too short');
+
+  try{
+   return await this.db.supplier.update({where:{id},data});
+  }catch(error){
+   if(error instanceof Prisma.PrismaClientKnownRequestError){
+    if(error.code==='P2002')
+     throw new ConflictException('Supplier code already exists');
+    if(error.code==='P2025')
+     throw new NotFoundException('Supplier not found');
+   }
+   throw error;
+  }
+ }
  @Get('orders') orders(){return this.db.purchaseOrder.findMany({include:{supplier:true,lines:true},orderBy:{createdAt:'desc'},take:200});}
  @Post('orders') async order(@Body() dto:PoDto,@CurrentUser() u:Principal){
   assertLocation(u,dto.warehouseId);
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
   const loc=await this.db.location.findUniqueOrThrow({where:{id:dto.warehouseId}});
   if(loc.type!=='WAREHOUSE')throw new BadRequestException('Purchase receiving location must be warehouse');
+  const supplier=await this.db.supplier.findUnique({
+   where:{id:dto.supplierId}
+  });
+  if(!supplier)throw new BadRequestException('Supplier not found');
+  if(!supplier.active)
+   throw new BadRequestException('Cannot order from inactive supplier');
   return this.db.purchaseOrder.create({data:{supplierId:dto.supplierId,warehouseId:dto.warehouseId,reference:dto.reference,status:'SUBMITTED',lines:{create:dto.lines.map(l=>({variantId:l.variantId,orderedQty:l.quantity,unitCost:new Prisma.Decimal(l.unitCost.toFixed(2))}))}},include:{lines:true}});
+ }
+ // R3-B1 PURCHASE ORDER CANCELLATION
+ @Post('orders/:id/cancel')
+ async cancelOrder(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`purchase:${id}`}))`;
+
+   const order=await tx.purchaseOrder.findUnique({
+    where:{id},
+    include:{lines:true}
+   });
+
+   if(!order)throw new NotFoundException('Purchase order not found');
+
+   assertLocation(u,order.warehouseId);
+
+   if(order.status!=='SUBMITTED' && order.status!=='DRAFT')
+    throw new ConflictException('Purchase order cannot be cancelled');
+
+   if(order.lines.some(line=>line.receivedQty>0))
+    throw new ConflictException(
+     'Cannot cancel an order with received quantities'
+    );
+
+   const updated=await tx.purchaseOrder.update({
+    where:{id},
+    data:{status:'CANCELLED'}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'PURCHASE_ORDER_CANCELLED',
+     entityType:'PurchaseOrder',
+     entityId:id,
+     after:{status:'CANCELLED'}
+    }
+   });
+
+   return updated;
+  },{
+   isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+   timeout:15000
+  });
  }
  @Post('orders/:id/receive') async receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
