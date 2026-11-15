@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-const allowed = new Set(['finance-reconciliation','finance-verification','finance-operations','finance-casework','finance-command-center','hq','orders','transfers','catalog','inventory','purchasing','stock-counts','governance','staff','replenishment','retail','retail-ops','pos','payment-exceptions','payment-reports','finance-management','drawer-movements','settlements']);
+const allowed = new Set(['finance-reconciliation','finance-verification','finance-operations','finance-casework','finance-command-center','hq','orders','transfers','catalog','inventory','purchasing','stock-counts','governance','staff','staff-management','replenishment','retail','retail-ops','pos','payment-exceptions','payment-reports','finance-management','drawer-movements','settlements']);
 const methods = ['GET','POST','PATCH'];
 function upstreamOrigin() {
   const value = process.env.INTERNAL_API_URL || 'http://127.0.0.1:3001';
