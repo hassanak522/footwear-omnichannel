@@ -547,6 +547,7 @@ export default function ReplenishmentPlanner() {
         </button>
       </div>
 
+      <div className="tablewrap">
         <table>
           <thead>
             <tr>
