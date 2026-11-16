@@ -102,6 +102,8 @@ export default function StockMovementHistory() {
   const [locationId, setLocationId] = useState('');
   const [type, setType] = useState('');
   const [variantId, setVariantId] = useState('');
+  const [sku, setSku] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
@@ -141,6 +143,13 @@ export default function StockMovementHistory() {
       return;
     }
 
+    if (sku.trim() && variantId.trim()) {
+      setResult(null);
+      setLoading(false);
+      setError('Use either SKU or variant ID, not both.');
+      return;
+    }
+
     if (from && to && from > to) {
       setResult(null);
       setError('Start date must not be after end date.');
@@ -155,6 +164,7 @@ export default function StockMovementHistory() {
 
     if (type) params.set('type', type);
     if (variantId.trim()) params.set('variantId', variantId.trim());
+    if (sku.trim()) params.set('sku', sku.trim());
     if (from) params.set('from', new Date(from + 'T00:00:00').toISOString());
     if (to) params.set('to', new Date(to + 'T23:59:59.999').toISOString());
 
@@ -182,7 +192,161 @@ export default function StockMovementHistory() {
     return () => {
       requestNumber.current++;
     };
-  }, [locationId, type, variantId, from, to, page, reload]);
+  }, [locationId, type, variantId, sku, from, to, page, reload]);
+
+  function buildExportParams(exportPage: number) {
+    const params = new URLSearchParams({
+      locationId,
+      page: String(exportPage),
+      take: '100',
+    });
+
+    if (type) params.set('type', type);
+    if (sku.trim()) params.set('sku', sku.trim());
+    if (variantId.trim()) params.set('variantId', variantId.trim());
+    if (from) params.set('from', new Date(from + 'T00:00:00').toISOString());
+    if (to) params.set('to', new Date(to + 'T23:59:59.999').toISOString());
+
+    return params;
+  }
+
+  async function exportCsv() {
+    if (!locationId || loading || exporting) return;
+
+    if (sku.trim() && variantId.trim()) {
+      setError('Use either SKU or variant ID, not both.');
+      return;
+    }
+
+    if (from && to && from > to) {
+      setError('Start date must not be after end date.');
+      return;
+    }
+
+    setExporting(true);
+    setError('');
+
+    try {
+      const rows: Movement[] = [];
+      let expectedTotal: number | null = null;
+      let exportPage = 1;
+
+      while (true) {
+        const response = await getJson(
+          '/inventory/movements?' +
+          buildExportParams(exportPage).toString()
+        ) as Result;
+
+        if (expectedTotal === null) expectedTotal = response.total;
+
+        if (response.total !== expectedTotal) {
+          throw new Error(
+            'Movement history changed during export. Please retry.'
+          );
+        }
+
+        if (!Array.isArray(response.items)) {
+          throw new Error('Invalid export response');
+        }
+
+        if (response.items.length === 0 && rows.length < expectedTotal) {
+          throw new Error('Export ended before all records were retrieved');
+        }
+
+        rows.push(...response.items);
+
+        if (rows.length >= expectedTotal) break;
+
+        exportPage++;
+      }
+
+      if (rows.length !== expectedTotal ||
+          new Set(rows.map(m => m.id)).size !== rows.length) {
+        throw new Error(
+          'Export results were inconsistent. Please retry.'
+        );
+      }
+
+      const escapeCsv = (value: unknown) => {
+        let text = String(value ?? '');
+
+        // Prevent spreadsheet formula injection.
+        if (/^[\s]*[=+\-@]/.test(text)) {
+          text = "'" + text;
+        }
+
+        return '"' + text.replace(/"/g, '""') + '"';
+      };
+
+      const header = [
+        'Date / time',
+        'Location ID',
+        'SKU',
+        'Barcode',
+        'Variant ID',
+        'Movement type',
+        'Quantity change',
+        'Reference type',
+        'Reference ID',
+        'Staff',
+        'Notes',
+        'Movement ID',
+      ];
+
+      const csvRows = [
+        header,
+        ...rows.map(m => [
+          m.createdAt,
+          m.locationId,
+          m.variant?.sku || '',
+          m.variant?.barcode || '',
+          m.variantId,
+          m.type,
+          m.quantityDelta,
+          m.referenceType || '',
+          m.referenceId || '',
+          m.actor?.name || m.actor?.email || m.actorId || '',
+          m.notes || '',
+          m.id,
+        ]),
+      ];
+
+      const csv = '\uFEFF' + csvRows
+        .map(row => row.map(escapeCsv).join(','))
+        .join('\r\n');
+
+      const blob = new Blob([csv], {
+        type: 'text/csv;charset=utf-8',
+      });
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download =
+        'stock-movements-' +
+        new Date().toISOString().slice(0, 10) +
+        '.csv';
+
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'CSV export failed');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function clearFilters() {
+    setType('');
+    setSku('');
+    setVariantId('');
+    setFrom('');
+    setTo('');
+    setPage(1);
+    setError('');
+  }
 
   function resetPage() {
     setPage(1);
@@ -236,6 +400,20 @@ export default function StockMovementHistory() {
         </label>
 
         <label style={field}>
+          SKU (exact match)
+          <input
+            style={control}
+            value={sku}
+            maxLength={100}
+            placeholder="Enter product SKU"
+            onChange={e => {
+              setSku(e.target.value);
+              resetPage();
+            }}
+          />
+        </label>
+
+        <label style={field}>
           Variant ID (optional)
           <input
             style={control}
@@ -283,6 +461,22 @@ export default function StockMovementHistory() {
           disabled={loading || !locationId}
         >
           Refresh movements
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={clearFilters}
+          disabled={exporting}
+        >
+          Clear filters
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={exportCsv}
+          disabled={loading || exporting || !locationId}
+        >
+          {exporting ? 'Exporting all matching records...' : 'Export CSV'}
         </button>
         <span className="muted">
           {result ? `${result.total} matching movements` : ''}

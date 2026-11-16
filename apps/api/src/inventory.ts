@@ -136,6 +136,7 @@ export class InventoryController {
     @CurrentUser() u:Principal,
     @Query('locationId') locationId?:string,
     @Query('variantId') variantId?:string,
+    @Query('sku') sku?:string,
     @Query('type') type?:string,
     @Query('from') from?:string,
     @Query('to') to?:string,
@@ -151,6 +152,14 @@ export class InventoryController {
 
     if(variantId && !uuid.test(variantId))
       throw new BadRequestException('Invalid variantId');
+
+    const normalizedSku=sku?.trim();
+
+    if(normalizedSku && normalizedSku.length>100)
+      throw new BadRequestException('SKU too long');
+
+    if(normalizedSku && variantId)
+      throw new BadRequestException('Use either SKU or variantId');
 
     const allowedTypes=Object.values(StockMovementType);
 
@@ -182,6 +191,7 @@ export class InventoryController {
     const where:Prisma.StockMovementWhereInput={
       locationId,
       ...(variantId?{variantId}:{}),
+      ...(normalizedSku?{variant:{sku:normalizedSku}}:{}),
       ...(type?{type:type as StockMovementType}:{}),
       ...((fromDate||toDate)?{
         createdAt:{
