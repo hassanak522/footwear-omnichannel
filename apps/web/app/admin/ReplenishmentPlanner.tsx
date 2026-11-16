@@ -268,7 +268,122 @@ export default function ReplenishmentPlanner() {
     )
   }), [recommendations]);
 
-  function exportCSV() {
+  const keyFor = (r: Recommendation) =>
+    `${r.branchId}:${r.variantId}`;
+
+  const selectedRows = recommendations.filter(
+    r => r.suggested > 0 && selected.includes(keyFor(r))
+  );
+
+  function toggleRow(r: Recommendation, checked: boolean) {
+    const key = keyFor(r);
+    setSelected(old => checked
+      ? Array.from(new Set([...old,key]))
+      : old.filter(x => x !== key)
+    );
+    setPendingKeys({});
+  }
+
+  async function createRequests() {
+    if (creating || loading || !warehouseId ||
+        selectedRows.length === 0) return;
+
+    const groups = new Map<string, Recommendation[]>();
+
+    for (const r of selectedRows) {
+      const group = groups.get(r.branchId) || [];
+      group.push(r);
+      groups.set(r.branchId,group);
+    }
+
+    const batches = [...groups.entries()].map(
+      ([destinationId,rows]) => ({
+        destinationId,
+        rows,
+        items: rows.map(r => ({
+          variantId: r.variantId,
+          quantity: r.suggested
+        }))
+      })
+    );
+
+    if (!window.confirm(
+      `Create ${batches.length} transfer request(s) for manager review? ` +
+      'No inventory will be reserved or dispatched.'
+    )) return;
+
+    setCreating(true);
+    setError('');
+    setNotice('');
+
+    const keys = {...pendingKeys};
+    const completed: string[] = [];
+    const failures: string[] = [];
+
+    for (const batch of batches) {
+      const signature = JSON.stringify({
+        sourceId: warehouseId,
+        destinationId: batch.destinationId,
+        items: batch.items
+      });
+
+      const idempotencyKey =
+        keys[signature] || crypto.randomUUID();
+
+      keys[signature] = idempotencyKey;
+
+      try {
+        const response = await fetch('/api/v1/transfers', {
+          method: 'POST',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            sourceId: warehouseId,
+            destinationId: batch.destinationId,
+            items: batch.items,
+            idempotencyKey
+          })
+        });
+
+        const result = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          const message = Array.isArray(result.message)
+            ? result.message.join('; ')
+            : result.message || `HTTP ${response.status}`;
+          throw new Error(message);
+        }
+
+        completed.push(batch.destinationId);
+        delete keys[signature];
+      } catch (e) {
+        failures.push(
+          `${batch.destinationId}: ` +
+          (e instanceof Error ? e.message : 'Request failed')
+        );
+      }
+    }
+
+    setPendingKeys(keys);
+    setSelected(old => old.filter(key =>
+      !completed.some(branch => key.startsWith(branch + ':'))
+    ));
+
+    if (completed.length) {
+      setNotice(
+        `${completed.length} transfer request(s) created. ` +
+        'Review them in Transfers before approval.'
+      );
+    }
+
+    if (failures.length) {
+      setError(failures.join(' | '));
+    }
+
+    setCreating(false);
+  }
+
     const headers = [
       'Branch', 'SKU', 'Variant ID',
       'Branch Available', 'Warehouse Available',
@@ -409,10 +524,27 @@ export default function ReplenishmentPlanner() {
         </button>
       </div>
 
-      <div className="tablewrap">
+      {notice && <p role="status">{notice}</p>}
+
+      <div className="row">
+        <strong>
+          {selectedRows.length} selected allocation(s)
+        </strong>
+
+        <button
+          disabled={creating || loading || selectedRows.length === 0}
+          onClick={() => void createRequests()}
+        >
+          {creating
+            ? 'Creating requests...'
+            : 'Create transfer requests for review'}
+        </button>
+      </div>
+
         <table>
           <thead>
             <tr>
+              <th>Select</th>
               <th>Branch</th>
               <th>SKU</th>
               <th>Available</th>
@@ -427,6 +559,15 @@ export default function ReplenishmentPlanner() {
           <tbody>
             {recommendations.map(r => (
               <tr key={`${r.branchId}-${r.variantId}`}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${r.sku} for ${r.branchName}`}
+                    checked={selected.includes(keyFor(r))}
+                    disabled={r.suggested <= 0 || creating}
+                    onChange={e => toggleRow(r,e.target.checked)}
+                  />
+                </td>
                 <td>{r.branchName}</td>
                 <td>{r.sku}</td>
                 <td>{r.branchAvailable}</td>
