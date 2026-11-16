@@ -36,6 +36,165 @@ export class HqController {
   const stock=balances.reduce((a,b)=>{a.onHand+=b.onHand;a.reservedOnline+=b.reservedOnline;a.reservedReplenish+=b.reservedReplenish;a.quarantined+=b.quarantined;a.safetyBuffer+=b.safetyBuffer;return a;},{onHand:0,reservedOnline:0,reservedReplenish:0,quarantined:0,safetyBuffer:0});
   return {period:{from,to,timezone:'UTC',toExclusive:true},locations,stock:{...stock,available:stock.onHand-stock.reservedOnline-stock.reservedReplenish-stock.quarantined-stock.safetyBuffer},pos:{acceptedSales:accepted._count._all,grossAcceptedSales:accepted._sum.total?.toString()??'0',stockConflicts:conflicts,openShifts,approvedReturnCount:returns._count._all},transfers:{inTransit:transfers},notes:['POS sales use soldAt, not sync time. Offline sales not yet synced are excluded.','Gross accepted sales are not net revenue: returns, refunds, taxes, and payment settlement are not deducted.','Stock is a current snapshot, not an as-of-period stock balance.']};
  }
+ @Get('pos-forecast-accuracy')
+ async posForecastAccuracy(@Query() q:PeriodQuery) {
+  const {from,to}=this.period(q);
+  const duration=(to.getTime()-from.getTime())/86400000;
+
+  if(duration<14 || duration>90){
+   throw new BadRequestException(
+    'Forecast analysis requires 14 to 90 days'
+   );
+  }
+
+  const sales=await this.db.posSale.findMany({
+   where:{
+    status:'ACCEPTED',
+    soldAt:{gte:from,lt:to},
+    location:{
+     type:'BRANCH',
+     active:true
+    },
+    ...(q.locationId?{locationId:q.locationId}:{})
+   },
+   select:{
+    locationId:true,
+    soldAt:true,
+    lines:{
+     select:{variantId:true,quantity:true}
+    }
+   },
+   orderBy:{soldAt:'asc'},
+   take:10001
+  });
+
+  if(sales.length>10000){
+   throw new BadRequestException(
+    'More than 10000 accepted sales in this period. '+
+    'Use a shorter date range; partial results are not returned.'
+   );
+  }
+
+  const balances=await this.db.stockBalance.findMany({
+   where:{
+    location:{
+     type:'BRANCH',
+     active:true,
+     ...(q.locationId?{id:q.locationId}:{})
+    }
+   },
+   select:{
+    locationId:true,variantId:true,
+    onHand:true,quarantined:true,
+    reservedOnline:true,reservedReplenish:true,
+    safetyBuffer:true,
+    location:{select:{name:true}},
+    variant:{select:{sku:true}}
+   }
+  });
+
+  const split=from.getTime()+
+   (to.getTime()-from.getTime())*0.7;
+  const trainDays=(split-from.getTime())/86400000;
+  const testDays=(to.getTime()-split)/86400000;
+  const recentStart=to.getTime()-7*86400000;
+  const previousStart=to.getTime()-14*86400000;
+
+  const demand=new Map<string,{
+   train:number;test:number;
+   recent:number;previous:number;
+  }>();
+
+  for(const sale of sales){
+   const time=sale.soldAt.getTime();
+
+   for(const line of sale.lines){
+    const key=sale.locationId+':'+line.variantId;
+    const current=demand.get(key)||{
+     train:0,test:0,recent:0,previous:0
+    };
+
+    if(time<split)current.train+=line.quantity;
+    else current.test+=line.quantity;
+
+    if(time>=recentStart)current.recent+=line.quantity;
+    else if(time>=previousStart)
+     current.previous+=line.quantity;
+
+    demand.set(key,current);
+   }
+  }
+
+  const rows=balances.map(b=>{
+   const key=b.locationId+':'+b.variantId;
+   const d=demand.get(key)||{
+    train:0,test:0,recent:0,previous:0
+   };
+
+   const available=Math.max(0,
+    b.onHand-b.quarantined-b.reservedOnline-
+    b.reservedReplenish-b.safetyBuffer
+   );
+
+   const historicalDaily=d.train/trainDays;
+   const predictedTest=historicalDaily*testDays;
+   const recentDaily=d.recent/7;
+   const previousDaily=d.previous/7;
+   const daysCover=recentDaily>0
+    ?available/recentDaily:null;
+
+   const risk=recentDaily===0?'INSUFFICIENT SIGNAL':
+    available===0?'OUT OF STOCK NOW':
+    daysCover!==null && daysCover<=3?'CRITICAL':
+    daysCover!==null && daysCover<=7?'HIGH':'NORMAL';
+
+   return {
+    locationId:b.locationId,
+    branchName:b.location.name,
+    variantId:b.variantId,
+    sku:b.variant.sku,
+    available,
+    trainingUnits:d.train,
+    testUnits:d.test,
+    predictedTestUnits:predictedTest,
+    absoluteError:Math.abs(predictedTest-d.test),
+    historicalDaily,
+    recentDaily,
+    previousDaily,
+    velocityChangePct:previousDaily>0
+     ?(recentDaily-previousDaily)*100/previousDaily
+     :null,
+    daysCover,
+    risk,
+    accuracyEligible:d.train>0 && d.test>0
+   };
+  });
+
+  const eligible=rows.filter(r=>r.accuracyEligible);
+  const actual=eligible.reduce((n,r)=>n+r.testUnits,0);
+  const error=eligible.reduce((n,r)=>n+r.absoluteError,0);
+
+  return {
+   period:{from,to,trainDays,testDays},
+   saleCount:sales.length,
+   rows,
+   accuracy:{
+    eligibleSkuBranches:eligible.length,
+    wapePct:actual>0?100*error/actual:null,
+    definition:'Sum absolute errors / sum actual units'
+   },
+   notes:[
+    'Only accepted, synchronized POS sales are included.',
+    'Forecast uses the first 70% of the period to predict the final 30%.',
+    'WAPE is calculated only for SKU/branch pairs with positive training and test sales.',
+    'Velocity compares the latest 7 days against the preceding 7 days.',
+    'Stockout risk uses current available stock and recent sales; it does not reconstruct historical stockouts.',
+    'Sales are gross units and are not adjusted for returns.',
+    'Zero sales may reflect stockouts, inactivity, or insufficient demand.',
+    'Analysis is limited to 10000 accepted sales; larger requests fail rather than return incomplete metrics.'
+   ]
+  };
+ }
  @Get('pos-demand-forecast')
  async posDemandForecast(@Query() q:PeriodQuery) {
   const {from,to} = this.period(q);
