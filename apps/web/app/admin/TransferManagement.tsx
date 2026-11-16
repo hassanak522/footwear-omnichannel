@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Row = Record<string, any>;
 type TransferLine = {
@@ -119,6 +119,83 @@ function remaining(item: Row): number {
   );
 }
 
+/* R4-E3 STATUS INDICATORS */
+const transferStatusInfo: Record<string, {
+  label: string;
+  description: string;
+  background: string;
+  color: string;
+}> = {
+  REQUESTED: {
+    label: 'Requested',
+    description: 'Awaiting source-location approval.',
+    background: '#dbeafe',
+    color: '#1e40af',
+  },
+  APPROVED: {
+    label: 'Approved',
+    description: 'Stock reserved and awaiting dispatch.',
+    background: '#fef3c7',
+    color: '#92400e',
+  },
+  PICKING: {
+    label: 'Picking',
+    description: 'Picking in progress.',
+    background: '#e0e7ff',
+    color: '#3730a3',
+  },
+  DISPATCHED: {
+    label: 'Dispatched',
+    description: 'Stock dispatched; awaiting destination receipt.',
+    background: '#ffedd5',
+    color: '#9a3412',
+  },
+  PARTIALLY_RECEIVED: {
+    label: 'Partially received',
+    description: 'Some dispatched quantities remain outstanding.',
+    background: '#fef3c7',
+    color: '#92400e',
+  },
+  RECEIVED: {
+    label: 'Received',
+    description: 'All dispatched quantities accounted for.',
+    background: '#dcfce7',
+    color: '#166534',
+  },
+  SHORTAGE_CLOSED: {
+    label: 'Shortage closed',
+    description: 'Outstanding quantities recorded as shortages.',
+    background: '#f3e8ff',
+    color: '#6b21a8',
+  },
+  CANCELLED: {
+    label: 'Cancelled',
+    description: 'Transfer cancelled before dispatch.',
+    background: '#f1f5f9',
+    color: '#475569',
+  },
+};
+
+function TransferStatusBadge({ status }: { status: string }) {
+  const info = transferStatusInfo[status];
+
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        padding: '5px 10px',
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 700,
+        background: info?.background || '#f1f5f9',
+        color: info?.color || '#334155',
+      }}
+      title={info?.description || status}
+    >
+      {info?.label || status}
+    </span>
+  );
+}
 export default function TransferManagement() {
   const [transfers, setTransfers] = useState<Row[]>([]);
   const [locations, setLocations] = useState<Row[]>([]);
@@ -145,6 +222,10 @@ export default function TransferManagement() {
 
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('ALL');
+
+  // R4-E2 RETRY PROTECTION
+  // Retain the same key for an identical operation until it succeeds.
+  const pendingOperations = useRef<Map<string, string>>(new Map());
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -248,7 +329,23 @@ export default function TransferManagement() {
     setNotice('');
 
     try {
-      await request(path, 'POST', body);
+      const original = body as Record<string, unknown>;
+      const { idempotencyKey: _ignoredKey, ...payload } = original;
+      const signature = JSON.stringify({ path, payload });
+
+      let key = pendingOperations.current.get(signature);
+      if (!key) {
+        key = crypto.randomUUID();
+        pendingOperations.current.set(signature, key);
+      }
+
+      const protectedBody = {
+        ...payload,
+        idempotencyKey: key,
+      };
+
+      await request(path, 'POST', protectedBody);
+      pendingOperations.current.delete(signature);
       await load();
 
       if (selectedId) {
@@ -267,7 +364,18 @@ export default function TransferManagement() {
         );
       }
 
-      setNotice('Operation completed successfully.');
+      /* R4-E3B OPERATION FEEDBACK */
+      const operation = path.split('/').pop();
+
+      const messages: Record<string, string> = {
+        approve: 'Transfer approved. Source stock is reserved.',
+        dispatch: 'Transfer dispatched. Awaiting destination receipt.',
+        receive: 'Receipt recorded. Stock balances have been updated.',
+        'close-shortage': 'Transfer shortage closed and recorded.',
+      };
+
+      setNotice(messages[operation || ''] ||
+        'Transfer operation completed successfully.');
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -337,7 +445,17 @@ export default function TransferManagement() {
     name: string,
     confirmation: string,
   ) {
-    if (!selectedId) return;
+    if (!selectedId || !details || busy) return;
+
+    const allowed: Record<string, string[]> = {
+      approve: ['REQUESTED'],
+      dispatch: ['APPROVED'],
+    };
+
+    if (!allowed[name]?.includes(String(details.status))) {
+      setError('This action is not permitted in the current transfer status.');
+      return;
+    }
 
     perform(
       `/transfers/${encodeURIComponent(selectedId)}/${name}`,
@@ -347,7 +465,12 @@ export default function TransferManagement() {
   }
 
   function submitReceipt() {
-    if (!selectedId || !details) return;
+    if (!selectedId || !details || busy) return;
+
+    if (!['DISPATCHED', 'PARTIALLY_RECEIVED'].includes(String(details.status))) {
+      setError('Only dispatched transfers can receive stock.');
+      return;
+    }
 
     const items = receipt.map(line => ({
       variantId: line.variantId,
@@ -464,7 +587,12 @@ export default function TransferManagement() {
     }
   }
   function closeShortage() {
-    if (!selectedId) return;
+    if (!selectedId || !details || busy) return;
+
+    if (details.status !== 'PARTIALLY_RECEIVED') {
+      setError('Shortage closure requires a partially received transfer.');
+      return;
+    }
 
     if (shortageReason.trim().length < 10) {
       setError('Enter a shortage reason of at least 10 characters.');
@@ -701,7 +829,7 @@ export default function TransferManagement() {
                     {locationMap.get(t.destinationId)?.name ||
                       t.destinationId}
                   </td>
-                  <td>{t.status}</td>
+                  <td><TransferStatusBadge status={String(t.status)} /></td>
                   <td>
                     {t.createdAt
                       ? new Date(t.createdAt).toLocaleString()
@@ -729,6 +857,23 @@ export default function TransferManagement() {
       {details && (
         <div style={panel}>
           <h3>Transfer details</h3>
+
+          <div style={{ marginBottom: 14 }}>
+            <TransferStatusBadge status={String(details.status)} />
+            <p className="muted" style={{ marginTop: 8 }}>
+              {transferStatusInfo[String(details.status)]?.description ||
+                'Review this transfer before taking action.'}
+            </p>
+            {['DISPATCHED', 'PARTIALLY_RECEIVED'].includes(String(details.status)) && (
+              <p>
+                <strong>Outstanding units: </strong>
+                {asArray(details.items).reduce(
+                  (sum, item) => sum + remaining(item),
+                  0,
+                )}
+              </p>
+            )}
+          </div>
 
           <p>
             <strong>{details.transferNumber}</strong>
@@ -781,6 +926,385 @@ export default function TransferManagement() {
             </table>
           </div>
 
+          {/* R4-D5 Transfer Reporting */}
+          <div style={panel}>
+            <h4>Transfer reporting</h4>
+            <p className="muted">
+              Summary of the selected transfer and its
+              recorded stock quantities.
+            </p>
+
+            {(() => {
+              const items = asArray(details.items);
+
+              const sum = (field: string) =>
+                items.reduce(
+                  (total, item) =>
+                    total + Number(item[field] || 0),
+                  0,
+                );
+
+              const dispatched = sum('dispatchedQty');
+              const good = sum('receivedQty');
+              const damaged = sum('damagedQty');
+              const shortage = sum('shortageQty');
+              const outstanding =
+                dispatched - good - damaged - shortage;
+
+              const exportCsv = () => {
+                const columns = [
+                  'Transfer Number',
+                  'Transfer ID',
+                  'Status',
+                  'Source ID',
+                  'Destination ID',
+                  'Variant ID',
+                  'Requested',
+                  'Dispatched',
+                  'Good Received',
+                  'Damaged',
+                  'Shortage',
+                  'Outstanding',
+                ];
+
+                const csvCell = (value: unknown) => {
+                  const text = String(value ?? '');
+                  const safe = /^[\s]*[=+\-@]/.test(text)
+                    ? "'" + text
+                    : text;
+
+                  return '"' +
+                    safe.replace(/"/g, '""') +
+                    '"';
+                };
+
+                const rows = items.map(item => [
+                  details.transferNumber,
+                  details.id,
+                  details.status,
+                  details.sourceId,
+                  details.destinationId,
+                  item.variantId,
+                  item.requestedQty,
+                  item.dispatchedQty,
+                  item.receivedQty,
+                  item.damagedQty,
+                  item.shortageQty,
+                  Number(item.dispatchedQty || 0) -
+                    Number(item.receivedQty || 0) -
+                    Number(item.damagedQty || 0) -
+                    Number(item.shortageQty || 0),
+                ]);
+
+                const csv = [columns, ...rows]
+                  .map(values => values.map(csvCell).join(','))
+                  .join('\r\n');
+
+                const blob = new Blob(
+                  ['\uFEFF' + csv],
+                  { type: 'text/csv;charset=utf-8' },
+                );
+
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download =
+                  'transfer-' +
+                  String(details.transferNumber || details.id)
+                    .replace(/[^a-zA-Z0-9_-]/g, '_') +
+                  '.csv';
+
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+              };
+
+              return (
+                <>
+                  <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 20,
+                  }}>
+                    <div>
+                      <strong>Requested</strong>
+                      <p>{sum('requestedQty')}</p>
+                    </div>
+                    <div>
+                      <strong>Dispatched</strong>
+                      <p>{dispatched}</p>
+                    </div>
+                    <div>
+                      <strong>Good received</strong>
+                      <p>{good}</p>
+                    </div>
+                    <div>
+                      <strong>Damaged</strong>
+                      <p>{damaged}</p>
+                    </div>
+                    <div>
+                      <strong>Shortage</strong>
+                      <p>{shortage}</p>
+                    </div>
+                    <div>
+                      <strong>Outstanding</strong>
+                      <p>{outstanding}</p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    style={button}
+                    onClick={exportCsv}
+                    disabled={items.length === 0}
+                  >
+                    Export transfer CSV
+                  </button>
+
+                  <p className="muted">
+                    Export includes this transfer only.
+                    It does not include audit records or
+                    historical inventory ledger entries.
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+          {/* R4-D3 Transfer Audit Trail */}
+          <div style={panel}>
+            <h4>Transfer audit history</h4>
+            <p className="muted">
+              Recorded transfer events in chronological order.
+            </p>
+
+            {asArray(details.audit).length === 0 ? (
+              <p className="muted">
+                No audit records available for this transfer.
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{
+                  width: '100%',
+                  textAlign: 'left',
+                }}>
+                  <thead>
+                    <tr>
+                      <th>Date and time</th>
+                      <th>Action</th>
+                      <th>Actor ID</th>
+                      <th>Recorded change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {asArray(details.audit).map(entry => (
+                      <tr key={entry.id}>
+                        <td>
+                          {entry.createdAt
+                            ? new Date(entry.createdAt).toLocaleString()
+                            : '-'}
+                        </td>
+                        <td>{entry.action}</td>
+                        <td>
+                          <code>{entry.actorId || '-'}</code>
+                        </td>
+                        <td>
+                          <details>
+                            <summary>View event details</summary>
+                            <pre style={{
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'anywhere',
+                              fontSize: 12,
+                            }}>
+                              {JSON.stringify({
+                                before: entry.before,
+                                after: entry.after,
+                              }, null, 2)}
+                            </pre>
+                          </details>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          {/* R4-D2 Transfer Reconciliation */}
+          <div style={panel}>
+            <h4>Transfer reconciliation</h4>
+
+            {(() => {
+              const items = asArray(details.items);
+
+              const totals = items.reduce(
+                (acc, item) => {
+                  acc.dispatched += Number(item.dispatchedQty || 0);
+                  acc.good += Number(item.receivedQty || 0);
+                  acc.damaged += Number(item.damagedQty || 0);
+                  acc.shortage += Number(item.shortageQty || 0);
+                  return acc;
+                },
+                {
+                  dispatched: 0,
+                  good: 0,
+                  damaged: 0,
+                  shortage: 0,
+                },
+              );
+
+              const accounted =
+                totals.good + totals.damaged + totals.shortage;
+
+              const outstanding = totals.dispatched - accounted;
+
+              const invalid = items.some(item => {
+                const values = [
+                  item.dispatchedQty,
+                  item.receivedQty,
+                  item.damagedQty,
+                  item.shortageQty,
+                ].map(Number);
+
+                return values.some(
+                  n => !Number.isSafeInteger(n) || n < 0,
+                ) || values[1] + values[2] + values[3] > values[0];
+              });
+
+              const active = [
+                'DISPATCHED',
+                'PARTIALLY_RECEIVED',
+                'RECEIVED',
+                'SHORTAGE_CLOSED',
+              ].includes(details.status);
+
+              const inconsistent =
+                invalid ||
+                (active && items.length === 0) ||
+                (active && outstanding < 0) ||
+                (['RECEIVED', 'SHORTAGE_CLOSED'].includes(
+                  details.status,
+                ) && outstanding !== 0) ||
+                (details.status === 'RECEIVED' &&
+                  totals.shortage > 0);
+
+              return (
+                <>
+                  <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 20,
+                    marginBottom: 12,
+                  }}>
+                    <div>
+                      <strong>Dispatched</strong>
+                      <p>{totals.dispatched}</p>
+                    </div>
+                    <div>
+                      <strong>Good received</strong>
+                      <p>{totals.good}</p>
+                    </div>
+                    <div>
+                      <strong>Damaged</strong>
+                      <p>{totals.damaged}</p>
+                    </div>
+                    <div>
+                      <strong>Shortage recorded</strong>
+                      <p>{totals.shortage}</p>
+                    </div>
+                    <div>
+                      <strong>Outstanding</strong>
+                      <p>{outstanding}</p>
+                    </div>
+                  </div>
+
+                  <p>
+                    <strong>Reconciliation status: </strong>
+                    {!active
+                      ? 'Not dispatched'
+                      : inconsistent
+                        ? 'REVIEW REQUIRED'
+                        : outstanding > 0
+                          ? 'Pending receipt / resolution'
+                          : totals.shortage > 0
+                            ? 'Accounted for with shortage'
+                            : totals.damaged > 0
+                              ? 'Accounted for with damage'
+                              : 'Quantity accounted for'}
+                  </p>
+
+                  {inconsistent && (
+                    <p role="alert" style={{
+                      color: '#dc2626',
+                      fontWeight: 600,
+                    }}>
+                      Quantity or status inconsistency detected.
+                      Investigate before closing this transfer.
+                    </p>
+                  )}
+
+                  <p className="muted">
+                    This is a read-only quantity reconciliation.
+                    It does not independently verify physical
+                    stock, receipt provenance, or ledger entries.
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+          <div style={panel}>
+            <h4>Receipt history</h4>
+            <p className="muted">
+              Chronological records of stock received at the
+              destination. Damaged units are tracked separately.
+            </p>
+
+            {asArray(details.receipts).length === 0 ? (
+              <p className="muted">
+                No receipt records for this transfer.
+              </p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{
+                  width: '100%',
+                  textAlign: 'left',
+                }}>
+                  <thead>
+                    <tr>
+                      <th>Date and time</th>
+                      <th>Product</th>
+                      <th>Good</th>
+                      <th>Damaged</th>
+                      <th>Received by (user ID)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {asArray(details.receipts).map(r => (
+                      <tr key={r.id}>
+                        <td>
+                          {r.createdAt
+                            ? new Date(r.createdAt).toLocaleString()
+                            : '-'}
+                        </td>
+                        <td>
+                          {variantLabel(
+                            variantMap.get(r.variantId) || {
+                              sku: r.variantId,
+                            },
+                          )}
+                        </td>
+                        <td>{r.receivedQty}</td>
+                        <td>{r.damagedQty}</td>
+                        <td>
+                          <code>{r.actorId || '-'}</code>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
           {['REQUESTED', 'APPROVED'].includes(details.status) && (
             <div style={panel}>
               <h4>Cancel transfer</h4>
@@ -950,7 +1474,7 @@ export default function TransferManagement() {
 
               <button
                 style={button}
-                disabled={busy}
+                disabled={busy || shortageReason.trim().length < 10}
                 onClick={closeShortage}
               >
                 Close shortage

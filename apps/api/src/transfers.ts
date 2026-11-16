@@ -216,9 +216,12 @@ export class TransfersService {
  }
  async closeShortage(id:string,dto:CloseShortageDto,u:Principal){
   this.requireRole(u,'WAREHOUSE_MANAGER');
+   const reason=dto.reason?.trim();
+   if(!reason || reason.length<10)
+    throw new BadRequestException('Shortage reason must contain at least 10 characters');
   return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
-   if(await this.once(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason}))return t;
+   if(await this.once(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason}))return t;
    if(t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Only partially received transfers can be shortage-closed');
    let outstanding=0;
    for(const item of t.items){
@@ -231,13 +234,25 @@ export class TransfersService {
    }
    if(outstanding===0)throw new ConflictException('No outstanding quantity');
    const result=await tx.stockTransfer.update({where:{id},data:{status:'SHORTAGE_CLOSED'},include:{items:true}});
-   await this.event(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason:dto.reason});
-   await this.audit(tx,u,'TRANSFER_SHORTAGE_CLOSE',id,{status:t.status},{status:'SHORTAGE_CLOSED',outstanding,reason:dto.reason});
+   await this.event(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason});
+   await this.audit(tx,u,'TRANSFER_SHORTAGE_CLOSE',id,{status:t.status},{status:'SHORTAGE_CLOSED',outstanding,reason});
    return result;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable, maxWait:10000, timeout:30000}));
  }
  async list(u:Principal){return this.db.stockTransfer.findMany({where:u.roles.includes('SUPER_ADMIN')?{}:{OR:[{sourceId:{in:u.locations}},{destinationId:{in:u.locations}}]},include:{items:true},orderBy:{createdAt:'desc'},take:200});}
- async get(id:string,u:Principal){const t=await this.db.stockTransfer.findUnique({where:{id},include:{items:true,source:true,destination:true}});if(!t)throw new BadRequestException('Transfer not found');if(!u.roles.includes('SUPER_ADMIN')&&!u.locations.some(l=>l===t.sourceId||l===t.destinationId))throw new ForbiddenException();return t;}
+ async get(id:string,u:Principal){const t=await this.db.stockTransfer.findUnique({where:{id},include:{items:true,source:true,destination:true,receipts:{orderBy:[{createdAt:'asc'},{id:'asc'}]}}});if(!t)throw new BadRequestException('Transfer not found');if(!u.roles.includes('SUPER_ADMIN')&&!u.locations.some(l=>l===t.sourceId||l===t.destinationId))throw new ForbiddenException();const audit = await this.db.auditLog.findMany({
+  where: {
+    entityType: 'StockTransfer',
+    entityId: id,
+  },
+  orderBy: [
+    { createdAt: 'asc' },
+    { id: 'asc' },
+  ],
+  take: 200,
+});
+return { ...t, audit };
+}
 }
 @Controller('transfers') @UseGuards(JwtAuthGuard,RolesGuard)
 export class TransfersController {
