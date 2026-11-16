@@ -66,6 +66,11 @@ export default function ReplenishmentPlanner() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [pendingKeys, setPendingKeys] =
+    useState<Record<string, string>>({});
 
   async function getJSON(path: string) {
     const response = await fetch('/api/v1' + path, {
@@ -384,6 +389,7 @@ export default function ReplenishmentPlanner() {
     setCreating(false);
   }
 
+  function exportCSV() {
     const headers = [
       'Branch', 'SKU', 'Variant ID',
       'Branch Available', 'Warehouse Available',
