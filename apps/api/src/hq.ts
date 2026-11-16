@@ -36,6 +36,105 @@ export class HqController {
   const stock=balances.reduce((a,b)=>{a.onHand+=b.onHand;a.reservedOnline+=b.reservedOnline;a.reservedReplenish+=b.reservedReplenish;a.quarantined+=b.quarantined;a.safetyBuffer+=b.safetyBuffer;return a;},{onHand:0,reservedOnline:0,reservedReplenish:0,quarantined:0,safetyBuffer:0});
   return {period:{from,to,timezone:'UTC',toExclusive:true},locations,stock:{...stock,available:stock.onHand-stock.reservedOnline-stock.reservedReplenish-stock.quarantined-stock.safetyBuffer},pos:{acceptedSales:accepted._count._all,grossAcceptedSales:accepted._sum.total?.toString()??'0',stockConflicts:conflicts,openShifts,approvedReturnCount:returns._count._all},transfers:{inTransit:transfers},notes:['POS sales use soldAt, not sync time. Offline sales not yet synced are excluded.','Gross accepted sales are not net revenue: returns, refunds, taxes, and payment settlement are not deducted.','Stock is a current snapshot, not an as-of-period stock balance.']};
  }
+ @Get('pos-demand-forecast')
+ async posDemandForecast(@Query() q:PeriodQuery) {
+  const {from,to} = this.period(q);
+  const days = (to.getTime()-from.getTime())/86400000;
+
+  const [locations,grouped,balances] = await Promise.all([
+   this.db.location.findMany({
+    where:{
+     type:'BRANCH',
+     active:true,
+     ...(q.locationId?{id:q.locationId}:{})
+    },
+    select:{id:true,name:true,code:true}
+   }),
+   this.db.posSaleLine.groupBy({
+    by:['variantId','saleId'],
+    where:{
+     sale:{
+      status:'ACCEPTED',
+      soldAt:{gte:from,lt:to},
+      ...(q.locationId?{locationId:q.locationId}:{})
+     }
+    },
+    _sum:{quantity:true}
+   }),
+   this.db.stockBalance.findMany({
+    where:{
+     location:{
+      type:'BRANCH',
+      active:true,
+      ...(q.locationId?{id:q.locationId}:{})
+     }
+    },
+    select:{
+     locationId:true,variantId:true,onHand:true,
+     quarantined:true,reservedOnline:true,
+     reservedReplenish:true,safetyBuffer:true,
+     variant:{select:{sku:true}}
+    }
+   })
+  ]);
+
+  const saleIds = [...new Set(grouped.map(g=>g.saleId))];
+  const sales = saleIds.length
+   ? await this.db.posSale.findMany({
+      where:{id:{in:saleIds}},
+      select:{id:true,locationId:true}
+     })
+   : [];
+
+  const saleLocations = new Map(
+   sales.map(s=>[s.id,s.locationId])
+  );
+
+  const demand = new Map<string,number>();
+
+  for(const g of grouped){
+   const locationId=saleLocations.get(g.saleId);
+   if(!locationId)continue;
+   const key=locationId+':'+g.variantId;
+   demand.set(key,(demand.get(key)||0)+(g._sum.quantity||0));
+  }
+
+  const stockKeys = new Set(
+   balances.map(b=>b.locationId+':'+b.variantId)
+  );
+
+  return {
+   period:{from,to,days,timezone:'UTC',toExclusive:true},
+   locations,
+   rows:balances.map(b=>{
+    const units=demand.get(b.locationId+':'+b.variantId)||0;
+    const available=Math.max(0,
+     b.onHand-b.quarantined-b.reservedOnline-
+     b.reservedReplenish-b.safetyBuffer
+    );
+    return {
+     locationId:b.locationId,
+     variantId:b.variantId,
+     sku:b.variant.sku,
+     soldUnits:units,
+     averageDailySales:units/days,
+     available,
+     hasStockBalance:true
+    };
+   }),
+   soldWithoutBalance:[...demand.entries()]
+    .filter(([key])=>!stockKeys.has(key))
+    .map(([key,units])=>({key,units})),
+   notes:[
+    'Accepted POS sales only; unsynced offline sales are excluded.',
+    'Demand is gross sales, not adjusted for returns.',
+    'Average daily sales includes zero-sale days in the period.',
+    'Only branch/SKU combinations with stock balances appear in rows.',
+    'Available inventory is a current snapshot, not historical stock.',
+    'No-sales does not prove zero demand: stockouts may suppress sales.'
+   ]
+  };
+ }
  @Get('sales-analytics')
  async salesAnalytics(@Query() q:PeriodQuery){
   const {from,to}=this.period(q);
