@@ -1238,3 +1238,21 @@ model PosRefundSettlement {
  @@index([returnId,settledAt])
  @@index([payoutShiftId,settledAt])
 }
+
+model StockAvailabilitySnapshot {
+  id             String   @id @default(uuid()) @db.Uuid
+  batchId        String   @db.Uuid
+  locationId     String   @db.Uuid
+  variantId      String   @db.Uuid
+  capturedAt     DateTime @default(now())
+  onHand         Int
+  quarantined    Int
+  reservedOnline Int
+  reservedReplenish Int
+  safetyBuffer   Int
+  available      Int
+
+  @@unique([batchId, locationId, variantId])
+  @@index([locationId, variantId, capturedAt])
+  @@index([batchId])
+}

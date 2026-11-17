@@ -1,4 +1,5 @@
-import { Controller, Get, Query, UseGuards, BadRequestException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Controller, Get, Post, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { Db } from './db';
 import { JwtAuthGuard, Roles, RolesGuard } from './auth';
@@ -35,6 +36,157 @@ export class HqController {
   ]);
   const stock=balances.reduce((a,b)=>{a.onHand+=b.onHand;a.reservedOnline+=b.reservedOnline;a.reservedReplenish+=b.reservedReplenish;a.quarantined+=b.quarantined;a.safetyBuffer+=b.safetyBuffer;return a;},{onHand:0,reservedOnline:0,reservedReplenish:0,quarantined:0,safetyBuffer:0});
   return {period:{from,to,timezone:'UTC',toExclusive:true},locations,stock:{...stock,available:stock.onHand-stock.reservedOnline-stock.reservedReplenish-stock.quarantined-stock.safetyBuffer},pos:{acceptedSales:accepted._count._all,grossAcceptedSales:accepted._sum.total?.toString()??'0',stockConflicts:conflicts,openShifts,approvedReturnCount:returns._count._all},transfers:{inTransit:transfers},notes:['POS sales use soldAt, not sync time. Offline sales not yet synced are excluded.','Gross accepted sales are not net revenue: returns, refunds, taxes, and payment settlement are not deducted.','Stock is a current snapshot, not an as-of-period stock balance.']};
+ }
+
+ @Post('stock-availability-snapshots')
+ async captureStockAvailability() {
+  const batchId = randomUUID();
+  const capturedAt = new Date();
+
+  const balances = await this.db.stockBalance.findMany({
+   where: {
+    location: {
+     type: 'BRANCH',
+     active: true
+    }
+   },
+   select: {
+    locationId: true,
+    variantId: true,
+    onHand: true,
+    quarantined: true,
+    reservedOnline: true,
+    reservedReplenish: true,
+    safetyBuffer: true
+   }
+  });
+
+  if (balances.length === 0) {
+   throw new BadRequestException(
+    'No active branch stock balances available for capture'
+   );
+  }
+
+  const records = balances.map(b => {
+   const available = Math.max(
+    0,
+    b.onHand -
+    b.quarantined -
+    b.reservedOnline -
+    b.reservedReplenish -
+    b.safetyBuffer
+   );
+
+   return {
+    batchId,
+    capturedAt,
+    locationId: b.locationId,
+    variantId: b.variantId,
+    onHand: b.onHand,
+    quarantined: b.quarantined,
+    reservedOnline: b.reservedOnline,
+    reservedReplenish: b.reservedReplenish,
+    safetyBuffer: b.safetyBuffer,
+    available
+   };
+  });
+
+  const result =
+   await this.db.stockAvailabilitySnapshot.createMany({
+    data: records
+   });
+
+  if (result.count !== records.length) {
+   throw new BadRequestException(
+    'Snapshot capture count mismatch'
+   );
+  }
+
+  return {
+   success: true,
+   batchId,
+   capturedAt: capturedAt.toISOString(),
+   capturedRows: result.count,
+   note:
+    'Snapshot recorded successfully. ' +
+    'Inventory balances were not modified.'
+  };
+ }
+
+ @Get('stock-availability-snapshots')
+ async stockAvailabilityHistory() {
+  const batches =
+   await this.db.stockAvailabilitySnapshot.groupBy({
+    by: ['batchId', 'capturedAt'],
+    _count: {
+     _all: true
+    },
+    orderBy: {
+     capturedAt: 'desc'
+    },
+    take: 30
+   });
+
+  const batchIds = batches.map(b => b.batchId);
+
+  const [snapshots, locations] = await Promise.all([
+   batchIds.length > 0
+    ? this.db.stockAvailabilitySnapshot.findMany({
+       where: {
+        batchId: {
+         in: batchIds
+        }
+       },
+       select: {
+        batchId: true,
+        locationId: true,
+        variantId: true,
+        capturedAt: true,
+        available: true
+       }
+      })
+    : Promise.resolve([]),
+
+   this.db.location.findMany({
+    where: {
+     type: 'BRANCH'
+    },
+    select: {
+     id: true,
+     name: true
+    }
+   })
+  ]);
+
+  const locationNames = new Map(
+   locations.map(l => [l.id, l.name])
+  );
+
+  return {
+   batches: batches.map(b => ({
+    batchId: b.batchId,
+    capturedAt: b.capturedAt,
+    rows: b._count._all
+   })),
+
+   rows: snapshots.map(s => ({
+    batchId: s.batchId,
+    locationId: s.locationId,
+    variantId: s.variantId,
+    branchName:
+     locationNames.get(s.locationId) || s.locationId,
+    capturedAt: s.capturedAt,
+    available: s.available
+   })),
+
+   notes: [
+    'Snapshots represent inventory at a recorded instant.',
+    'Zero availability is confirmed only at capture time.',
+    'Stockout duration cannot be inferred between captures.',
+    'The most recent 30 snapshot batches are returned.',
+    'Historical records do not change stock balances.'
+   ]
+  };
  }
  @Get('pos-forecast-accuracy')
  async posForecastAccuracy(@Query() q:PeriodQuery) {
