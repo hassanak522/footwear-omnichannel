@@ -608,6 +608,39 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   const shift=await this.db.posShift.findFirst({where:{deviceId,status:'OPEN'},orderBy:{openedAt:'desc'},select:{id:true,openedAt:true,cashierId:true,openingCash:true}});
   return {id:device.id,code:device.code,active:device.active,locationId:device.locationId,location:device.location,openShift:shift};
  }
+ async offlineSaleStatus(deviceId:string,localSaleId:string,u:Principal){
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if(!uuid.test(deviceId)||!uuid.test(localSaleId)){
+   throw new BadRequestException('Valid device and local sale UUIDs required');
+  }
+
+  const device=await this.db.posDevice.findUniqueOrThrow({
+   where:{id:deviceId}
+  });
+  this.branchAccess(u,device.locationId);
+
+  const sale=await this.db.posSale.findUnique({
+   where:{deviceId_localSaleId:{deviceId,localSaleId}},
+   select:{
+    id:true,
+    localSaleId:true,
+    status:true,
+    conflictReason:true
+   }
+  });
+
+  if(!sale){
+   return {found:false,deviceId,localSaleId};
+  }
+
+  return {
+   found:true,
+   id:sale.id,
+   localSaleId:sale.localSaleId,
+   status:sale.status,
+   conflictReason:sale.conflictReason
+  };
+ }
  async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
@@ -623,6 +656,14 @@ export class PosController {
  @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  discountedStatus(@Param('deviceId') deviceId:string,@Param('localSaleId') localSaleId:string,@CurrentUser() u:Principal){
   return this.pos.discountedSaleStatus(deviceId,localSaleId,u);
+ }
+ @Get('sales/status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ offlineSaleStatusRoute(
+  @Param('deviceId') deviceId:string,
+  @Param('localSaleId') localSaleId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.offlineSaleStatus(deviceId,localSaleId,u);
  }
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
