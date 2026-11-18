@@ -93,6 +93,7 @@ export default function ReturnsPanel({
   }
 
   function selectSale(id: string) {
+    if (key || busy) return;
     const sale = sales.find(s => s.id === id);
 
     setSelectedId(id);
@@ -111,6 +112,7 @@ export default function ReturnsPanel({
     variantId: string,
     changes: Partial<DraftLine>
   ) {
+    if (key || busy) return;
     setLines(current => current.map(line =>
       line.variantId === variantId
         ? { ...line, ...changes }
@@ -121,6 +123,7 @@ export default function ReturnsPanel({
   }
 
   async function submitReturn() {
+    if (busy) return;
     if (!selected || !token || !location) {
       setMessage('Select an accepted sale first.');
       return;
@@ -183,7 +186,7 @@ export default function ReturnsPanel({
     } catch (error: any) {
       setMessage(
         (error.message || 'Return failed') +
-        ' Retry the same request if its outcome is uncertain.'
+        ' The request identity is preserved. Retry the same request or ask a manager to reconcile it before starting another return.'
       );
     } finally {
       setBusy(false);
@@ -207,7 +210,7 @@ export default function ReturnsPanel({
 
       <button
         className="secondary"
-        disabled={busy || !token || !location}
+        disabled={busy || !!key || !token || !location}
         onClick={() => void loadSales()}
       >
         Load branch sales
@@ -217,7 +220,7 @@ export default function ReturnsPanel({
         Original accepted sale
         <select
           value={selectedId}
-          disabled={busy}
+          disabled={busy || !!key}
           onChange={e => selectSale(e.target.value)}
         >
           <option value="">Select sale</option>
@@ -262,7 +265,7 @@ export default function ReturnsPanel({
                           max={sold.quantity}
                           step={1}
                           value={draft?.quantity || 0}
-                          disabled={busy}
+                          disabled={busy || !!key}
                           onChange={e => {
                             const value = Number(e.target.value);
 
@@ -284,7 +287,7 @@ export default function ReturnsPanel({
                         <input
                           type="checkbox"
                           checked={draft?.quarantined || false}
-                          disabled={busy}
+                          disabled={busy || !!key}
                           onChange={e =>
                             updateLine(sold.variantId, {
                               quarantined: e.target.checked
@@ -304,8 +307,9 @@ export default function ReturnsPanel({
             <textarea
               value={reason}
               maxLength={500}
-              disabled={busy}
+              disabled={busy || !!key}
               onChange={e => {
+                if (key || busy) return;
                 setReason(e.target.value);
                 invalidateDraft();
               }}
