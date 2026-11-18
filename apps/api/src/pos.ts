@@ -641,6 +641,71 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    conflictReason:sale.conflictReason
   };
  }
+ async saleReturnHistory(saleId:string,u:Principal){
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saleId)){
+   throw new BadRequestException('Valid sale UUID required');
+  }
+
+  const sale=await this.db.posSale.findUnique({
+   where:{id:saleId},
+   include:{
+    lines:true,
+    returns:{
+     include:{lines:true}
+    }
+   }
+  });
+
+  if(!sale)throw new NotFoundException('Sale not found');
+
+  this.branchAccess(u,sale.locationId);
+
+  if(sale.status!=='ACCEPTED'){
+   throw new ConflictException('Accepted sale required');
+  }
+
+  const lines=sale.lines.map(line=>{
+   const returned=sale.returns
+    .flatMap(ret=>ret.lines)
+    .filter(item=>item.variantId===line.variantId)
+    .reduce((sum,item)=>sum+item.quantity,0);
+
+   return {
+    variantId:line.variantId,
+    soldQuantity:line.quantity,
+    returnedQuantity:returned,
+    remainingQuantity:Math.max(0,line.quantity-returned),
+    unitPrice:line.unitPrice.toString()
+   };
+  });
+
+  const returns=sale.returns.map(ret=>({
+   id:ret.id,
+   reason:ret.reason,
+   approvedById:ret.approvedById,
+   lines:ret.lines.map(line=>({
+    variantId:line.variantId,
+    quantity:line.quantity,
+    quarantined:line.quarantined,
+    refundAmount:line.refundAmount.toString()
+   })),
+   refundDue:(
+    ret.lines.reduce(
+     (sum,line)=>sum+Math.round(line.refundAmount.toNumber()*100),
+     0
+    )/100
+   ).toFixed(2)
+  }));
+
+  return {
+   saleId:sale.id,
+   locationId:sale.locationId,
+   lines,
+   returns,
+   refundPaymentRecorded:false,
+   note:'Return records establish refund amounts due, not payment settlement.'
+  };
+ }
  async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
@@ -666,6 +731,14 @@ export class PosController {
   return this.pos.offlineSaleStatus(deviceId,localSaleId,u);
  }
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
+ @Get('returns/sale/:saleId')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ returnHistory(
+  @Param('saleId') saleId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.saleReturnHistory(saleId,u);
+ }
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
  @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
  @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
