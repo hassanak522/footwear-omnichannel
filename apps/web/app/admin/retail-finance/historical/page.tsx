@@ -1,9 +1,9 @@
 "use client";
 import RetailCaseLink from 'next/link';
-import RetailFinanceOperationsNav from '../components/retail-finance-operations-nav';
+
 
 import {useEffect,useState} from "react";
-import RetailFinanceToolbar from "../components/retail-finance-toolbar";
+
 
 type Branch = {
  locationId:string;
@@ -324,24 +324,38 @@ export default function HistoricalRetailFinance(){
  const totals=report?.totals;
 
  return <main style={{
-  maxWidth:1450,
-  margin:"30px auto",
-  padding:20,
+  maxWidth:1200,
+  margin:"0 auto",
+  padding:"28px 20px 48px",
   fontFamily:"system-ui",
   color:"#172b4d"
  }}>
-  <RetailFinanceOperationsNav />
+  
 
   <div style={{marginBottom:20}}>
    <a href="/admin/retail-finance"
     style={{color:"#104c72"}}>
     Retail Finance Dashboard
    </a>
-   <RetailFinanceToolbar/>
-   <h1>Historical Retail Finance</h1>
+   
+   <div style={{
+  color:"#ef3321",
+  fontSize:12,
+  fontWeight:700,
+  letterSpacing:1
+}}>
+  ROYAL STEP / FINANCE
+</div>
+<h1 style={{
+  color:"#104c72",
+  fontSize:28,
+  margin:"8px 0"
+}}>
+  Finance Reports
+</h1>
    <p style={{color:"#475569"}}>
-    Consolidated reporting for physical retail branches,
-    historical refund obligations and cash drawer exceptions.
+    Compare financial records across retail branches,
+    review refunds and identify cash drawer issues.
    </p>
   </div>
 
@@ -353,7 +367,7 @@ export default function HistoricalRetailFinance(){
     gap:14
    }}>
     <label style={{display:"grid",gap:6}}>
- <strong>Retail branch</strong>
+ <strong>Branch</strong>
  <select
   value={locationId}
   onChange={e=>setLocationId(e.target.value)}
@@ -383,7 +397,7 @@ export default function HistoricalRetailFinance(){
 </label>
 
     <label style={{display:"grid",gap:6}}>
-     <strong>From</strong>
+     <strong>From Date (UTC)</strong>
      <input
       type="date"
       value={from}
@@ -397,7 +411,7 @@ export default function HistoricalRetailFinance(){
     </label>
 
     <label style={{display:"grid",gap:6}}>
-     <strong>To</strong>
+     <strong>To Date (UTC)</strong>
      <input
       type="date"
       value={to}
@@ -414,8 +428,8 @@ export default function HistoricalRetailFinance(){
    <p style={{fontSize:13,color:"#64748b"}}>
     Dates filter shift closings only, using UTC boundaries.
     Refund liabilities and drawer exceptions are current
-    all-time figures. Branch managers must supply an
-    authorized branch UUID.
+    all-time figures. Branch managers must select an
+    authorized branch.
    </p>
 
    <button
@@ -431,7 +445,7 @@ export default function HistoricalRetailFinance(){
      cursor:"pointer"
     }}
    >
-    {loading?"Loading…":"Generate historical report"}
+    {loading?"Loading…":"Generate Report"}
    </button>
   </section>
 
@@ -482,37 +496,37 @@ export default function HistoricalRetailFinance(){
     marginBottom:24
    }}>
     <Metric
-     title="Closed shifts"
+     title="Closed Shifts"
      value={String(totals.closedShifts)}
     />
     <Metric
-     title="Net shift variance"
+     title="Net Cash Difference"
      value={formatMoney(totals.netShiftVariance)}
     />
     <Metric
-     title="Absolute shift variance"
+     title="Total Cash Differences"
      value={formatMoney(totals.absoluteShiftVariance)}
     />
     <Metric
-     title="Total refund obligations"
+     title="Total Refunds Due (All Time)"
      value={formatMoney(totals.refundDueAllTime)}
     />
     <Metric
-     title="Refunds recorded as settled"
+     title="Refunds Recorded as Paid (All Time)"
      value={formatMoney(totals.refundSettledAllTime)}
     />
     <Metric
-     title="Current outstanding refunds"
+     title="Refunds Pending (All Time)"
      value={formatMoney(totals.refundOutstandingAllTime)}
     />
     <Metric
-     title="Cash drawer exceptions"
+     title="Cash Drawer Issues"
      value={String(totals.cashDrawerExceptions)}
     />
    </section>
 
    <section style={{...panel,marginBottom:22}}>
-    <h2>Branch financial comparison</h2>
+    <h2 style={{color:"#104c72"}}>Branch Comparison</h2>
     <div style={{overflowX:"auto"}}>
      <table style={{
       width:"100%",
@@ -583,8 +597,15 @@ export default function HistoricalRetailFinance(){
     </div>
    </section>
 
-   <section style={{...panel,marginBottom:22}}>
-    <h2>Cash refund drawer exceptions</h2>
+   <details style={{...panel,marginBottom:22}}>
+    <summary style={{
+      cursor:"pointer",
+      color:"#104c72",
+      fontSize:18,
+      fontWeight:700
+    }}>
+      Cash Drawer Issues
+    </summary>
     <p style={{fontSize:13,color:"#64748b"}}>
      These exceptions require finance review.
      This dashboard does not automatically approve,
@@ -681,13 +702,13 @@ export default function HistoricalRetailFinance(){
       The total exception count includes all matches.
      </p>
     }
-   </section>
+   </details>
 
    <section style={{
     ...panel,
     background:"#f8fafc"
    }}>
-    <h2>Financial reporting notes</h2>
+    <h2 style={{color:"#104c72"}}>About This Report</h2>
     <ul>
      {(report.notes||[]).map((note,i)=>
       <li key={i} style={{marginBottom:8}}>

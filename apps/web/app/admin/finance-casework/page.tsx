@@ -1,6 +1,6 @@
 "use client";
-import FinanceUnifiedNav from '../finance-unified-nav';
-import { useState } from "react";
+
+import { useEffect,useState } from "react";
 
 type CaseEvent = {id:string;action:string;note:string;createdAt:string;actorId:string};
 type CaseRow = {id:string;summary:string;status:string;sourceId:string;createdAt:string;events:CaseEvent[]};
@@ -20,6 +20,82 @@ function exportCsv(name:string,headers:string[],rows:unknown[][]){
 }
 export default function FinanceCaseworkPage(){
   const [locationId,setLocationId]=useState("");
+  const [locations,setLocations]=useState<Array<{
+    id:string;
+    name:string;
+    code:string;
+  }>>([]);
+  const [locationsLoading,setLocationsLoading]=useState(true);
+  const [locationsError,setLocationsError]=useState("");
+
+  useEffect(()=>{
+    let active=true;
+
+    async function loadLocations(){
+      try{
+        const response=await fetch(
+          "/api/v1/inventory/locations",
+          {
+            credentials:"include",
+            cache:"no-store"
+          }
+        );
+
+        const data=await response.json().catch(()=>null);
+
+        if(!response.ok){
+          throw new Error(
+            "Unable to retrieve authorized locations (HTTP "+
+            response.status+")."
+          );
+        }
+
+        const items=Array.isArray(data)
+          ?data
+          :Array.isArray(data?.locations)
+            ?data.locations
+            :Array.isArray(data?.data)
+              ?data.data
+              :[];
+
+        const list=items
+          .filter((item:any)=>
+            item &&
+            typeof item.id==="string" &&
+            item.active!==false &&
+            (
+              item.type==="BRANCH" ||
+              item.type==="WAREHOUSE"
+            )
+          )
+          .map((item:any)=>({
+            id:item.id as string,
+            name:String(item.name||item.code||"Location"),
+            code:String(item.code||"")
+          }));
+
+        if(active){
+          setLocations(list);
+
+          if(list.length===1){
+            setLocationId(list[0].id);
+          }
+        }
+      }catch(e){
+        if(active){
+          setLocationsError(
+            e instanceof Error?e.message:String(e)
+          );
+        }
+      }finally{
+        if(active)setLocationsLoading(false);
+      }
+    }
+
+    void loadLocations();
+
+    return ()=>{active=false;};
+  },[]);
   const [cases,setCases]=useState<CaseRow[]>([]);
   const [invoices,setInvoices]=useState<InvoiceRow[]>([]);
   const [alerts,setAlerts]=useState<Alerts|null>(null);
@@ -41,7 +117,12 @@ export default function FinanceCaseworkPage(){
     return body;
   }
   async function refresh(){
-    if(!uuid.test(locationId))throw new Error("Enter a valid location UUID");
+    if(
+      !uuid.test(locationId) ||
+      !locations.some(item=>item.id===locationId)
+    ){
+      throw new Error("Select an authorized location.");
+    }
     const q=`locationId=${encodeURIComponent(locationId)}`;
     const [c,i,a]=await Promise.all([
       request(`cases?${q}`),request(`invoice-register?${q}`),request(`alerts?${q}`)
@@ -81,20 +162,95 @@ export default function FinanceCaseworkPage(){
   const th={padding:9,textAlign:"left" as const,borderBottom:"1px solid #ccc"};
   const td={padding:9,borderBottom:"1px solid #e4e4e4",verticalAlign:"top" as const};
   return <main style={{maxWidth:1150,margin:"28px auto",padding:24,fontFamily:"system-ui"}}>
-<FinanceUnifiedNav />
 
-    <h1>HQ Finance Casework & Alerts</h1>
-    <p>Operational case management and staff-entered financial evidence. Not bank-confirmed accounting.</p>
+
+    <header style={{marginBottom:20}}>
+  <div style={{
+    color:"#ef3321",
+    fontSize:12,
+    fontWeight:700,
+    letterSpacing:1
+  }}>
+    ROYAL STEP / FINANCE
+  </div>
+  <h1 style={{
+    color:"#104c72",
+    fontSize:28,
+    margin:"8px 0"
+  }}>
+    Supplier Investigations
+  </h1>
+</header>
+    <p style={{color:"#64748b",fontSize:14}}>
+  Review supplier settlement issues, record investigation
+  decisions and inspect invoice evidence.
+  Financial evidence is not independently bank-confirmed.
+</p>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"end"}}>
-      <label>Location UUID<input aria-label="Location UUID" value={locationId}
-        onChange={e=>setLocationId(e.target.value)} placeholder="Location UUID"
-        style={{display:"block",minWidth:320,padding:9}}/></label>
-      <button disabled={loading} onClick={load}>{loading?"Loading…":"Load HQ data"}</button>
+      <label style={{display:"grid",gap:7}}>
+        <strong style={{fontSize:13}}>Select Location</strong>
+        <select
+          aria-label="Select Location"
+          value={locationId}
+          disabled={locationsLoading}
+          onChange={e=>{
+            setLocationId(e.target.value);
+            setCases([]);
+            setInvoices([]);
+            setAlerts(null);
+            setError("");
+          }}
+          style={{
+            minWidth:300,
+            padding:11,
+            border:"1px solid #cbd5e1",
+            borderRadius:8,
+            background:"#fff"
+          }}
+        >
+          <option value="">
+            {locationsLoading
+              ?"Loading locations..."
+              :"Choose location"}
+          </option>
+          {locations.map(item=>(
+            <option key={item.id} value={item.id}>
+              {item.name} ({item.code})
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+  disabled={loading||locationsLoading||!locationId}
+  onClick={load}
+  style={{
+    padding:"11px 18px",
+    background:"#104c72",
+    color:"#fff",
+    border:0,
+    borderRadius:8,
+    cursor:"pointer"
+  }}
+>
+  {loading?"Loading...":"View Investigations"}
+</button>
     </div>
-    {error&&<p role="alert" style={{color:"crimson"}}>{error}</p>}
+    {locationsError&&
+  <p role="alert" style={{color:"#b91c1c"}}>
+    {locationsError}
+  </p>
+}
+{!locationsLoading&&!locationsError&&locations.length===0&&
+  <p role="status">No authorized locations available.</p>
+}
+{error&&
+  <p role="alert" style={{color:"#b91c1c"}}>
+    {error}
+  </p>
+}
     {message&&<p role="status">{message}</p>}
     {alerts&&<section style={{marginTop:25}}>
-      <h2>Financial alerts</h2>
+      <h2 style={{color:"#104c72"}}>Issues Requiring Attention</h2>
       <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
         {([["Open cases",alerts.openCaseCount],["Disputed evidence",alerts.disputedEvidenceCount],
           ["Unreviewed evidence",alerts.unreviewedEvidenceCount]] as const).map(([label,value])=>
@@ -105,7 +261,7 @@ export default function FinanceCaseworkPage(){
       <p>{alerts.warning}{alerts.truncated?" WARNING: Alerts truncated.":""}</p>
     </section>}
     <section style={{marginTop:25}}>
-      <h2>Open a settlement investigation</h2>
+      <h2 style={{color:"#104c72"}}>Start an Investigation</h2>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
         <input aria-label="Settlement UUID" placeholder="Settlement UUID" value={settlementId}
           onChange={e=>setSettlementId(e.target.value)} style={{padding:9,minWidth:300}}/>
@@ -115,7 +271,7 @@ export default function FinanceCaseworkPage(){
       </div>
     </section>
     <section style={{marginTop:25,overflowX:"auto"}}>
-      <h2>Investigation cases</h2>
+      <h2 style={{color:"#104c72"}}>Investigation Register</h2>
       <label>Note for status change<textarea value={note} maxLength={1000}
         onChange={e=>setNote(e.target.value)} style={{display:"block",width:"100%",maxWidth:650,minHeight:65}}/></label>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
@@ -137,7 +293,7 @@ export default function FinanceCaseworkPage(){
       {truncated.cases&&<p role="alert">Case list truncated. Not a complete export.</p>}
     </section>
     <section style={{marginTop:25,overflowX:"auto"}}>
-      <h2>Location invoice register</h2>
+      <h2 style={{color:"#104c72"}}>Supplier Invoice Records</h2>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
         <thead><tr>{["Invoice","Date","Invoice amount","Reviewed evidence","Remaining"].map(h=><th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>{invoices.map(i=><tr key={i.invoiceId}>
