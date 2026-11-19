@@ -1,4 +1,5 @@
 "use client";
+import FinanceUnifiedNav from '../finance-unified-nav';
 import { useState } from "react";
 type Compare = {from:string;to:string;truncated:boolean;rows:Array<{
   locationId:string;snapshotDate:string|null;pendingCount:number;pendingAmount:string;
@@ -47,6 +48,8 @@ export default function FinanceOperations(){
     finally{setLoading(false);}
   }
   return <main style={{maxWidth:1100,margin:"30px auto",padding:24,fontFamily:"system-ui"}}>
+<FinanceUnifiedNav />
+
     <h1>HQ Finance Operations</h1>
     <p>Management reporting, invoice statements, and reconciliation exceptions. Amounts are not bank-verified.</p>
     <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"end"}}>

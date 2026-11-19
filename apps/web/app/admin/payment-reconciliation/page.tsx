@@ -1,4 +1,5 @@
 'use client';
+import FinanceUnifiedNav from '../finance-unified-nav';
 import {useEffect,useState} from 'react';
 const API='/api/v1';
 type Row=Record<string,any>;
@@ -58,6 +59,8 @@ export default function PaymentReconciliation(){
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`royal-step-payment-exceptions-${from}-${to}.csv`;a.click();URL.revokeObjectURL(url);
  }
  return <main style={{maxWidth:1250,margin:'30px auto',padding:20,fontFamily:'system-ui',lineHeight:1.5}}>
+<FinanceUnifiedNav />
+
   <h1>Royal Step — Payment Reconciliation</h1><p><a href="/admin">HQ console</a> · Milestones 34–35</p>
   <p>Recorded tenders and administrative exception decisions are not proof of bank settlement, refund disbursement, or cash receipt.</p>
   {!token?<p role="status">Loading your HQ session. If this persists, return to <a href="/admin/finance-login">finance sign in</a>.</p>:<>

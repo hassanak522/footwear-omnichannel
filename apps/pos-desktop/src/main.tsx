@@ -6,7 +6,7 @@ const DEFAULT_API_URL =
   import.meta.env.VITE_POS_QA_MODE === 'true'
     ? 'http://127.0.0.1:3002/api/v1'
     : 'https://royal-step-api-production.up.railway.app/api/v1';
-function App(){const[api,setApi]=useState(DEFAULT_API_URL);const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[token,setToken]=useState('');const[device,setDevice]=useState('');const[deviceCode,setDeviceCode]=useState('POS-01');const[branches,setBranches]=useState<{id:string;name:string;type:string;active:boolean}[]>([]);const[location,setLocation]=useState('');const[shift,setShift]=useState('');const[opening,setOpening]=useState('0');const[items,setItems]=useState<Variant[]>([]);const[cart,setCart]=useState<Line[]>([]);const[query,setQuery]=useState('');const[tender,setTender]=useState<'CASH'|'CARD'|'SPLIT'>('CASH');const[cashAmount,setCashAmount]=useState('0');const[closingCash,setClosingCash]=useState('0');const[reference,setReference]=useState('');const[status,setStatus]=useState('');const[busy,setBusy]=useState(false);const[online,setOnline]=useState(navigator.onLine);const[tab,setTab]=useState<'sale'|'history'|'settings'>('sale');const[history,setHistory]=useState<any[]>([]);const[historyFilter,setHistoryFilter]=useState<'ALL'|'PENDING'|'STOCK_CONFLICT'|'ACCEPTED'>('ALL');const[pending,setPending]=useState(0);const syncingRef=useRef(false);const checkoutLockRef=useRef(false);const authBlockedRef=useRef(false);const[autoSync,setAutoSync]=useState(true);const[serverShiftSummary,setServerShiftSummary]=useState<any>(null);const[reviewAcknowledged,setReviewAcknowledged]=useState(false);const[customerQuery,setCustomerQuery]=useState('');const[customerMatches,setCustomerMatches]=useState<{id:string;name:string;phone:string}[]>([]);const[selectedCustomer,setSelectedCustomer]=useState<{id:string;name:string;phone:string}|null>(null);const[promoCode,setPromoCode]=useState('');const[promoQuote,setPromoQuote]=useState<any>(null);const[discountAttempts,setDiscountAttempts]=useState<any[]>([]);
+function App(){const[api,setApi]=useState(DEFAULT_API_URL);const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[token,setToken]=useState('');const[device,setDevice]=useState('');const[deviceCode,setDeviceCode]=useState('POS-01');const[branches,setBranches]=useState<{id:string;name:string;type:string;active:boolean}[]>([]);const[location,setLocation]=useState('');const[shift,setShift]=useState('');const[opening,setOpening]=useState('0');const[items,setItems]=useState<Variant[]>([]);const[cart,setCart]=useState<Line[]>([]);const[query,setQuery]=useState('');const[tender,setTender]=useState<'CASH'|'CARD'|'SPLIT'>('CASH');const[cashAmount,setCashAmount]=useState('0');const[closingCash,setClosingCash]=useState('0');const[reference,setReference]=useState('');const[status,setStatus]=useState('');const[busy,setBusy]=useState(false);const[online,setOnline]=useState(navigator.onLine);const[tab,setTab]=useState<'sale'|'history'|'settings'>('sale');const[history,setHistory]=useState<any[]>([]);const[historyFilter,setHistoryFilter]=useState<'ALL'|'PENDING'|'STOCK_CONFLICT'|'ACCEPTED'>('ALL');const[pending,setPending]=useState(0);const syncingRef=useRef(false);const checkoutLockRef=useRef(false);const authBlockedRef=useRef(false);const[autoSync,setAutoSync]=useState(true);const[serverShiftSummary,setServerShiftSummary]=useState<any>(null);const[serverSummaryFetchedAt,setServerSummaryFetchedAt]=useState("");const[reviewAcknowledged,setReviewAcknowledged]=useState(false);const[customerQuery,setCustomerQuery]=useState('');const[customerMatches,setCustomerMatches]=useState<{id:string;name:string;phone:string}[]>([]);const[selectedCustomer,setSelectedCustomer]=useState<{id:string;name:string;phone:string}|null>(null);const[promoCode,setPromoCode]=useState('');const[promoQuote,setPromoQuote]=useState<any>(null);const[discountAttempts,setDiscountAttempts]=useState<any[]>([]);
 useEffect(()=>{(async()=>{setApi(DEFAULT_API_URL);setDevice(await window.pos.getConfig('deviceId')||'');setLocation(await window.pos.getConfig('locationId')||'');setShift(await window.pos.getConfig('shiftId')||'');setItems(await window.pos.listCatalog());await refreshHistory();await refreshDiscountAttempts();})();const yes=()=>setOnline(true),no=()=>setOnline(false);window.addEventListener('online',yes);window.addEventListener('offline',no);return()=>{window.removeEventListener('online',yes);window.removeEventListener('offline',no);};},[]);
 async function refreshHistory(){const[h,p]=await Promise.all([window.pos.listSales(),window.pos.pendingSales()]);setHistory(h);setPending(p.length);}
 async function request(path:string,method='GET',body?:unknown){
@@ -22,7 +22,7 @@ async function request(path:string,method='GET',body?:unknown){
 async function login(){setBusy(true);try{const data=await request('/auth/login','POST',{email,password});setToken(data.accessToken);authBlockedRef.current=false;setStatus('Logged in. Set branch and device, then open shift.');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function loadBranches(){setBusy(true);try{const rows=await request('/inventory/locations');const list=Array.isArray(rows)?rows:(rows?.locations||[]);setBranches(list.filter((r:any)=>r.type==='BRANCH'&&r.active));setStatus('Branches loaded. Select the branch assigned to this terminal.');}catch(e){setStatus('Unable to load branches: '+String(e));}finally{setBusy(false);}}
 async function registerDevice(){if(!token){setStatus('Sign in before registering a device');return;}if(!location){setStatus('Select a branch first');return;}if(!/^[A-Z0-9_-]{3,50}$/.test(deviceCode)){setStatus('Device code must be 3â€“50 uppercase letters, digits, underscores or hyphens');return;}if(device){setStatus('This terminal already has a registered device ID. Do not create another without administrator approval.');return;}setBusy(true);try{const created=await request('/pos/devices','POST',{code:deviceCode,locationId:location});if(!created?.id)throw new Error('Server did not return a device ID');setDevice(created.id);await window.pos.setConfig('deviceId',created.id);await window.pos.setConfig('locationId',location);await window.pos.setConfig('apiUrl',api);setStatus('POS device registered and saved. Open a cashier shift next.');}catch(e){setStatus('Device registration failed: '+String(e));}finally{setBusy(false);}}
-async function openShift(){setBusy(true);try{const r=await request('/pos/shifts/open','POST',{deviceId:device,openingCash:Number(opening)});setShift(r.id);setServerShiftSummary(null);setReviewAcknowledged(false);await window.pos.setConfig('shiftId',r.id);setStatus('Shift opened successfully');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+async function openShift(){setBusy(true);try{const r=await request('/pos/shifts/open','POST',{deviceId:device,openingCash:Number(opening)});setShift(r.id);setServerShiftSummary(null);setServerSummaryFetchedAt("");setReviewAcknowledged(false);await window.pos.setConfig('shiftId',r.id);setStatus('Shift opened successfully');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function cacheCatalog(){setBusy(true);try{const products=await request('/catalog/products');const variants:Variant[]=products.flatMap((p:any)=>(p.variants||[]).filter((v:any)=>v.active).map((v:any)=>({id:v.id,barcode:v.barcode,sku:v.sku,title:p.title,size:v.size,color:v.color,price:Number(v.price)})));await window.pos.replaceCatalog(variants);setItems(variants);setStatus(`Cached ${variants.length} variants for offline lookup`);}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function sync(silent=false){if(!token||syncingRef.current||authBlockedRef.current){if(authBlockedRef.current&&!silent)setStatus('Session expired or unauthorized. Sign in again under Setup & shift before retrying.');return;}syncingRef.current=true;if(!silent)setBusy(true);let ok=0,conflicts=0;try{for(const row of await window.pos.pendingSales()){try{const result=await recoverPendingSale(row,device,request);if(result.status==='ACCEPTED'){await window.pos.setSaleResult(row.id,'ACCEPTED');ok++;}else if(result.status==='STOCK_CONFLICT'){await window.pos.setSaleResult(row.id,'STOCK_CONFLICT',result.conflictReason ?? undefined);conflicts++;}else await window.pos.setSaleResult(row.id,'PENDING','Unexpected server status');}catch(e){await window.pos.setSaleResult(row.id,'PENDING',String(e));if(/Unauthorized|HTTP 401/i.test(String(e))){authBlockedRef.current=true;setStatus('POS sync paused: session unauthorized. Sign in again under Setup & shift. Local sales are preserved.');}else if(!silent)setStatus('Sync paused: '+String(e));break;}}await refreshHistory();if(!silent||ok||conflicts)if(!authBlockedRef.current)setStatus(`Sync complete: ${ok} accepted, ${conflicts} stock conflicts. Pending items remain queued.`);}catch(e){if(!silent)setStatus('Sync failed: '+String(e));}finally{syncingRef.current=false;if(!silent)setBusy(false);}}
 useEffect(()=>{if(!token||!autoSync)return;const timer=window.setInterval(()=>{if(navigator.onLine&&!authBlockedRef.current)void sync(true);},30000);const onReconnect=()=>{void sync(true);};window.addEventListener('online',onReconnect);return()=>{window.clearInterval(timer);window.removeEventListener('online',onReconnect);};},[token,api,autoSync]);
@@ -114,27 +114,221 @@ const accepted=shiftSales.filter(s=>s.status==='ACCEPTED');
 const shiftCash=accepted.reduce((sum,s)=>sum+JSON.parse(s.payload).tenders.filter((t:any)=>t.type==='CASH').reduce((n:number,t:any)=>n+Math.round(Number(t.amount)*100),0),0)/100;
 const shiftCard=accepted.reduce((sum,s)=>sum+JSON.parse(s.payload).tenders.filter((t:any)=>t.type==='CARD').reduce((n:number,t:any)=>n+Math.round(Number(t.amount)*100),0),0)/100;
 const unsettled=shiftSales.filter(s=>s.status!=='ACCEPTED');
-const expectedCash=Number(opening)+shiftCash;
+const localCashEstimate=Number(opening)+shiftCash;
+const centralSummary=
+ serverShiftSummary?.shiftId===shift
+  ? serverShiftSummary
+  : null;
+const centralExpected=
+ centralSummary?.expectedCash==null
+  ? null
+  : Number(centralSummary.expectedCash);
+const centralVariance=
+ centralExpected===null
+  ? null
+  : Math.round(
+     (Number(closingCash)-centralExpected)*100
+    )/100;
 const conflicted=shiftSales.filter(s=>s.status==='STOCK_CONFLICT');
 const queued=shiftSales.filter(s=>s.status==='PENDING');
-const closingVariance=Number(closingCash)-expectedCash;
-async function loadShiftSummary(){if(!shift||!token){setStatus('Sign in and open a shift to view server reconciliation');return;}try{const summary=await request(`/pos/shifts/${shift}/summary`);setServerShiftSummary(summary);setStatus('Central shift summary refreshed. Compare with local transactions.');}catch(e){setStatus('Central reconciliation failed: '+String(e));}}
+
+async function loadShiftSummary(){
+ if(!shift||!token){
+  setStatus('Sign in and open a shift first');
+  return;
+ }
+ setServerShiftSummary(null);
+ setServerSummaryFetchedAt('');
+ try{
+  const data=await request(
+   `/pos/shifts/${shift}/summary`
+  );
+  if(
+   data?.shiftId!==shift ||
+   !Number.isFinite(Number(data.expectedCash))
+  ){
+   throw new Error('Invalid central shift summary');
+  }
+  setServerShiftSummary(data);
+  setServerSummaryFetchedAt(new Date().toLocaleString());
+  setStatus('Central cash reconciliation refreshed.');
+ }catch(e){
+  setStatus('Central reconciliation unavailable: '+String(e));
+ }
+}
 async function closeShift(){
- if(!shift||!token){setStatus('Sign in and open a shift first');return;}
- await refreshHistory();
- const all=await window.pos.listSales();
- const unresolved=all.filter(s=>{try{return JSON.parse(s.payload).shiftId===shift&&s.status==='PENDING';}catch{return true;}});
- if(unresolved.length){setStatus(`Cannot close: ${unresolved.length} unsynchronized sales. Sign in and sync first.`);return;}
- if(all.some(s=>{try{return JSON.parse(s.payload).shiftId===shift&&s.status==='STOCK_CONFLICT';}catch{return false;}})&&!reviewAcknowledged){setStatus('Review stock-conflicted sales and acknowledge them before closing. They remain unresolved, not accepted.');return;}
- if(!Number.isFinite(Number(closingCash))||Number(closingCash)<0){setStatus('Enter a valid counted closing cash amount');return;}
- if(!window.confirm('Close this shift? Verify the counted cash and local sales before continuing.'))return;
+ if(!shift||!token){
+  setStatus('Sign in and open a shift first');
+  return;
+ }
+
  setBusy(true);
- try{await request(`/pos/shifts/${shift}/close`,'POST',{closingCash:Number(closingCash)});setShift('');setServerShiftSummary(null);setReviewAcknowledged(false);await window.pos.setConfig('shiftId','');setStatus('Shift closed on central backend. Cash variance is shown in local summary only.');}
- catch(e){setStatus('Close failed: '+String(e));}finally{setBusy(false);}
+ try{
+  await refreshHistory();
+
+  const all=await window.pos.listSales();
+
+  const unresolved=all.filter(s=>{
+   try{
+    return JSON.parse(s.payload).shiftId===shift &&
+     s.status==='PENDING';
+   }catch{
+    return true;
+   }
+  });
+
+  if(unresolved.length){
+   setStatus(
+    `Cannot close: ${unresolved.length} unsynchronized sales.`
+   );
+   return;
+  }
+
+  const conflicts=all.some(s=>{
+   try{
+    return JSON.parse(s.payload).shiftId===shift &&
+     s.status==='STOCK_CONFLICT';
+   }catch{
+    return false;
+   }
+  });
+
+  if(conflicts&&!reviewAcknowledged){
+   setStatus(
+    'Review and acknowledge stock-conflicted sales first.'
+   );
+   return;
+  }
+
+  const counted=Number(closingCash);
+
+  if(
+   !Number.isFinite(counted) ||
+   counted<0 ||
+   !Number.isSafeInteger(Math.round(counted*100)) ||
+   Math.abs(counted*100-Math.round(counted*100))>0.000001
+  ){
+   setStatus('Enter a valid closing cash amount (2 decimals).');
+   return;
+  }
+
+  // Always fetch a fresh authoritative summary.
+  const latest=await request(
+   `/pos/shifts/${shift}/summary`
+  );
+
+  if(latest?.shiftId!==shift||latest.status!=='OPEN'){
+   throw new Error('Shift is not open on the server');
+  }
+
+  const openingCash=Number(latest.openingCash);
+  const cashSales=Number(latest.cashSales);
+  const drawerAdjustment=Number(latest.drawerAdjustment);
+  const expected=Number(latest.expectedCash);
+
+  if(
+   ![
+    openingCash,
+    cashSales,
+    drawerAdjustment,
+    expected
+   ].every(Number.isFinite)
+  ){
+   throw new Error('Invalid server cash reconciliation');
+  }
+
+  setServerShiftSummary(latest);
+  setServerSummaryFetchedAt(new Date().toLocaleString());
+
+  const variance=
+   Math.round((counted-expected)*100)/100;
+
+  const confirmed=window.confirm(
+   'CENTRAL SHIFT CLOSING\n\n'+
+   'Opening cash: '+money(openingCash)+'\n'+
+   'Accepted cash sales: '+money(cashSales)+'\n'+
+   'Approved drawer adjustment: '+
+     money(drawerAdjustment)+'\n'+
+   'Expected cash: '+money(expected)+'\n'+
+   'Counted cash: '+money(counted)+'\n'+
+   'Variance: '+money(variance)+'\n\n'+
+   'Approved cash refunds are already included in '+
+   'drawer adjustments. Do not deduct them again.\n\n'+
+   'Confirm the physical cash count and close shift?'
+  );
+
+  if(!confirmed){
+   setStatus('Shift closing cancelled.');
+   return;
+  }
+
+  await request(
+   `/pos/shifts/${shift}/close`,
+   'POST',
+   {closingCash:counted}
+  );
+
+  setShift('');
+  setServerShiftSummary(null);
+  setServerSummaryFetchedAt('');
+  setReviewAcknowledged(false);
+  await window.pos.setConfig('shiftId','');
+
+  setStatus(
+   'Shift closed centrally. Review the immutable '+
+   'closing snapshot in HQ.'
+  );
+
+ }catch(e){
+  setStatus('Shift closing failed: '+String(e));
+ }finally{
+  setBusy(false);
+ }
 }
 async function saveSettings(){await Promise.all([window.pos.setConfig('apiUrl',api),window.pos.setConfig('deviceId',device),window.pos.setConfig('locationId',location)]);setStatus('Device settings saved locally');}
 return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop Â· v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier shift'}</h1><p>Barcode-first checkout Â· Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now {pending>0?`(${pending})`:''}</button></header>{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>Ã—</button></div>}
-{tab==='settings'&&<div className="settingsgrid"><section className="panel"><h2>1. API login</h2><label>Backend API URL<input value={api} readOnly title="API endpoint is locked for this testing environment"/></label><label>Email<input value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button onClick={login} disabled={busy||!email||!password}>Sign in to central API</button><div className="hint">{token?'Authenticated for this session':'Not signed in'}. Login again after restarting.</div></section><section className="panel"><h2>2. Register branch device</h2><button className="secondary" onClick={()=>void loadBranches()} disabled={!token||busy}>Load available branches</button><label>Assigned branch<select value={location} disabled={!!device||!!shift} onChange={e=>setLocation(e.target.value)}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}{location&&!branches.some(b=>b.id===location)&&<option value={location}>Previously configured branch ({location})</option>}</select></label><label>Device registration code<input value={deviceCode} disabled={!!device} onChange={e=>setDeviceCode(e.target.value.toUpperCase())} placeholder="BRANCH1-POS01"/></label><button onClick={()=>void registerDevice()} disabled={!token||!location||!!device||busy}>Register this terminal</button><label>Registered POS device UUID<input value={device} readOnly/></label><button className="secondary" onClick={()=>void saveSettings()} disabled={!device||!location||!!shift}>Save connection settings</button><div className="hint">Register once per physical terminal. The registered device is bound to its branch; changing branch requires administrator-assisted reprovisioning. Do not delete local sales data.</div></section><section className="panel"><h2>3. Cashier shift</h2><label>Opening cash (PKR)<input type="number" min="0" value={opening} onChange={e=>setOpening(e.target.value)}/></label><label>Current shift UUID<input value={shift} readOnly/></label><button onClick={openShift} disabled={busy||!token||!device||!!shift}>Open shift</button><div className="hint">Close requires all local shift sales accepted centrally. Stock conflicts must be reconciled first.</div><button className="secondary" onClick={refreshHistory}>Refresh reconciliation</button><button className="secondary" onClick={()=>void loadShiftSummary()} disabled={!shift||!token||busy}>Fetch central shift summary</button>{serverShiftSummary&&<div className="hint">Central accepted sales: {serverShiftSummary.acceptedSales} Â· Central expected cash: {money(Number(serverShiftSummary.expectedCash))} Â· Central cash: {money(Number(serverShiftSummary.cashSales))} Â· Central card: {money(Number(serverShiftSummary.cardSales))} Â· Server shift status: {serverShiftSummary.status}</div>}<div className="hint">Local shift transactions: {shiftSales.length} Â· Accepted: {accepted.length} Â· Pending: {queued.length} Â· Stock conflicts: {conflicted.length}</div>{conflicted.length>0&&<label className="hint"><input type="checkbox" checked={reviewAcknowledged} onChange={e=>setReviewAcknowledged(e.target.checked)}/> I reviewed {conflicted.length} stock-conflicted sale(s). These are NOT accepted sales and require manager follow-up.</label>}<div className="hint">Accepted cash sales: {money(shiftCash)} Â· Card sales: {money(shiftCard)} Â· Unresolved: {unsettled.length}</div><div className="hint">Expected cash (opening + accepted cash): {money(expectedCash)}</div><label>Counted closing cash (PKR)<input type="number" min="0" step="0.01" value={closingCash} onChange={e=>setClosingCash(e.target.value)}/></label><div className="hint">Local cash variance: {money(closingVariance)} (excludes cash payouts/returns)</div><button onClick={closeShift} disabled={busy||!token||!shift||queued.length>0||(conflicted.length>0&&!reviewAcknowledged)}>Close shift on central server</button></section><section className="panel"><h2>4. Offline product catalog</h2><p>Download the active product variants while connected. Barcodes and prices will remain available offline.</p><div className="bigstat">{items.length}</div><div className="hint">Cached product variants</div><button onClick={cacheCatalog} disabled={busy||!token}><Package size={16}/> Refresh product catalog</button></section></div>}
+{tab==='settings'&&<div className="settingsgrid"><section className="panel"><h2>1. API login</h2><label>Backend API URL<input value={api} readOnly title="API endpoint is locked for this testing environment"/></label><label>Email<input value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button onClick={login} disabled={busy||!email||!password}>Sign in to central API</button><div className="hint">{token?'Authenticated for this session':'Not signed in'}. Login again after restarting.</div></section><section className="panel"><h2>2. Register branch device</h2><button className="secondary" onClick={()=>void loadBranches()} disabled={!token||busy}>Load available branches</button><label>Assigned branch<select value={location} disabled={!!device||!!shift} onChange={e=>setLocation(e.target.value)}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}{location&&!branches.some(b=>b.id===location)&&<option value={location}>Previously configured branch ({location})</option>}</select></label><label>Device registration code<input value={deviceCode} disabled={!!device} onChange={e=>setDeviceCode(e.target.value.toUpperCase())} placeholder="BRANCH1-POS01"/></label><button onClick={()=>void registerDevice()} disabled={!token||!location||!!device||busy}>Register this terminal</button><label>Registered POS device UUID<input value={device} readOnly/></label><button className="secondary" onClick={()=>void saveSettings()} disabled={!device||!location||!!shift}>Save connection settings</button><div className="hint">Register once per physical terminal. The registered device is bound to its branch; changing branch requires administrator-assisted reprovisioning. Do not delete local sales data.</div></section><section className="panel"><h2>3. Cashier shift</h2><label>Opening cash (PKR)<input type="number" min="0" value={opening} onChange={e=>setOpening(e.target.value)}/></label><label>Current shift UUID<input value={shift} readOnly/></label><button onClick={openShift} disabled={busy||!token||!device||!!shift}>Open shift</button><div className="hint">Close requires all local shift sales accepted centrally. Stock conflicts must be reconciled first.</div><button className="secondary" onClick={refreshHistory}>Refresh reconciliation</button><button className="secondary" onClick={()=>void loadShiftSummary()} disabled={!shift||!token||busy}>Fetch central shift summary</button>{centralSummary&&(
+ <div className="panel">
+  <h3>Central cash reconciliation</h3>
+  <p className="hint">
+   Last refreshed: {serverSummaryFetchedAt}
+  </p>
+  <p>Shift status: {centralSummary.status}</p>
+  <p>Accepted sales: {centralSummary.acceptedSales}</p>
+  <p>
+   Opening cash:
+   {' '}{money(Number(centralSummary.openingCash))}
+  </p>
+  <p>
+   Accepted cash sales:
+   {' '}{money(Number(centralSummary.cashSales))}
+  </p>
+  <p>
+   Approved drawer adjustment:
+   {' '}{money(Number(centralSummary.drawerAdjustment))}
+  </p>
+  <p>
+   <strong>
+    Expected cash:
+    {' '}{money(Number(centralSummary.expectedCash))}
+   </strong>
+  </p>
+  <p>
+   Card sales:
+   {' '}{money(Number(centralSummary.cardSales))}
+  </p>
+  <p className="hint">
+   Approved cash refunds and other cash movements
+   are included in drawer adjustments.
+   Refresh after any refund or drawer activity.
+  </p>
+ </div>
+)}<div className="hint">Local shift transactions: {shiftSales.length} Â· Accepted: {accepted.length} Â· Pending: {queued.length} Â· Stock conflicts: {conflicted.length}</div>{conflicted.length>0&&<label className="hint"><input type="checkbox" checked={reviewAcknowledged} onChange={e=>setReviewAcknowledged(e.target.checked)}/> I reviewed {conflicted.length} stock-conflicted sale(s). These are NOT accepted sales and require manager follow-up.</label>}<div className="hint">Accepted cash sales: {money(shiftCash)} Â· Card sales: {money(shiftCard)} Â· Unresolved: {unsettled.length}</div><div className="hint">Local estimate only (excludes drawer movements): {money(localCashEstimate)}</div><label>Counted closing cash (PKR)<input type="number" min="0" step="0.01" value={closingCash} onChange={e=>setClosingCash(e.target.value)}/></label><div className="hint">
+ {centralVariance===null
+  ? 'Central variance unavailable. Fetch central shift summary.'
+  : 'Variance against last central snapshot: '+
+    money(centralVariance)}
+</div><button onClick={closeShift} disabled={busy||!token||!shift||queued.length>0||(conflicted.length>0&&!reviewAcknowledged)}>Close shift on central server</button></section><section className="panel"><h2>4. Offline product catalog</h2><p>Download the active product variants while connected. Barcodes and prices will remain available offline.</p><div className="bigstat">{items.length}</div><div className="hint">Cached product variants</div><button onClick={cacheCatalog} disabled={busy||!token}><Package size={16}/> Refresh product catalog</button></section></div>}
 {tab==='sale'&&<div className="salegrid"><section className="panel" style={{gridColumn:'1 / -1'}}>
 <h2>Checkout preflight (online, advisory)</h2>
 <button className="secondary" disabled={busy||!token||!cart.length} onClick={()=>void checkCheckout()}>Check HQ prices and branch stock</button>
@@ -150,7 +344,7 @@ return <div className="app"><aside className="sidebar"><div className="brand"><d
 <p className="hint">Customer search needs an internet connection. Once selected, the customer ID is saved with the offline sale and synchronized later. No loyalty points or discounts are applied yet.</p>
 </section><section className="panel searchpanel"><h2>Find footwear</h2><div className="search"><Search size={21}/><input autoFocus placeholder="Scan barcode or search product, SKU, size..." value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&results.length===1)add(results[0]);}}/></div><div className="hint">Barcode scanners that act as keyboards work in this field. Press Enter for an exact single match.</div><div className="results">{query&&results.length===0&&<div className="empty">No matching cached products</div>}{results.map(v=><button className="product" key={v.id} onClick={()=>add(v)}><div className="shoe"><Package size={22}/></div><div className="productinfo"><strong>{v.title}</strong><small>{v.sku} Â· Size {v.size} Â· {v.color}</small><small>Barcode: {v.barcode}</small></div><strong>{money(v.price)}</strong><Plus size={18}/></button>)}{!query&&<div className="empty"><Search size={34}/><h3>Ready to scan</h3><p>Search a product or scan a barcode to add it to the sale.</p></div>}</div></section><section className="panel cartpanel"><div className="carthead"><h2>Current sale</h2><span>{cart.reduce((s,l)=>s+l.qty,0)} pairs</span></div><div className="cartitems">{cart.length===0?<div className="empty">Your cart is empty</div>:cart.map(l=><div className="cartline" key={l.item.id}><div className="productinfo"><strong>{l.item.title}</strong><small>{l.item.sku} Â· {l.item.size} Â· {l.item.color}</small><small>{money(l.item.price)} each</small></div><div className="qty"><button onClick={()=>change(l.item.id,-1)}><Minus size={14}/></button>{l.qty}<button onClick={()=>change(l.item.id,1)}><Plus size={14}/></button></div><strong>{money(l.item.price*l.qty)}</strong><button className="iconbutton" onClick={()=>setCart(old=>old.filter(x=>x.item.id!==l.item.id))}><Trash2 size={16}/></button></div>)}</div><div className="summary"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Discount / Tax</span><span>Not configured</span></div><div className="grand"><span>Total due</span><strong>{money(total)}</strong></div><div className="tenders"><button className={tender==='CASH'?'selected':''} onClick={()=>setTender('CASH')}>Cash</button><button className={tender==='CARD'?'selected':''} onClick={()=>setTender('CARD')}>Card</button><button className={tender==='SPLIT'?'selected':''} onClick={()=>setTender('SPLIT')}>Split</button></div>{tender==='SPLIT'&&<label>Cash portion (PKR)<input type="number" min="0" max={total} step="0.01" value={cashAmount} onChange={e=>setCashAmount(e.target.value)}/><span className="hint">Card portion: {money(Math.max(0,total-(Number(cashAmount)||0)))}</span></label>}{(tender==='CARD'||tender==='SPLIT')&&<label>Card reference<input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Approved terminal reference"/></label>}<button className="secondary" disabled={import.meta.env.VITE_ENABLE_DISCOUNT_SANDBOX!=='true'||busy||!online||!token||!promoQuote?.promotion?.eligible||!cart.length||!shift} onClick={()=>void completeDiscountedSandbox()}>SANDBOX ONLY Â· Record discounted test sale</button><p className="hint">Posts real database inventory movement; use test data only. Not approved for real payments.</p><button className="checkout" onClick={complete} disabled={busy||!cart.length||!shift}>Complete sale Â· Save locally</button><p className="hint">Offline sales are provisional until HQ accepts them. A stock conflict requires manager reconciliation; a card reference is not proof of payment authorization.</p></div></section></div>}
 {tab==='history'&&<section className="panel"><h2>Discounted checkout recovery</h2><button className="secondary" onClick={()=>void refreshDiscountAttempts()}>Refresh attempts</button><div className="tablewrap"><table><thead><tr><th>Attempt</th><th>Status</th><th>Recorded</th><th>Action</th></tr></thead><tbody>{discountAttempts.map(a=><tr key={a.id}><td>{a.id.slice(0,8)}</td><td>{a.status}</td><td>{new Date(a.created_at).toLocaleString()}</td><td>{a.status==='ACCEPTED'?<button className="secondary" onClick={async()=>{try{const r=await window.pos.printDiscounted(a.id);if(!r.success)setStatus('Print failed: '+r.reason)}catch(e){setStatus(String(e))}}}>Print discounted receipt</button>:<button className="secondary" disabled={busy||!token} onClick={()=>void reconcileDiscountAttempt(a)}>Check server status</button>}</td></tr>)}</tbody></table></div></section>}
-{tab==='history'&&<ReturnsPanel request={request} location={location} token={token}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
+{tab==='history'&&<ReturnsPanel request={request} location={location} token={token} shiftId={shift}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
   <div className="hint">
     Total recorded: <strong>{history.length}</strong>
   </div>

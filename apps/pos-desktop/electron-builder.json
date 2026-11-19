@@ -1,0 +1,23 @@
+﻿{
+  "appId": "pk.royalstep.pos",
+  "productName": "Royal Step POS",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "asar": true,
+  "win": {
+    "target": ["nsis"]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "artifactName": "RoyalStep-POS-Setup-${version}.${ext}"
+  }
+}

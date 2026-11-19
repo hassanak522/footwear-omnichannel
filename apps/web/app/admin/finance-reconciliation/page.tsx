@@ -1,4 +1,5 @@
 "use client";
+import FinanceUnifiedNav from '../finance-unified-nav';
 
 import { useState } from "react";
 
@@ -55,6 +56,8 @@ export default function FinanceReconciliationPage(){
     link.click();URL.revokeObjectURL(url);
   }
   return <main style={{maxWidth:1050,margin:"32px auto",padding:24,fontFamily:"system-ui"}}>
+<FinanceUnifiedNav />
+
     <h1>Supplier Reconciliation</h1>
     <p>Staff-reviewed settlement evidence only. Not bank-verified or audited accounting.</p>
     <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:24}}>

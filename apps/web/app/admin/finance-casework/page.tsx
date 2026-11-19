@@ -1,4 +1,5 @@
 "use client";
+import FinanceUnifiedNav from '../finance-unified-nav';
 import { useState } from "react";
 
 type CaseEvent = {id:string;action:string;note:string;createdAt:string;actorId:string};
@@ -80,6 +81,8 @@ export default function FinanceCaseworkPage(){
   const th={padding:9,textAlign:"left" as const,borderBottom:"1px solid #ccc"};
   const td={padding:9,borderBottom:"1px solid #e4e4e4",verticalAlign:"top" as const};
   return <main style={{maxWidth:1150,margin:"28px auto",padding:24,fontFamily:"system-ui"}}>
+<FinanceUnifiedNav />
+
     <h1>HQ Finance Casework & Alerts</h1>
     <p>Operational case management and staff-entered financial evidence. Not bank-confirmed accounting.</p>
     <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"end"}}>

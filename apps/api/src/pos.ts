@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, NotFoundException, Get, Injectable, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Query, ForbiddenException, NotFoundException, Get, Injectable, Param, Post, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { PosTenderType, Prisma } from '@prisma/client';
@@ -72,6 +72,17 @@ class ReturnDto {
  @IsString() @MinLength(8) @MaxLength(100) idempotencyKey!: string;
  @IsString() @MinLength(3) @MaxLength(500) reason!: string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReturnLineDto) lines!: ReturnLineDto[];
+}
+class RecordPosRefundSettlementDto {
+ @IsUUID() returnId!:string;
+ @IsString() @MinLength(8) @MaxLength(100)
+ idempotencyKey!:string;
+ @IsEnum(PosTenderType) method!:PosTenderType;
+ @IsNumber({maxDecimalPlaces:2}) @Min(0.01)
+ amount!:number;
+ @IsOptional() @IsUUID() payoutShiftId?:string;
+ @IsOptional() @IsString() @MaxLength(200)
+ reference?:string;
 }
 class PreflightDto {
  @IsUUID() locationId!:string;
@@ -641,7 +652,287 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    conflictReason:sale.conflictReason
   };
  }
- async saleReturnHistory(saleId:string,u:Principal){
+  async recordRefundSettlement(
+  dto:RecordPosRefundSettlementDto,
+  u:Principal
+ ){
+  const manager=
+   u.roles.includes('SUPER_ADMIN')||
+   u.roles.includes('BRANCH_MANAGER');
+
+  if(!manager){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  const amountCents=Math.round(dto.amount*100);
+
+  if(!Number.isSafeInteger(amountCents)||amountCents<=0){
+   throw new BadRequestException('Invalid settlement amount');
+  }
+
+  const reference=dto.reference?.trim()||null;
+
+  if(dto.method!=='CASH'&&!reference){
+   throw new BadRequestException(
+    'Non-cash refunds require a payment reference'
+   );
+  }
+
+  if(dto.method==='CASH'&&!dto.payoutShiftId){
+   throw new BadRequestException(
+    'Cash refunds require an open payout shift'
+   );
+  }
+
+  if(dto.method!=='CASH'&&dto.payoutShiftId){
+   throw new BadRequestException(
+    'Only cash refunds may specify a payout shift'
+   );
+  }
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    // Cash settlements share the same shift lock as shift closing.
+    // This prevents a payout from being posted after closing.
+    if(dto.method==='CASH'){
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${`pos-shift-id:${dto.payoutShiftId}`})
+      )
+     `;
+    }
+
+    // Serialize all settlement attempts for the same return.
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-refund-settlement:${dto.returnId}`})
+     )
+    `;
+
+    const existing=await tx.posRefundSettlement.findUnique({
+     where:{idempotencyKey:dto.idempotencyKey}
+    });
+
+    if(existing){
+     const previousReturn=await tx.posReturn.findUniqueOrThrow({
+      where:{id:existing.returnId}
+     });
+
+     this.branchAccess(u,previousReturn.locationId);
+
+     if(
+      existing.returnId!==dto.returnId||
+      existing.method!==dto.method||
+      Math.round(existing.amount.toNumber()*100)!==amountCents||
+      (existing.payoutShiftId??null)!==
+       (dto.payoutShiftId??null)||
+      (existing.reference??null)!==reference
+     ){
+      throw new ConflictException(
+       'Settlement idempotency key reused with different details'
+      );
+     }
+
+     return {...existing,duplicate:true};
+    }
+
+    const ret=await tx.posReturn.findUnique({
+     where:{id:dto.returnId},
+     include:{
+      lines:true,
+      settlements:true,
+      exchange:true
+     }
+    });
+
+    if(!ret){
+     throw new NotFoundException('Approved return not found');
+    }
+
+    this.branchAccess(u,ret.locationId);
+
+    if(ret.status!=='APPROVED'){
+     throw new ConflictException('Approved return required');
+    }
+
+    if(ret.exchange){
+     throw new ConflictException(
+      'Exchange-linked return requires separate settlement review'
+     );
+    }
+
+    // Legacy refund records have an independent payment workflow.
+    // Block cross-workflow settlement until explicitly reconciled.
+    const legacy=await tx.refundRecord.findUnique({
+     where:{returnId:ret.id}
+    });
+
+    if(legacy){
+     throw new ConflictException(
+      'A legacy refund record exists for this return. '+
+      'Reconcile it before using POS refund settlement.'
+     );
+    }
+
+    const dueCents=ret.lines.reduce(
+     (sum,line)=>
+      sum+Math.round(line.refundAmount.toNumber()*100),
+     0
+    );
+
+    const settledCents=ret.settlements.reduce(
+     (sum,item)=>
+      sum+Math.round(item.amount.toNumber()*100),
+     0
+    );
+
+    if(
+     dueCents<=0||
+     settledCents+amountCents>dueCents
+    ){
+     throw new ConflictException(
+      'Settlement exceeds the outstanding refund amount'
+     );
+    }
+
+    let shift:null|{
+     id:string;
+     locationId:string;
+     status:string;
+    }=null;
+
+    if(dto.method==='CASH'){
+     const found=await tx.posShift.findUnique({
+      where:{id:dto.payoutShiftId!}
+     });
+
+     if(!found){
+      throw new NotFoundException('Payout shift not found');
+     }
+
+     if(
+      found.locationId!==ret.locationId||
+      found.status!=='OPEN'
+     ){
+      throw new ConflictException(
+       'Cash payout requires an open shift at the return branch'
+      );
+     }
+
+     shift=found;
+
+     // Prevent reusing a return-specific manual cash movement.
+     const manualMovement=await tx.drawerMovement.findFirst({
+      where:{
+       shiftId:shift.id,
+       type:'CASH_REFUND',
+       status:{in:['PENDING','APPROVED']},
+       externalReference:{in:[
+        ret.id,
+        `POS_RETURN:${ret.id}`
+       ]}
+      }
+     });
+
+     if(manualMovement){
+      throw new ConflictException(
+       'A cash refund movement already references this return. '+
+       'Reconcile it before recording settlement.'
+      );
+     }
+    }
+
+    const amount=new Prisma.Decimal(
+     (amountCents/100).toFixed(2)
+    );
+
+    const settlement=await tx.posRefundSettlement.create({
+     data:{
+      returnId:ret.id,
+      payoutShiftId:shift?.id??null,
+      idempotencyKey:dto.idempotencyKey,
+      method:dto.method,
+      amount,
+      reference,
+      settledById:u.id
+     }
+    });
+
+    if(shift){
+     // This movement is approved atomically with the
+     // manager-authorized settlement. Do not approve it again.
+     const movement=await tx.drawerMovement.create({
+      data:{
+       locationId:ret.locationId,
+       shiftId:shift.id,
+       type:'CASH_REFUND',
+       amount,
+       reason:`POS return refund ${ret.id}`,
+       externalReference:`POS_REFUND:${settlement.id}`,
+       status:'APPROVED',
+       createdById:u.id,
+       reviewedById:u.id,
+       reviewNote:'Manager-authorized POS refund settlement',
+       reviewedAt:new Date()
+      }
+     });
+
+     await tx.auditLog.create({
+      data:{
+       actorId:u.id,
+       action:'POS_REFUND_DRAWER_MOVEMENT_CREATED',
+       entityType:'DrawerMovement',
+       entityId:movement.id,
+       after:{
+        settlementId:settlement.id,
+        returnId:ret.id,
+        shiftId:shift.id,
+        amount:amount.toString(),
+        status:'APPROVED'
+       }
+      }
+     });
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_REFUND_SETTLEMENT_RECORDED',
+      entityType:'PosRefundSettlement',
+      entityId:settlement.id,
+      after:{
+       returnId:ret.id,
+       locationId:ret.locationId,
+       method:dto.method,
+       amount:amount.toString(),
+       reference,
+       payoutShiftId:shift?.id??null,
+       outstandingAfter:
+        ((dueCents-settledCents-amountCents)/100).toFixed(2)
+      }
+     }
+    });
+
+    return {
+     ...settlement,
+     duplicate:false,
+     refundDue:(dueCents/100).toFixed(2),
+     refundSettledAfter:
+      ((settledCents+amountCents)/100).toFixed(2),
+     refundOutstandingAfter:
+      ((dueCents-settledCents-amountCents)/100).toFixed(2),
+     cashDrawerRecorded:!!shift,
+     note:'Administrative record of a refund payout; this API does not transfer funds.'
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
+async saleReturnHistory(saleId:string,u:Principal){
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saleId)){
    throw new BadRequestException('Valid sale UUID required');
   }
@@ -651,7 +942,12 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    include:{
     lines:true,
     returns:{
-     include:{lines:true}
+     include:{
+      lines:true,
+      settlements:{
+       orderBy:{settledAt:'asc'}
+      }
+     }
     }
    }
   });
@@ -679,7 +975,24 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    };
   });
 
-  const returns=sale.returns.map(ret=>({
+  const toCents=(value:Prisma.Decimal)=>
+   Math.round(value.toNumber()*100);
+
+  const formatMoney=(value:number)=>
+   (value/100).toFixed(2);
+
+  const returns=sale.returns.map(ret=>{
+   const due=ret.lines.reduce(
+    (sum,line)=>sum+toCents(line.refundAmount),0
+   );
+
+   const settled=ret.settlements.reduce(
+    (sum,item)=>sum+toCents(item.amount),0
+   );
+
+   const outstanding=Math.max(0,due-settled);
+
+   return {
    id:ret.id,
    reason:ret.reason,
    approvedById:ret.approvedById,
@@ -689,24 +1002,624 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     quarantined:line.quarantined,
     refundAmount:line.refundAmount.toString()
    })),
-   refundDue:(
-    ret.lines.reduce(
-     (sum,line)=>sum+Math.round(line.refundAmount.toNumber()*100),
-     0
-    )/100
-   ).toFixed(2)
-  }));
+   refundDue:formatMoney(due),
+   refundSettled:formatMoney(settled),
+   refundOutstanding:formatMoney(outstanding),
+   settlementStatus:
+    settled===0?'UNSETTLED':
+    outstanding===0?'SETTLED':'PARTIALLY_SETTLED',
+   settlements:ret.settlements.map(item=>({
+    id:item.id,
+    method:item.method,
+    amount:item.amount.toString(),
+    reference:item.reference,
+    payoutShiftId:item.payoutShiftId,
+    settledById:item.settledById,
+    settledAt:item.settledAt
+   }))
+   };
+  });
 
   return {
    saleId:sale.id,
    locationId:sale.locationId,
    lines,
    returns,
-   refundPaymentRecorded:false,
-   note:'Return records establish refund amounts due, not payment settlement.'
+   refundPaymentRecorded:returns.some(
+    ret=>ret.settlements.length>0
+   ),
+   refundDueTotal:formatMoney(
+    returns.reduce(
+     (sum,ret)=>sum+Math.round(Number(ret.refundDue)*100),0
+    )
+   ),
+   refundSettledTotal:formatMoney(
+    returns.reduce(
+     (sum,ret)=>sum+Math.round(Number(ret.refundSettled)*100),0
+    )
+   ),
+   refundOutstandingTotal:formatMoney(
+    returns.reduce(
+     (sum,ret)=>sum+Math.round(Number(ret.refundOutstanding)*100),0
+    )
+   ),
+   note:'Refund settlement status reflects recorded payments. Return approval alone does not confirm payment.'
   };
  }
  async listSales(locationId:string,u:Principal){this.branchAccess(u,locationId);return this.db.posSale.findMany({where:{locationId},orderBy:{syncedAt:'desc'},take:100,include:{lines:true,tenders:true}});}
+ async retailFinanceSummary(locationId:string,u:Principal){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid locationId required');
+  }
+
+  if(
+   !u.roles.includes('SUPER_ADMIN') &&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const limit=100;
+  const cents=(v:Prisma.Decimal)=>
+   Math.round(v.toNumber()*100);
+  const fmt=(n:number)=>(n/100).toFixed(2);
+
+  const [snapshots,returns,settlements,reconciliations]=
+   await Promise.all([
+    this.db.posShiftClosingSnapshot.findMany({
+     where:{locationId},
+     orderBy:{closedAt:'desc'},
+     take:limit+1
+    }),
+
+    this.db.posReturn.findMany({
+     where:{locationId},
+     orderBy:{createdAt:'desc'},
+     take:limit+1,
+     include:{
+      lines:true,
+      settlements:true
+     }
+    }),
+
+    this.db.posRefundSettlement.findMany({
+     where:{return:{locationId}},
+     orderBy:{settledAt:'desc'},
+     take:limit+1,
+     include:{
+      return:{
+       select:{
+        id:true,
+        saleId:true,
+        locationId:true
+       }
+      }
+     }
+    }),
+
+    this.db.cashReconciliation.findMany({
+     where:{locationId},
+     orderBy:{submittedAt:'desc'},
+     take:limit+1
+    })
+   ]);
+
+  const recentSettlements=settlements.slice(0,limit);
+
+  const cashReferences=recentSettlements
+   .filter(s=>s.method==='CASH')
+   .map(s=>`POS_REFUND:${s.id}`);
+
+  const movements=cashReferences.length
+   ?await this.db.drawerMovement.findMany({
+     where:{
+      locationId,
+      type:'CASH_REFUND',
+      externalReference:{in:cashReferences}
+     },
+     select:{
+      id:true,
+      shiftId:true,
+      amount:true,
+      status:true,
+      externalReference:true,
+      reviewedAt:true
+     }
+    })
+   :[];
+
+  const shiftRows=snapshots.slice(0,limit).map(s=>({
+   shiftId:s.shiftId,
+   deviceId:s.deviceId,
+   cashierId:s.cashierId,
+   closedAt:s.closedAt,
+   openingCash:s.openingCash.toString(),
+   cashSales:s.cashSales.toString(),
+   cardSales:s.cardSales.toString(),
+   otherSales:s.otherSales.toString(),
+   drawerAdjustment:s.drawerAdjustment.toString(),
+   approvedMovements:s.approvedMovements,
+   expectedCash:s.expectedCash.toString(),
+   countedCash:s.countedCash.toString(),
+   variance:s.variance.toString(),
+   acceptedSales:s.acceptedSales,
+   conflictedSales:s.conflictedSales,
+   snapshotVerified:true
+  }));
+
+  const returnRows=returns.slice(0,limit).map(r=>{
+   const due=r.lines.reduce(
+    (n,l)=>n+cents(l.refundAmount),0
+   );
+
+   const paid=r.settlements.reduce(
+    (n,s)=>n+cents(s.amount),0
+   );
+
+   const outstanding=Math.max(0,due-paid);
+
+   return {
+    returnId:r.id,
+    saleId:r.saleId,
+    approvedById:r.approvedById,
+    createdAt:r.createdAt,
+    status:r.status,
+    refundDue:fmt(due),
+    refundSettled:fmt(paid),
+    refundOutstanding:fmt(outstanding),
+    settlementStatus:
+     paid===0?'UNSETTLED':
+     outstanding===0?'SETTLED':'PARTIALLY_SETTLED'
+   };
+  });
+
+  const settlementRows=recentSettlements.map(s=>{
+   const linked=s.method==='CASH'
+    ?movements.filter(m=>
+      m.externalReference===`POS_REFUND:${s.id}`
+     )
+    :[];
+
+   const matched=
+    linked.length===1 &&
+    linked[0].status==='APPROVED' &&
+    linked[0].shiftId===s.payoutShiftId &&
+    cents(linked[0].amount)===cents(s.amount);
+
+   return {
+    settlementId:s.id,
+    returnId:s.returnId,
+    saleId:s.return.saleId,
+    method:s.method,
+    amount:s.amount.toString(),
+    reference:s.reference,
+    payoutShiftId:s.payoutShiftId,
+    settledById:s.settledById,
+    settledAt:s.settledAt,
+    drawerMovements:linked.map(m=>({
+     movementId:m.id,
+     shiftId:m.shiftId,
+     amount:m.amount.toString(),
+     status:m.status,
+     reviewedAt:m.reviewedAt
+    })),
+    drawerLinkStatus:s.method!=='CASH'
+     ?'NOT_APPLICABLE'
+     :matched?'MATCHED':'REVIEW_REQUIRED'
+   };
+  });
+
+  const reconciliationRows=
+   reconciliations.slice(0,limit).map(r=>({
+    id:r.id,
+    shiftId:r.shiftId,
+    status:r.status,
+    expectedCash:r.expectedCash.toString(),
+    countedCash:r.countedCash.toString(),
+    variance:r.variance.toString(),
+    submittedAt:r.submittedAt,
+    submittedById:r.submittedById,
+    reviewedAt:r.reviewedAt,
+    reviewedById:r.reviewedById
+   }));
+
+  const truncated={
+   shifts:snapshots.length>limit,
+   returns:returns.length>limit,
+   settlements:settlements.length>limit,
+   reconciliations:reconciliations.length>limit
+  };
+
+  const anyTruncated=Object.values(truncated).some(Boolean);
+
+  const sum=(values:number[])=>
+   values.reduce((n,v)=>n+v,0);
+
+  return {
+   locationId,
+   generatedAt:new Date().toISOString(),
+   readOnly:true,
+   currency:'PKR',
+   rowLimit:limit,
+   truncated,
+   anyTruncated,
+   totalsScope:'DISPLAYED_ROWS_ONLY',
+   summary:{
+    closedShifts:shiftRows.length,
+    netShiftVariance:fmt(
+     sum(snapshots.slice(0,limit).map(s=>cents(s.variance)))
+    ),
+    returnsShown:returnRows.length,
+    refundDue:fmt(
+     sum(returnRows.map(r=>Math.round(Number(r.refundDue)*100)))
+    ),
+    refundSettled:fmt(
+     sum(returnRows.map(r=>Math.round(Number(r.refundSettled)*100)))
+    ),
+    refundOutstanding:fmt(
+     sum(returnRows.map(r=>Math.round(Number(r.refundOutstanding)*100)))
+    ),
+    cashSettlementsShown:settlementRows.filter(
+     s=>s.method==='CASH'
+    ).length,
+    cashDrawerLinksRequiringReview:settlementRows.filter(
+     s=>s.drawerLinkStatus==='REVIEW_REQUIRED'
+    ).length
+   },
+   shifts:shiftRows,
+   returns:returnRows,
+   settlements:settlementRows,
+   reconciliations:reconciliationRows,
+   warning:anyTruncated
+    ?'Results are truncated. Totals cover displayed rows only.'
+    :'Totals cover displayed rows only, not the full ledger.',
+   note:'Historical shift closing snapshots are not recalculated. '+
+    'Refund settlements record administrative payout evidence, '+
+    'not independent proof of external funds transfer.'
+  };
+ }
+
+ async historicalRetailFinance(
+  locationId:string|undefined,
+  from:string|undefined,
+  to:string|undefined,
+  u:Principal
+ ){
+  const isHQ=u.roles.includes('SUPER_ADMIN');
+  const isManager=u.roles.includes('BRANCH_MANAGER');
+
+  if(!isHQ&&!isManager){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  const selectedLocation=locationId?.trim()||undefined;
+
+  if(selectedLocation&&!uuid.test(selectedLocation)){
+   throw new BadRequestException('Invalid locationId');
+  }
+
+  if(!isHQ&&!selectedLocation){
+   throw new BadRequestException(
+    'Branch managers must specify an assigned locationId'
+   );
+  }
+
+  if(selectedLocation){
+   this.branchAccess(u,selectedLocation);
+  }
+
+  const parseDate=(value:string|undefined,name:string)=>{
+   if(!value)return undefined;
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(value)){
+    throw new BadRequestException(
+     name+' must use YYYY-MM-DD'
+    );
+   }
+   const date=new Date(value+'T00:00:00.000Z');
+   if(
+    Number.isNaN(date.getTime())||
+    date.toISOString().slice(0,10)!==value
+   ){
+    throw new BadRequestException('Invalid '+name);
+   }
+   return date;
+  };
+
+  const start=parseDate(from,'from');
+  const last=parseDate(to,'to');
+
+  if(start&&last&&start>last){
+   throw new BadRequestException('from must not exceed to');
+  }
+
+  const end=last
+   ?new Date(last.getTime()+86400000)
+   :undefined;
+
+  if(start&&end&&
+     end.getTime()-start.getTime()>366*86400000){
+   throw new BadRequestException(
+    'Maximum reporting period is 366 days'
+   );
+  }
+
+  const dateWhere={
+   ...(start?{gte:start}:{}),
+   ...(end?{lt:end}:{})
+  };
+
+  const hasDateFilter=!!start||!!end;
+
+  const locations=await this.db.location.findMany({
+   where:{
+    type:'BRANCH',
+    active:true,
+    ...(selectedLocation?{id:selectedLocation}:{}),
+    ...(!isHQ?{id:{in:u.locations}}:{})
+   },
+   select:{id:true,code:true,name:true},
+   orderBy:{code:'asc'}
+  });
+
+  if(selectedLocation&&locations.length===0){
+   throw new BadRequestException(
+    'Selected location is not an active authorized branch'
+   );
+  }
+
+  const ids=locations.map(l=>l.id);
+
+  if(ids.length===0){
+   return {
+    generatedAt:new Date().toISOString(),
+    currency:'PKR',
+    scope:isHQ?'HQ':'BRANCH_MANAGER',
+    from:from||null,
+    to:to||null,
+    timezone:'UTC',
+    liabilityScope:'ALL_TIME_CURRENT_OUTSTANDING',
+    periodScope:'SHIFT_CLOSINGS_ONLY',
+    branches:[],
+    totals:{
+     closedShifts:0,
+     netShiftVariance:'0.00',
+     absoluteShiftVariance:'0.00',
+     refundDueAllTime:'0.00',
+     refundSettledAllTime:'0.00',
+     refundOutstandingAllTime:'0.00',
+     cashDrawerExceptions:0
+    }
+   };
+  }
+
+  const snapshotGroups=
+   await this.db.posShiftClosingSnapshot.groupBy({
+    by:['locationId'],
+    where:{
+     locationId:{in:ids},
+     ...(hasDateFilter?{closedAt:dateWhere}:{})
+    },
+    _count:{_all:true},
+    _sum:{variance:true}
+   });
+
+  const snapshots=
+   await this.db.posShiftClosingSnapshot.findMany({
+    where:{
+     locationId:{in:ids},
+     ...(hasDateFilter?{closedAt:dateWhere}:{})
+    },
+    select:{locationId:true,variance:true}
+   });
+
+  const cents=(v:Prisma.Decimal|null|undefined)=>
+   v?Math.round(v.toNumber()*100):0;
+
+  const fmt=(n:number)=>(n/100).toFixed(2);
+
+  // Aggregate ALL historical POS returns.
+  // Do not apply the latest-100-record display limit.
+  // Each return line and settlement is aggregated separately
+  // to prevent multiplication of joined amounts.
+
+  type LiabilityRow={
+   locationId:string;
+   due:Prisma.Decimal;
+   settled:Prisma.Decimal;
+   outstanding:Prisma.Decimal;
+  };
+
+  const liabilities=await this.db.$queryRaw<LiabilityRow[]>`
+   WITH return_due AS (
+    SELECT
+     r."id",
+     r."locationId",
+     COALESCE(SUM(l."refundAmount"),0)::numeric AS due
+    FROM "PosReturn" r
+    LEFT JOIN "PosReturnLine" l
+     ON l."returnId"=r."id"
+    WHERE r."locationId" IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})
+    GROUP BY r."id",r."locationId"
+   ),
+   return_paid AS (
+    SELECT
+     s."returnId",
+     COALESCE(SUM(s."amount"),0)::numeric AS paid
+    FROM "PosRefundSettlement" s
+    INNER JOIN "PosReturn" r
+     ON r."id"=s."returnId"
+    WHERE r."locationId" IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})
+    GROUP BY s."returnId"
+   )
+   SELECT
+    d."locationId",
+    COALESCE(SUM(d.due),0)::numeric AS due,
+    COALESCE(SUM(COALESCE(p.paid,0)),0)::numeric AS settled,
+    COALESCE(
+     SUM(GREATEST(d.due-COALESCE(p.paid,0),0)),
+     0
+    )::numeric AS outstanding
+   FROM return_due d
+   LEFT JOIN return_paid p ON p."returnId"=d."id"
+   GROUP BY d."locationId"
+  `;
+
+  // Cash settlement records must have exactly one
+  // approved drawer movement with matching shift/amount.
+  // This is a reporting check, not a payment action.
+
+  type ExceptionRow={
+   locationId:string;
+   settlementId:string;
+   returnId:string;
+   payoutShiftId:string|null;
+   amount:Prisma.Decimal;
+   movementCount:bigint;
+   validMovementCount:bigint;
+  };
+
+  const cashChecks=await this.db.$queryRaw<ExceptionRow[]>`
+   SELECT
+    r."locationId",
+    s."id" AS "settlementId",
+    s."returnId",
+    s."payoutShiftId",
+    s."amount",
+    COUNT(m."id")::bigint AS "movementCount",
+    COUNT(m."id") FILTER (
+     WHERE m."status"='APPROVED'
+      AND m."shiftId"=s."payoutShiftId"
+      AND m."amount"=s."amount"
+    )::bigint AS "validMovementCount"
+   FROM "PosRefundSettlement" s
+   INNER JOIN "PosReturn" r ON r."id"=s."returnId"
+   LEFT JOIN "DrawerMovement" m
+    ON m."locationId"=r."locationId"
+    AND m."type"='CASH_REFUND'
+    AND m."externalReference"=
+     ('POS_REFUND:' || s."id"::text)
+   WHERE r."locationId" IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})
+    AND s."method"='CASH'
+   GROUP BY
+    r."locationId",
+    s."id",
+    s."returnId",
+    s."payoutShiftId",
+    s."amount"
+  `;
+
+  const exceptions=cashChecks.filter(
+   r=>Number(r.movementCount)!==1||
+      Number(r.validMovementCount)!==1
+  );
+
+  const branches=locations.map(location=>{
+   const group=snapshotGroups.find(
+    g=>g.locationId===location.id
+   );
+
+   const liability=liabilities.find(
+    l=>l.locationId===location.id
+   );
+
+   const branchSnapshots=snapshots.filter(
+    s=>s.locationId===location.id
+   );
+
+   const branchExceptions=exceptions.filter(
+    e=>e.locationId===location.id
+   );
+
+   return {
+    locationId:location.id,
+    code:location.code,
+    name:location.name,
+    closedShifts:group?group._count._all:0,
+    netShiftVariance:fmt(
+     cents(group?group._sum.variance:null)
+    ),
+    absoluteShiftVariance:fmt(
+     branchSnapshots.reduce(
+      (sum,s)=>sum+Math.abs(cents(s.variance)),0
+     )
+    ),
+    refundDueAllTime:fmt(
+     cents(liability?.due)
+    ),
+    refundSettledAllTime:fmt(
+     cents(liability?.settled)
+    ),
+    refundOutstandingAllTime:fmt(
+     cents(liability?.outstanding)
+    ),
+    cashDrawerExceptions:branchExceptions.length
+   };
+  });
+
+  const total=(key:
+   'netShiftVariance'|
+   'absoluteShiftVariance'|
+   'refundDueAllTime'|
+   'refundSettledAllTime'|
+   'refundOutstandingAllTime'
+  )=>fmt(branches.reduce(
+   (sum,b)=>sum+Math.round(Number(b[key])*100),0
+  ));
+
+  return {
+   generatedAt:new Date().toISOString(),
+   currency:'PKR',
+   scope:isHQ?'HQ':'BRANCH_MANAGER',
+   from:from||null,
+   to:to||null,
+   timezone:'UTC',
+   liabilityScope:'ALL_TIME_CURRENT_OUTSTANDING',
+   periodScope:'SHIFT_CLOSINGS_ONLY',
+   branches,
+   totals:{
+    closedShifts:branches.reduce(
+     (sum,b)=>sum+b.closedShifts,0
+    ),
+    netShiftVariance:total('netShiftVariance'),
+    absoluteShiftVariance:total('absoluteShiftVariance'),
+    refundDueAllTime:total('refundDueAllTime'),
+    refundSettledAllTime:total('refundSettledAllTime'),
+    refundOutstandingAllTime:total(
+     'refundOutstandingAllTime'
+    ),
+    cashDrawerExceptions:exceptions.length
+   },
+   cashDrawerExceptionDetails:exceptions
+    .slice(0,100).map(e=>({
+     locationId:e.locationId,
+     settlementId:e.settlementId,
+     returnId:e.returnId,
+     payoutShiftId:e.payoutShiftId,
+     amount:e.amount.toString(),
+     movementCount:Number(e.movementCount),
+     validMovementCount:Number(e.validMovementCount)
+    })),
+   exceptionsTruncated:exceptions.length>100,
+   notes:[
+    'Refund liabilities include all historical POS returns and recorded POS settlements.',
+    'Date filters apply to shift closing snapshots only.',
+    'Refund liabilities are current all-time balances, not historical as-of-date balances.',
+    'Shift closing variances remain based on immutable snapshots.',
+    'UTC dates are used for reporting boundaries.',
+    'POS refund records are administrative evidence, not proof of bank settlement.',
+    'Legacy refund records and exchange-specific obligations require separate reconciliation.'
+   ]
+  };
+ }
+
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
 export class PosController {
@@ -731,6 +1644,14 @@ export class PosController {
   return this.pos.offlineSaleStatus(deviceId,localSaleId,u);
  }
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
+ @Post('returns/settlements')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ recordRefundSettlement(
+  @Body() dto:RecordPosRefundSettlementDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.recordRefundSettlement(dto,u);
+ }
  @Get('returns/sale/:saleId')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  returnHistory(
@@ -739,7 +1660,28 @@ export class PosController {
  ){
   return this.pos.saleReturnHistory(saleId,u);
  }
+
  @Post('returns') @Roles('SUPER_ADMIN','BRANCH_MANAGER') returnSale(@Body() dto:ReturnDto,@CurrentUser() u:Principal){return this.pos.returnSale(dto,u);}
- @Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
+    @Get('finance/historical-summary')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ historicalRetailFinance(
+  @Query('locationId') locationId:string,
+  @Query('from') from:string,
+  @Query('to') to:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.historicalRetailFinance(
+   locationId,from,to,u
+  );
+ }
+@Get('finance/retail-summary')
+  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+  retailFinanceSummary(
+   @Query('locationId') locationId:string,
+   @CurrentUser() u:Principal
+  ){
+   return this.pos.retailFinanceSummary(locationId,u);
+  }
+@Get('shifts/:id/summary') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') summary(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.shiftSummary(id,u);}
  @Get('sales/:locationId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') list(@Param('locationId') id:string,@CurrentUser() u:Principal){return this.pos.listSales(id,u);}
 }

@@ -1,4 +1,6 @@
 "use client";
+import ExecutiveFinanceConsolidated from './components/executive-finance-consolidated';
+import FinanceUnifiedNav from '../finance-unified-nav';
 import {useState} from "react";
 type Alert={type:string;id:string;invoiceId:string|null;createdAt:string;summary:string};
 type Statement={rows:Array<{invoiceId:string;invoiceNumber:string;invoiceDate:string;
@@ -43,7 +45,14 @@ export default function FinanceCommandCenter(){
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   return <main style={{maxWidth:1100,margin:"30px auto",padding:24,fontFamily:"system-ui"}}>
+<FinanceUnifiedNav />
+
     <h1>HQ Financial Command Center</h1>
+<ExecutiveFinanceConsolidated />
+
+
+
+
     <p>On-demand alerts, invoice evidence and casework navigation. Not audited or bank-confirmed accounting.</p>
     <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"end"}}>
       <label>Location UUID<input value={locationId} onChange={e=>setLocationId(e.target.value)}

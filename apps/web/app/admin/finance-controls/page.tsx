@@ -1,4 +1,5 @@
 'use client';
+import FinanceUnifiedNav from '../finance-unified-nav';
 import {useEffect,useState} from 'react';
 const API='/api/v1';
 type Row=Record<string,any>;
@@ -33,7 +34,9 @@ export default function FinanceControls(){
  function exportCsv(){if(!dashboard)return;const keys=['accountCode','debit','credit','netDebit'];const data=[keys.map(cell).join(','),...(dashboard.accountBalances||[]).map((r:Row)=>keys.map(k=>cell(r[k])).join(','))].join('\r\n');const blob=new Blob(['\ufeff'+data],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`royal-step-manual-ledger-${from}-${to}.csv`;a.click();URL.revokeObjectURL(url);}
  const panel:React.CSSProperties={border:'1px solid #d7dce4',padding:18,borderRadius:12,margin:'18px 0'};
  const input:React.CSSProperties={padding:8,margin:4,maxWidth:'100%'};
- return <main style={{maxWidth:1180,margin:'30px auto',padding:20,fontFamily:'system-ui'}}><h1>Royal Step — Finance Controls</h1><p><a href="/admin">HQ console</a> · Milestones 39–41</p><p>Imported settlements are not bank confirmation. Manual journals are separate from operational POS records; never double-count them as automatically posted sales.</p>
+ return <main style={{maxWidth:1180,margin:'30px auto',padding:20,fontFamily:'system-ui'}}>
+<FinanceUnifiedNav />
+<h1>Royal Step — Finance Controls</h1><p><a href="/admin">HQ console</a> · Milestones 39–41</p><p>Imported settlements are not bank confirmation. Manual journals are separate from operational POS records; never double-count them as automatically posted sales.</p>
  {!token?<p role="status">Loading your HQ session. If this persists, return to <a href="/admin/finance-login">finance sign in</a>.</p>:<>
  <section style={panel}><h2>Branch and period</h2><select style={input} value={location} onChange={e=>setLocation(e.target.value)}>{locations.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select><label>From UTC <input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>To UTC <input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><button disabled={busy} onClick={()=>void refresh()}>Load finance data</button></section>
  {dashboard&&<section style={panel}><h2>Finance overview</h2><pre style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{JSON.stringify({approvedCashAdjustment:dashboard.approvedCashAdjustment,pendingMovementTotal:dashboard.pendingMovementTotal,movementCounts:dashboard.movementCounts,exceptionCounts:dashboard.exceptionCounts,settlementBatches:dashboard.settlementBatches,matchCounts:dashboard.matchCounts,statementGross:dashboard.statementGross,statementNet:dashboard.statementNet,statementFees:dashboard.statementFees,journals:dashboard.journals},null,2)}</pre><h3>Manual journal account balances</h3><button onClick={exportCsv}>Export balances CSV</button><table style={{width:'100%'}}><thead><tr><th>Account</th><th>Debit</th><th>Credit</th><th>Net debit</th></tr></thead><tbody>{(dashboard.accountBalances||[]).map((r:Row)=><tr key={r.accountCode}><td>{r.accountCode}</td><td>{r.debit}</td><td>{r.credit}</td><td>{r.netDebit}</td></tr>)}</tbody></table></section>}

@@ -1,4 +1,5 @@
 'use client';
+import FinanceUnifiedNav from '../finance-unified-nav';
 import {useEffect,useState} from 'react';
 type Row=Record<string,any>;
 const API='/api/v1';
@@ -44,6 +45,8 @@ export default function RetailOperations(){
   }catch(e){setMessage(String(e))}finally{setBusy(false)}
  }
  return <main style={{maxWidth:1150,margin:'30px auto',padding:20,fontFamily:'system-ui'}}>
+<FinanceUnifiedNav />
+
   <h1>Royal Step — Retail Operations</h1><p>Milestones 22–24: sales history, manager-approved merchandise returns, and daily reconciliation.</p>
   {!token?<p role="status">Loading your HQ session. If this persists, return to <a href="/admin/finance-login">finance sign in</a>.</p>:<>
    <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:20}}>

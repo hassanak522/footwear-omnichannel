@@ -3,6 +3,8 @@ import { usePathname, useRouter } from 'next/navigation';
 const pages = [
   ['/admin', 'HQ operations'],
   ['/admin/finance-command-center', 'Command center'],
+  ['/admin/retail-finance', 'Retail finance'],
+  ['/admin/retail-finance/historical', 'Historical retail finance'],
   ['/admin/finance-reconciliation', 'Reconciliation'],
   ['/admin/finance-operations', 'Operations'],
   ['/admin/finance-casework', 'Casework'],

@@ -32,6 +32,21 @@ type ReturnSummary = {
     id: string;
     reason: string;
     refundDue: string;
+    refundSettled: string;
+    refundOutstanding: string;
+    settlementStatus:
+      | 'UNSETTLED'
+      | 'PARTIALLY_SETTLED'
+      | 'SETTLED';
+    settlements: {
+      id: string;
+      method: 'CASH' | 'CARD' | 'OTHER';
+      amount: string;
+      reference: string | null;
+      payoutShiftId: string | null;
+      settledById: string;
+      settledAt: string;
+    }[];
     lines: {
       variantId: string;
       quantity: number;
@@ -40,6 +55,7 @@ type ReturnSummary = {
     }[];
   }[];
 };
+
 type DraftLine = {
   variantId: string;
   quantity: number;
@@ -49,11 +65,13 @@ type DraftLine = {
 export default function ReturnsPanel({
   request,
   location,
-  token
+  token,
+  shiftId
 }: {
   request: RequestFn;
   location: string;
   token: string;
+  shiftId: string;
 }) {
   const [sales, setSales] = useState<Sale[]>([]);
   const [selectedId, setSelectedId] = useState('');
@@ -67,9 +85,129 @@ export default function ReturnsPanel({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState('');
 
+
+
+
+  const [payoutReturnId, setPayoutReturnId] = useState('');
+  const [payoutMethod, setPayoutMethod] =
+    useState<'CASH' | 'CARD' | 'OTHER'>('CASH');
+  const [payoutAmount, setPayoutAmount] = useState('');
+  const [payoutReference, setPayoutReference] = useState('');
+  const [payoutKey, setPayoutKey] = useState('');
+  const [payoutBusy, setPayoutBusy] = useState(false);
+  const [payoutMessage, setPayoutMessage] = useState('');
+  const [historyRevision, setHistoryRevision] = useState(0);
+
+  const selectedPayoutReturn = summary?.returns.find(
+    ret => ret.id === payoutReturnId
+  );
+
+  function resetPayout() {
+    setPayoutReturnId('');
+    setPayoutAmount('');
+    setPayoutReference('');
+    setPayoutMethod('CASH');
+    setPayoutKey('');
+    setPayoutMessage('');
+  }
+
+  async function recordPayout() {
+    if (payoutBusy || !selectedPayoutReturn) return;
+
+    const amount = Number(payoutAmount);
+    const outstanding =
+      Number(selectedPayoutReturn.refundOutstanding);
+
+    if (
+      !Number.isFinite(amount) ||
+      !Number.isSafeInteger(Math.round(amount * 100)) ||
+      amount <= 0 ||
+      Math.round(amount * 100) > Math.round(outstanding * 100) ||
+      Math.round(amount * 100) !== amount * 100
+    ) {
+      setPayoutMessage(
+        'Enter a valid amount within the outstanding refund balance.'
+      );
+      return;
+    }
+
+    if (payoutMethod === 'CASH' && !shiftId) {
+      setPayoutMessage(
+        'Open a cashier shift before recording a cash payout.'
+      );
+      return;
+    }
+
+    if (
+      payoutMethod !== 'CASH' &&
+      !payoutReference.trim()
+    ) {
+      setPayoutMessage(
+        'Card and other payouts require a payment reference.'
+      );
+      return;
+    }
+
+    if (
+      !window.confirm(
+        'Confirm the refund was actually paid? ' +
+        'This records a financial settlement and cannot be undone here.'
+      )
+    ) return;
+
+    const identity = payoutKey || crypto.randomUUID();
+    setPayoutKey(identity);
+    setPayoutBusy(true);
+    setPayoutMessage('');
+
+    try {
+      const response = await request(
+        '/pos/returns/settlements',
+        'POST',
+        {
+          returnId: selectedPayoutReturn.id,
+          idempotencyKey: identity,
+          method: payoutMethod,
+          amount,
+          ...(payoutMethod === 'CASH'
+            ? { payoutShiftId: shiftId }
+            : {}),
+          ...(payoutReference.trim()
+            ? { reference: payoutReference.trim() }
+            : {})
+        }
+      );
+
+      if (!response?.id) {
+        throw new Error('Settlement confirmation was incomplete');
+      }
+
+      setPayoutMessage(
+        response.duplicate
+          ? 'Existing settlement confirmation retrieved.'
+          : 'Refund settlement recorded. Refreshing history.'
+      );
+
+      setPayoutKey('');
+      setPayoutAmount('');
+      setPayoutReference('');
+      setPayoutReturnId('');
+      setHistoryRevision(value => value + 1);
+
+    } catch (error: any) {
+      setPayoutMessage(
+        (error.message || 'Unable to record settlement') +
+        ' Do not repeat the physical payout. Retry using the ' +
+        'same settlement details or reconcile with HQ.'
+      );
+    } finally {
+      setPayoutBusy(false);
+    }
+  }
   const selected = sales.find(s => s.id === selectedId);
 
   useEffect(() => {
+    resetPayout();
     setSales([]);
     setSelectedId('');
     setLines([]);
@@ -117,7 +255,8 @@ export default function ReturnsPanel({
     return () => {
       cancelled = true;
     };
-  }, [selectedId, token, location]);
+  }, [selectedId, token, location, historyRevision]);
+
   function invalidateDraft() {
     setKey('');
     setResult(null);
@@ -159,6 +298,7 @@ export default function ReturnsPanel({
     if (key || busy) return;
     const sale = sales.find(s => s.id === id);
 
+    resetPayout();
     setSelectedId(id);
     setReason('');
     setLines((sale?.lines || []).map(line => ({
@@ -334,6 +474,10 @@ export default function ReturnsPanel({
                     <th>Return ID</th>
                     <th>Reason</th>
                     <th>Refund due</th>
+                    <th>Paid</th>
+                    <th>Outstanding</th>
+                    <th>Status</th>
+                    <th>Payment details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -344,6 +488,35 @@ export default function ReturnsPanel({
                       <td>
                         Rs. {Number(ret.refundDue).toFixed(2)}
                       </td>
+                      <td>
+                        Rs. {Number(ret.refundSettled).toFixed(2)}
+                      </td>
+                      <td>
+                        Rs. {Number(ret.refundOutstanding).toFixed(2)}
+                      </td>
+                      <td>
+                        {ret.settlementStatus.replace(/_/g, ' ')}
+                      </td>
+                      <td>
+                        {ret.settlements.length === 0 ? (
+                          <span>No payment recorded</span>
+                        ) : (
+                          ret.settlements.map(payment => (
+                            <div key={payment.id}>
+                              <strong>{payment.method}</strong>
+                              {' | Rs. '}
+                              {Number(payment.amount).toFixed(2)}
+                              {' | '}
+                              {new Date(
+                                payment.settledAt
+                              ).toLocaleString()}
+                              {payment.reference
+                                ? ' | Ref: ' + payment.reference
+                                : ''}
+                            </div>
+                          ))
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -352,11 +525,149 @@ export default function ReturnsPanel({
           )}
 
           <p className="hint">
-            Refund due does not confirm refund payment.
+            Refund approval does not confirm payment.
+            Recorded settlements show paid amounts and
+            outstanding refund balances. Cash payouts
+            must be reconciled against drawer movements.
           </p>
         </div>
       )}
 
+            {selected && summary && summary.returns.length > 0 && (
+        <div className="panel">
+          <h3>Record refund payment</h3>
+          <p className="hint">
+            Manager-only operation. Record payment only after
+            cash has been handed over or the external refund
+            has actually been completed.
+          </p>
+
+          <label>
+            Approved return
+            <select
+              value={payoutReturnId}
+              disabled={payoutBusy}
+              onChange={e => {
+                setPayoutReturnId(e.target.value);
+                const ret = summary.returns.find(
+                  item => item.id === e.target.value
+                );
+                setPayoutAmount(
+                  ret ? ret.refundOutstanding : ''
+                );
+                setPayoutKey('');
+                setPayoutMessage('');
+              }}
+            >
+              <option value="">Select return to settle</option>
+              {summary.returns
+                .filter(ret =>
+                  Number(ret.refundOutstanding) > 0
+                )
+                .map(ret => (
+                  <option key={ret.id} value={ret.id}>
+                    {ret.id.slice(0, 12)}
+                    {' | Outstanding Rs. '}
+                    {Number(ret.refundOutstanding).toFixed(2)}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          {selectedPayoutReturn && (
+            <>
+              <p>
+                Outstanding refund:
+                {' Rs. '}
+                {Number(
+                  selectedPayoutReturn.refundOutstanding
+                ).toFixed(2)}
+              </p>
+
+              <label>
+                Refund method
+                <select
+                  value={payoutMethod}
+                  disabled={payoutBusy || !!payoutKey}
+                  onChange={e => {
+                    setPayoutMethod(
+                      e.target.value as 'CASH' | 'CARD' | 'OTHER'
+                    );
+                    setPayoutKey('');
+                  }}
+                >
+                  <option value="CASH">Cash</option>
+                  <option value="CARD">Card</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </label>
+
+              <label>
+                Amount paid (PKR)
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={selectedPayoutReturn.refundOutstanding}
+                  value={payoutAmount}
+                  disabled={payoutBusy || !!payoutKey}
+                  onChange={e => {
+                    setPayoutAmount(e.target.value);
+                    setPayoutKey('');
+                  }}
+                />
+              </label>
+
+              <label>
+                Payment reference
+                <input
+                  value={payoutReference}
+                  maxLength={200}
+                  disabled={payoutBusy || !!payoutKey}
+                  onChange={e => {
+                    setPayoutReference(e.target.value);
+                    setPayoutKey('');
+                  }}
+                  placeholder={
+                    payoutMethod === 'CASH'
+                      ? 'Optional cash receipt reference'
+                      : 'Required external transaction reference'
+                  }
+                />
+              </label>
+
+              {payoutMethod === 'CASH' && (
+                <p className="hint">
+                  Current payout shift:
+                  {' '}
+                  {shiftId || 'No open shift selected'}
+                  . An approved cash refund drawer movement
+                  will be recorded automatically.
+                </p>
+              )}
+
+              <button
+                disabled={
+                  payoutBusy ||
+                  !payoutAmount ||
+                  (payoutMethod === 'CASH' && !shiftId) ||
+                  (payoutMethod !== 'CASH' &&
+                    !payoutReference.trim())
+                }
+                onClick={() => void recordPayout()}
+              >
+                {payoutBusy
+                  ? 'Recording settlement...'
+                  : 'Confirm payment already made'}
+              </button>
+            </>
+          )}
+
+          {payoutMessage && (
+            <p role="status">{payoutMessage}</p>
+          )}
+        </div>
+      )}
       {selected && !result && (
         <>
           <h3>Items to return</h3>
@@ -381,6 +692,8 @@ export default function ReturnsPanel({
 
                   const remaining = balance?.remainingQuantity ?? 0;
 
+
+
                   const draft = lines.find(
                     item => item.variantId === sold.variantId
                   );
@@ -391,6 +704,7 @@ export default function ReturnsPanel({
                       <td>{sold.quantity}</td>
                       <td>{balance?.returnedQuantity ?? '—'}</td>
                       <td>{summary ? remaining : '—'}</td>
+
                       <td>
                         <input
                           type="number"
