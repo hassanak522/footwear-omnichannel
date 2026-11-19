@@ -1,8 +1,15 @@
 "use client";
-import RetailFinanceOperationsNav from '../components/retail-finance-operations-nav';
+
 
 import {useEffect,useState} from "react";
 import Link from "next/link";
+
+type BranchLocation={
+ id:string;
+ code:string;
+ name:string;
+ type?:string;
+};
 
 type CaseRow={
  id:string;
@@ -56,6 +63,9 @@ const inputStyle={
 
 export default function RetailCaseworkPage(){
  const [locationId,setLocationId]=useState("");
+ const [branches,setBranches]=useState<BranchLocation[]>([]);
+ const [branchesLoading,setBranchesLoading]=useState(true);
+ const [branchesError,setBranchesError]=useState("");
  const [status,setStatus]=useState("");
  const [rows,setRows]=useState<CaseRow[]>([]);
  const [total,setTotal]=useState(0);
@@ -95,6 +105,92 @@ export default function RetailCaseworkPage(){
   }
  },[]);
 
+ useEffect(()=>{
+  let active=true;
+
+  async function loadBranches(){
+   try{
+    const response=await fetch(
+     "/api/v1/inventory/locations",
+     {
+      credentials:"include",
+      cache:"no-store"
+     }
+    );
+
+    const data=await response.json().catch(()=>null);
+
+    if(!response.ok){
+     throw new Error(
+      Array.isArray(data?.message)
+       ?data.message.join(", ")
+       :data?.message||
+        "Unable to load branches (HTTP "+
+        response.status+")."
+     );
+    }
+
+    const items=Array.isArray(data)
+     ?data
+     :Array.isArray(data?.locations)
+      ?data.locations
+      :Array.isArray(data?.data)
+       ?data.data
+       :[];
+
+    const result=items
+     .filter((item:any)=>
+      item &&
+      typeof item.id==="string" &&
+      item.type==="BRANCH" &&
+      item.active!==false
+     )
+     .map((item:any)=>({
+      id:item.id,
+      code:String(item.code||""),
+      name:String(item.name||item.code||"Branch"),
+      type:item.type
+     })) as BranchLocation[];
+
+    if(active){
+     setBranches(result);
+    }
+   }catch(e){
+    if(active){
+     setBranchesError(
+      e instanceof Error?e.message:String(e)
+     );
+    }
+   }finally{
+    if(active){
+     setBranchesLoading(false);
+    }
+   }
+  }
+
+  void loadBranches();
+
+  return ()=>{active=false;};
+ },[]);
+
+ function branchName(id:string){
+  const branch=branches.find(b=>b.id===id);
+
+  return branch
+   ?branch.code+" — "+branch.name
+   :id.slice(0,8)+"…";
+ }
+
+ function statusName(value:string){
+  const labels:Record<string,string>={
+   OPEN:"Open",
+   INVESTIGATING:"Under Investigation",
+   RESOLVED:"Resolved",
+   DISMISSED:"Dismissed"
+  };
+
+  return labels[value]||value;
+ }
  async function load(){
   setBusy(true);setError("");
   try{
@@ -120,6 +216,15 @@ export default function RetailCaseworkPage(){
  }
 
  async function create(){
+  if(branchesLoading||branchesError){
+   setError("Authorized branches are not available.");
+   return;
+  }
+
+  if(!locationId||!branches.some(b=>b.id===locationId)){
+   setError("Select an authorized branch before creating a case.");
+   return;
+  }
   setBusy(true);setError("");setMessage("");
   try{
    await call("",{
@@ -172,17 +277,33 @@ export default function RetailCaseworkPage(){
 
  return <main style={{
   maxWidth:1300,
-  margin:"25px auto",
+  margin:"0 auto",
   padding:20,
   fontFamily:"system-ui"
  }}>
-  <RetailFinanceOperationsNav />
+
 
   <Link href="/admin/retail-finance/historical">
-   Historical retail finance
+   Finance Reports
   </Link>
 
-  <h1>Retail Finance Exception Management</h1>
+  <div style={{
+ color:"#ef3321",
+ fontSize:12,
+ fontWeight:700,
+ letterSpacing:1,
+ marginTop:18
+}}>
+ ROYAL STEP / FINANCE
+</div>
+
+<h1 style={{
+ color:"#104c72",
+ fontSize:28,
+ margin:"8px 0 14px"
+}}>
+ Retail Finance Investigations
+</h1>
   <p style={{
    padding:"12px 15px",
    border:"1px solid #dbe3ed",
@@ -190,8 +311,8 @@ export default function RetailCaseworkPage(){
    background:"#f8fafc",
    marginBottom:18
   }}>
-   Review the prefilled branch and source identifiers
-   before opening an investigation.
+   Review the selected branch and source records
+   before creating an investigation.
    Enter a summary to create a case, or use the case
    register to review existing investigations.
   </p>
@@ -201,15 +322,29 @@ export default function RetailCaseworkPage(){
   </p>
 
   <section style={panel}>
-   <h2>Case register</h2>
+   <h2 style={{color:"#104c72"}}>Investigation Register</h2>
    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-    <input
+    <select
      style={inputStyle}
-     placeholder="Branch UUID (blank for HQ)"
-     aria-label="Branch UUID"
+     aria-label="Select retail branch"
      value={locationId}
+     disabled={branchesLoading||busy}
      onChange={e=>setLocationId(e.target.value)}
-    />
+    >
+     <option value="">All authorized branches</option>
+
+     {locationId&&!branches.some(b=>b.id===locationId)&&
+      <option value={locationId}>
+       Linked branch ({locationId.slice(0,8)}…)
+      </option>
+     }
+
+     {branches.map(branch=>
+      <option key={branch.id} value={branch.id}>
+       {branch.code} — {branch.name}
+      </option>
+     )}
+    </select>
     <select
      style={inputStyle}
      value={status}
@@ -217,14 +352,26 @@ export default function RetailCaseworkPage(){
     >
      <option value="">All statuses</option>
      {["OPEN","INVESTIGATING","RESOLVED","DISMISSED"]
-      .map(s=><option key={s}>{s}</option>)}
+      .map(s=><option key={s} value={s}>{statusName(s)}</option>)}
     </select>
     <button disabled={busy} onClick={load}>
-     Load cases
+     View Investigations
     </button>
    </div>
 
-   <p>Showing {rows.length} of {total} cases</p>
+   {branchesLoading&&
+ <p style={{color:"#64748b"}}>
+  Loading authorized branches…
+ </p>
+}
+
+{branchesError&&
+ <p role="alert" style={{color:"#b91c1c"}}>
+  {branchesError}
+ </p>
+}
+
+<p>Showing {rows.length} of {total} cases</p>
 
    <div style={{overflowX:"auto"}}>
     <table style={{width:"100%",textAlign:"left"}}>
@@ -237,12 +384,12 @@ export default function RetailCaseworkPage(){
        <td style={{padding:8}} title={r.id}>
         {r.id.slice(0,8)}
        </td>
-       <td style={{padding:8}}>{r.locationId.slice(0,8)}</td>
+       <td style={{padding:8}}>{branchName(r.locationId)}</td>
        <td style={{padding:8}}>{r.sourceType}</td>
-       <td style={{padding:8}}>{r.status}</td>
+       <td style={{padding:8}}>{statusName(r.status)}</td>
        <td style={{padding:8}}>{r.summary}</td>
        <td style={{padding:8}}>
-        <button onClick={()=>openCase(r.id)}>Open</button>
+        <button onClick={()=>openCase(r.id)}>View Details</button>
        </td>
       </tr>)}
      </tbody>
@@ -251,8 +398,8 @@ export default function RetailCaseworkPage(){
   </section>
 
   <section style={panel}>
-   <h2>Create investigation</h2>
-   <p>Use the branch UUID entered in the register above.</p>
+   <h2 style={{color:"#104c72"}}>Create Investigation</h2>
+   <p>Select the relevant branch above before creating a case.</p>
    <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
     <select
      style={inputStyle}
@@ -288,10 +435,11 @@ export default function RetailCaseworkPage(){
   </section>
 
   {selected&&<section style={panel}>
-   <h2>Investigation details</h2>
+   <h2 style={{color:"#104c72"}}>Investigation Details</h2>
    <p><strong>Case:</strong> {selected.id}</p>
-   <p><strong>Status:</strong> {selected.status}</p>
-   <p><strong>Source:</strong> {selected.sourceId}</p>
+   <p><strong>Status:</strong> {statusName(selected.status)}</p>
+   <p><strong>Branch:</strong> {branchName(selected.locationId)}</p>
+<p><strong>Source:</strong> {selected.sourceId}</p>
    <p><strong>Assigned:</strong> {selected.assignedToId||"Unassigned"}</p>
    <p><strong>Summary:</strong> {selected.summary}</p>
 
@@ -342,7 +490,7 @@ export default function RetailCaseworkPage(){
      </button>}
    </div>
 
-   <h3>Case history</h3>
+   <h3 style={{color:"#104c72"}}>Investigation History</h3>
    {events.map(e=><div key={e.id}
     style={{borderBottom:"1px solid #eee",padding:10}}>
     <strong>{e.action}</strong>
