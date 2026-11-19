@@ -1,6 +1,7 @@
 "use client";
 import ExecutiveFinanceConsolidated from './components/executive-finance-consolidated';
-import FinanceUnifiedNav from '../finance-unified-nav';
+import RetailFinanceOverview from './components/retail-finance-overview';
+
 import {useState} from "react";
 type Alert={type:string;id:string;invoiceId:string|null;createdAt:string;summary:string};
 type Statement={rows:Array<{invoiceId:string;invoiceNumber:string;invoiceDate:string;
@@ -45,15 +46,62 @@ export default function FinanceCommandCenter(){
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   return <main style={{maxWidth:1100,margin:"30px auto",padding:24,fontFamily:"system-ui"}}>
-<FinanceUnifiedNav />
 
-    <h1>HQ Financial Command Center</h1>
+
+    <header style={{marginBottom:18}}>
+  <div style={{
+    color:"#ef3321",
+    fontSize:12,
+    fontWeight:700,
+    letterSpacing:1
+  }}>
+    ROYAL STEP / FINANCIAL MANAGEMENT
+  </div>
+  <h1 style={{
+    color:"#104c72",
+    margin:"8px 0 6px",
+    fontSize:28
+  }}>
+    Finance Control Tower
+  </h1>
+  <p style={{
+    color:"#64748b",
+    margin:0,
+    fontSize:13
+  }}>
+    Financial oversight for the central warehouse
+    and physical retail branches.
+  </p>
+</header>
+<RetailFinanceOverview />
 <ExecutiveFinanceConsolidated />
 
 
 
 
-    <p>On-demand alerts, invoice evidence and casework navigation. Not audited or bank-confirmed accounting.</p>
+    <details style={{
+  marginTop:22,
+  border:"1px solid #dbe3ed",
+  borderRadius:12,
+  padding:18,
+  background:"#ffffff"
+}}>
+  <summary style={{
+    cursor:"pointer",
+    color:"#104c72",
+    fontWeight:700,
+    fontSize:15
+  }}>
+    Supplier invoice evidence, aged alerts and statements
+  </summary>
+  <p style={{
+    color:"#64748b",
+    fontSize:13,
+    marginTop:14
+  }}>
+    Specialist supplier finance tools.
+    Evidence is not independently bank-confirmed.
+  </p>
     <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"end"}}>
       <label>Location UUID<input value={locationId} onChange={e=>setLocationId(e.target.value)}
         style={{display:"block",minWidth:300,padding:8}}/></label>
@@ -93,5 +141,6 @@ export default function FinanceCommandCenter(){
       <button disabled={!statement.rows.length||statement.truncated} onClick={exportCsv}>
         Export invoice statement CSV</button>
     </section>}
+  </details>
   </main>;
 }

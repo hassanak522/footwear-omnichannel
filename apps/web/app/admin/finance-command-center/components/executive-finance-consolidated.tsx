@@ -21,7 +21,7 @@ type WorkspaceTab=
  |"overview"
  |"retail"
  |"supplier"
- |"investigations";
+ |"investigations" | "reports";
 
 type NavigationItem={
  title:string;
@@ -36,23 +36,28 @@ const tabs:{
 }[]=[
  {
   id:"overview",
-  label:"Executive Overview",
+  label:"Overview",
   description:"Management intelligence and oversight"
  },
  {
   id:"retail",
-  label:"Retail Finance",
+  label:"Branch Finance",
   description:"Branch finance and historical reporting"
  },
  {
   id:"supplier",
-  label:"Supplier Finance",
+  label:"Payments & Settlements",
   description:"Payments, reconciliation and controls"
  },
  {
   id:"investigations",
-  label:"Financial Investigations",
+  label:"Investigations & Controls",
   description:"Exceptions, casework and reviews"
+  },
+  {
+   id:"reports",
+   label:"Reports & Intelligence",
+   description:"Historical branch and finance reporting"
  }
 ];
 
@@ -133,13 +138,32 @@ const navigation:Record<
    href:"/admin/finance-operations"
   }
  ]
+,
+ reports:[
+  {
+   title:"Historical Branch Finance",
+   description:"Branch performance, refund exposure and historical reconciliation.",
+   href:"/admin/retail-finance/historical"
+  },
+  {
+   title:"Recent Retail Finance",
+   description:"Recent POS closures, refunds and cash reconciliation.",
+   href:"/admin/retail-finance"
+  },
+  {
+   title:"Financial Operations",
+   description:"Financial reporting, supplier reconciliation and operational analysis.",
+   href:"/admin/finance-operations"
+  }
+ ]
 };
 
 function isWorkspace(value:string|null):value is WorkspaceTab{
  return value==="overview"||
   value==="retail"||
   value==="supplier"||
-  value==="investigations";
+  value==="investigations"||
+   value==="reports";
 }
 
 function readWorkspace():WorkspaceTab{
@@ -313,7 +337,7 @@ export default function ExecutiveFinanceConsolidated(){
      fontSize:24,
      margin:"0 0 8px"
     }}>
-     Executive Finance Command Center
+     Retail Finance Control Tower
     </h2>
 
     <p style={{
@@ -389,10 +413,119 @@ export default function ExecutiveFinanceConsolidated(){
 
     {active==="overview"&&(
      <>
-      <ExecutiveFinanceWorkspace/>
+      <div style={{
+  display:"grid",
+  gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",
+  gap:12,
+  marginBottom:20
+}}>
+  {[
+    {
+      title:"Branch Sales & Closures",
+      detail:"POS sales, cash drawers, refunds and shift reconciliation.",
+      href:"/admin/retail-finance"
+    },
+    {
+      title:"Payments & Settlements",
+      detail:"Payment exceptions, supplier reconciliation and settlement review.",
+      href:"/admin/payment-reconciliation"
+    },
+    {
+      title:"Financial Exceptions",
+      detail:"Investigate unresolved retail finance cases and approvals.",
+      href:"/admin/retail-finance/cases"
+    },
+    {
+      title:"Historical Performance",
+      detail:"Compare branch activity and historical refund exposure.",
+      href:"/admin/retail-finance/historical"
+    }
+  ].map(item=>(
+    <Link key={item.href} href={item.href} style={{
+      display:"block",
+      padding:18,
+      border:"1px solid #dbe3ed",
+      borderRadius:11,
+      background:"#ffffff",
+      textDecoration:"none"
+    }}>
+      <strong style={{
+        display:"block",
+        color:"#104c72",
+        fontSize:14,
+        marginBottom:8
+      }}>
+        {item.title}
+      </strong>
+      <span style={{
+        color:"#64748b",
+        fontSize:12,
+        lineHeight:1.6
+      }}>
+        {item.detail}
+      </span>
+      <div style={{
+        color:"#ef3321",
+        fontSize:12,
+        fontWeight:700,
+        marginTop:12
+      }}>
+        Open workspace
+      </div>
+    </Link>
+  ))}
+</div>
 
-      <ExecutiveFinancialIntelligence/>
-<ExecutiveFinanceActionCenter/>
+<details style={{
+  background:"#ffffff",
+  border:"1px solid #dbe3ed",
+  borderRadius:11,
+  padding:16,
+  marginBottom:14
+}}>
+  <summary style={{
+    cursor:"pointer",
+    color:"#104c72",
+    fontWeight:700
+  }}>
+    Executive financial intelligence
+  </summary>
+  <ExecutiveFinancialIntelligence/>
+</details>
+
+<details style={{
+  background:"#ffffff",
+  border:"1px solid #dbe3ed",
+  borderRadius:11,
+  padding:16,
+  marginBottom:14
+}}>
+  <summary style={{
+    cursor:"pointer",
+    color:"#104c72",
+    fontWeight:700
+  }}>
+    Management action center and investigations
+  </summary>
+  <ExecutiveFinanceActionCenter/>
+</details>
+
+<details style={{
+  background:"#ffffff",
+  border:"1px solid #dbe3ed",
+  borderRadius:11,
+  padding:16,
+  marginBottom:14
+}}>
+  <summary style={{
+    cursor:"pointer",
+    color:"#104c72",
+    fontWeight:700
+  }}>
+    Full finance workspace directory
+  </summary>
+  <ExecutiveFinanceWorkspace/>
+</details>
 
       <details style={{
        background:"#ffffff",
