@@ -33,25 +33,62 @@ export class FinanceReconciliationController {
     const settledAt=new Date(body.settledAt);
     if(Number.isNaN(settledAt.getTime())||settledAt.getTime()>Date.now())
       throw new BadRequestException('Settlement date must be valid and not in the future');
-    const request=await this.db.supplierPaymentRequest.findUnique({where:{id:requestId}});
-    if(!request)throw new BadRequestException('Payment request not found');
-    assertLocation(user,request.warehouseId);
-    if(request.status!=='APPROVED')throw new ConflictException('Payment request must be approved');
-    if(request.requestedById===user.id)
-      throw new ConflictException('Requester cannot record own settlement evidence');
-    const lock=await this.db.financePeriodLock.findFirst({where:{
-      locationId:request.warehouseId,periodStart:{lte:settledAt},periodEnd:{gt:settledAt}
-    }});
-    if(lock)throw new ConflictException('Settlement date is within a locked accounting period');
     try {
-      return await this.db.supplierPaymentSettlement.create({data:{
-        paymentRequestId:request.id,invoiceId:request.invoiceId,warehouseId:request.warehouseId,
-        amount:request.amount,settledAt,bankReference:body.bankReference.trim(),
-        evidenceNote:body.evidenceNote.trim(),recordedById:user.id
-      }});
+      return await this.db.$transaction(async tx=>{
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${`supplier-payment-settlement:${requestId}`})
+          )
+        `;
+
+        const request=await tx.supplierPaymentRequest.findUnique({
+          where:{id:requestId}
+        });
+
+        if(!request)
+          throw new BadRequestException('Payment request not found');
+
+        assertLocation(user,request.warehouseId);
+
+        if(request.status!=='APPROVED')
+          throw new ConflictException('Payment request must be approved');
+
+        if(request.requestedById===user.id)
+          throw new ConflictException(
+            'Requester cannot record own settlement evidence'
+          );
+
+        const lock=await tx.financePeriodLock.findFirst({
+          where:{
+            locationId:request.warehouseId,
+            periodStart:{lte:settledAt},
+            periodEnd:{gt:settledAt}
+          }
+        });
+
+        if(lock)
+          throw new ConflictException(
+            'Settlement date is within a locked accounting period'
+          );
+
+        return tx.supplierPaymentSettlement.create({
+          data:{
+            paymentRequestId:request.id,
+            invoiceId:request.invoiceId,
+            warehouseId:request.warehouseId,
+            amount:request.amount,
+            settledAt,
+            bankReference:body.bankReference.trim(),
+            evidenceNote:body.evidenceNote.trim(),
+            recordedById:user.id
+          }
+        });
+      });
     }catch(e){
       if(e instanceof Prisma.PrismaClientKnownRequestError&&e.code==='P2002')
-        throw new ConflictException('Settlement evidence already recorded for this request');
+        throw new ConflictException(
+          'Settlement evidence already recorded for this request'
+        );
       throw e;
     }
   }
