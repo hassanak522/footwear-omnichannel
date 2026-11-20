@@ -337,7 +337,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
      SELECT pg_advisory_xact_lock(hashtext(${`pos-sale:${dto.deviceId}:${dto.localSaleId}`}))
      `;
    const previous=await tx.posSale.findUnique({where:{deviceId_localSaleId:{deviceId:dto.deviceId,localSaleId:dto.localSaleId}}});
-   if(previous){
+   if(previous){if(previous.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
     if(previous.payloadHash!==payloadHash)throw new ConflictException('Sale ID reused with different payload');
     const redemption=await tx.promotionRedemption.findFirst({where:{saleId:previous.id}});
     return {id:previous.id,localSaleId:previous.localSaleId,status:previous.status,duplicate:true,total:previous.total.toString(),discount:redemption?.discountAmount.toString()??'0.00'};
@@ -403,7 +403,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
       }
     }
   });
-   if(existing){
+   if(existing){if(existing.cashierId!==u.id&&!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER'))throw new ForbiddenException('Not shift owner');
     if(existing.payloadHash!==payloadHash)throw new ConflictException('Local sale ID reused with different payload');
     return {id:existing.id,localSaleId:existing.localSaleId,status:existing.status,conflictReason:existing.conflictReason,duplicate:true};
    }
