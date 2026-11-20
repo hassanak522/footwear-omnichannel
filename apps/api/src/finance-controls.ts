@@ -185,17 +185,79 @@ export class SettlementController {
   return batch.entries.map(e=>{const matches=tenders.filter(t=>t.reference===e.terminalReference&&t.amount.equals(e.grossAmount));return {entryId:e.id,externalId:e.externalId,reference:e.terminalReference,gross:e.grossAmount.toString(),status:e.status,candidateCount:matches.length,candidates:matches.map(m=>({tenderId:m.id,saleId:m.saleId})),suggestedStatus:matches.length===1?'MATCHED':matches.length>1?'AMBIGUOUS':'UNMATCHED'};});
  }
  @Patch('entries/:entryId/review')
- async review(@Param('entryId') entryId:string,@Body() d:ReviewEntryDto,@CurrentUser() u:Principal){
-  manager(u);if(!d.note.trim())throw new BadRequestException('Review note required');
-  const entry=await this.db.settlementEntry.findUniqueOrThrow({where:{id:entryId},include:{batch:true}});assertLocation(u,entry.batch.locationId);
-  if(entry.status==='MATCHED')throw new ConflictException('Matched entry is locked');
-  if(d.status==='MATCHED'){
-   if(!d.matchedTenderId)throw new BadRequestException('Matched tender ID required');
-   const tender=await this.db.posSaleTender.findUnique({where:{id:d.matchedTenderId},include:{sale:true}});
-   if(!tender||tender.type!=='CARD'||tender.sale.locationId!==entry.batch.locationId||tender.sale.status!=='ACCEPTED'||tender.reference!==entry.terminalReference||!tender.amount.equals(entry.grossAmount))throw new ConflictException('Tender reference, amount, location or sale status mismatch');
-   const already=await this.db.settlementEntry.findFirst({where:{matchedTenderId:tender.id,status:'MATCHED',NOT:{id:entryId}}});if(already)throw new ConflictException('Tender already matched');
-  }else if(d.matchedTenderId)throw new BadRequestException('Tender ID only for MATCHED');
-  const result=await this.db.settlementEntry.updateMany({where:{id:entryId,status:entry.status},data:{status:d.status,matchedTenderId:d.status==='MATCHED'?d.matchedTenderId:null,reviewNote:d.note.trim(),reviewedById:u.id}});
-  if(result.count!==1)throw new ConflictException('Entry changed; reload');return this.db.settlementEntry.findUniqueOrThrow({where:{id:entryId}});
- }
+  async review(@Param('entryId') entryId:string,@Body() d:ReviewEntryDto,@CurrentUser() u:Principal){
+   manager(u);
+
+   if(!d.note.trim())
+    throw new BadRequestException('Review note required');
+
+   return this.db.$transaction(async tx=>{
+    const entry=await tx.settlementEntry.findUniqueOrThrow({
+     where:{id:entryId},
+     include:{batch:true}
+    });
+
+    assertLocation(u,entry.batch.locationId);
+
+    if(entry.status==='MATCHED')
+     throw new ConflictException('Matched entry is locked');
+
+    if(d.status==='MATCHED'){
+     if(!d.matchedTenderId)
+      throw new BadRequestException('Matched tender ID required');
+
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${`settlement-tender:${d.matchedTenderId}`})
+      )
+     `;
+
+     const tender=await tx.posSaleTender.findUnique({
+      where:{id:d.matchedTenderId},
+      include:{sale:true}
+     });
+
+     if(!tender||
+        tender.type!=='CARD'||
+        tender.sale.locationId!==entry.batch.locationId||
+        tender.sale.status!=='ACCEPTED'||
+        tender.reference!==entry.terminalReference||
+        !tender.amount.equals(entry.grossAmount))
+      throw new ConflictException(
+       'Tender reference, amount, location or sale status mismatch'
+      );
+
+     const already=await tx.settlementEntry.findFirst({
+      where:{
+       matchedTenderId:tender.id,
+       status:'MATCHED',
+       NOT:{id:entryId}
+      }
+     });
+
+     if(already)
+      throw new ConflictException('Tender already matched');
+
+    }else if(d.matchedTenderId){
+     throw new BadRequestException('Tender ID only for MATCHED');
+    }
+
+    const result=await tx.settlementEntry.updateMany({
+     where:{id:entryId,status:entry.status},
+     data:{
+      status:d.status,
+      matchedTenderId:d.status==='MATCHED'?d.matchedTenderId:null,
+      reviewNote:d.note.trim(),
+      reviewedById:u.id
+     }
+    });
+
+    if(result.count!==1)
+     throw new ConflictException('Entry changed; reload');
+
+    return tx.settlementEntry.findUniqueOrThrow({
+     where:{id:entryId}
+    });
+   });
+  }
 }
