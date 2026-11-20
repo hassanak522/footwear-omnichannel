@@ -579,6 +579,13 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   async shiftSummary(id:string,u:Principal){
     const shift=await this.db.posShift.findUniqueOrThrow({where:{id}});
     this.branchAccess(u,shift.locationId);
+    if (
+      shift.cashierId !== u.id &&
+      !u.roles.includes('SUPER_ADMIN') &&
+      !u.roles.includes('BRANCH_MANAGER')
+    ) {
+      throw new ForbiddenException('Not shift owner');
+    }
     if(shift.status==='CLOSED'){
       const snapshot=await this.db.posShiftClosingSnapshot.findUnique({where:{shiftId:id}});
       if(!snapshot)throw new ConflictException('Closed legacy shift has no verified closing snapshot; manual review required');
