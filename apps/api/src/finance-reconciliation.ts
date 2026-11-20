@@ -61,16 +61,29 @@ export class FinanceReconciliationController {
     const invoice=await this.db.supplierInvoice.findUnique({where:{id:invoiceId}});
     if(!invoice)throw new BadRequestException('Invoice not found');
     assertLocation(user,invoice.warehouseId);
-    const [requests,settlements]=await Promise.all([
+    const [requests,settlements,requestCount,settlementTotals]=await Promise.all([
       this.db.supplierPaymentRequest.findMany({where:{invoiceId},orderBy:{createdAt:'asc'},take:1000}),
-      this.db.supplierPaymentSettlement.findMany({where:{invoiceId},orderBy:{settledAt:'asc'},take:1000})
+      this.db.supplierPaymentSettlement.findMany({where:{invoiceId},orderBy:{settledAt:'asc'},take:1000}),
+      this.db.supplierPaymentRequest.count({where:{invoiceId}}),
+      this.db.supplierPaymentSettlement.aggregate({
+        where:{invoiceId},
+        _sum:{amount:true},
+        _count:{_all:true}
+      })
     ]);
-    const settled=settlements.reduce((s,x)=>s.plus(x.amount),new Prisma.Decimal(0));
+    const settled=settlementTotals._sum.amount??new Prisma.Decimal(0);
+    const detailsTruncated=requestCount>requests.length||
+      settlementTotals._count._all>settlements.length;
     return {invoiceId,invoiceTotal:invoice.totalAmount.toString(),
       recordedSettlements:settled.toString(),
       remainingByRecordedEvidence:invoice.totalAmount.minus(settled).toString(),
       requests,settlements,
-      warning:'Evidence entered by users; no external bank verification. Incomplete if 1000-row cap is reached.'};
+      requestCount,
+      settlementCount:settlementTotals._count._all,
+      detailsTruncated,
+      warning:detailsTruncated
+        ?'Evidence is not bank-verified. Detail lists are truncated to 1000 records; financial totals include all records.'
+        :'Evidence entered by users; no external bank verification.'};
   }
 
   // M62: location-scoped HQ overview, with explicit data-source provenance.
