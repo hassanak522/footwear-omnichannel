@@ -166,6 +166,24 @@ export class SettlementController {
  @Post('import')
  async importBatch(@Body() d:ImportBatchDto,@CurrentUser() u:Principal){
   manager(u);assertLocation(u,d.locationId);
+
+  const statementDate=new Date(d.statementDate);
+
+  if(Number.isNaN(statementDate.getTime()))
+   throw new BadRequestException('Invalid settlement statement date');
+
+  const periodLock=await this.db.financePeriodLock.findFirst({
+   where:{
+    locationId:d.locationId,
+    periodStart:{lte:statementDate},
+    periodEnd:{gt:statementDate}
+   }
+  });
+
+  if(periodLock)
+   throw new ConflictException(
+    'Settlement statement date is within a locked accounting period'
+   );
   if(!d.provider.trim()||!d.statementReference.trim())throw new BadRequestException('Provider and statement reference required');
   const ids=d.entries.map(e=>e.externalId.trim());if(ids.some(id=>!id)||new Set(ids).size!==ids.length)throw new BadRequestException('Unique nonempty external IDs required');
   for(const e of d.entries){if(!e.terminalReference.trim())throw new BadRequestException('Terminal reference required');if(Math.round(e.grossAmount*100)-Math.round(e.feeAmount*100)!==Math.round(e.netAmount*100))throw new BadRequestException('Net amount must equal gross minus fee');}
