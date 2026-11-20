@@ -58,7 +58,16 @@ export class PurchasingController {
    throw error;
   }
  }
- @Get('orders') orders(){return this.db.purchaseOrder.findMany({include:{supplier:true,lines:true},orderBy:{createdAt:'desc'},take:200});}
+ @Get('orders') orders(@CurrentUser() u:Principal){
+  return this.db.purchaseOrder.findMany({
+    where:u.roles.includes('SUPER_ADMIN')
+      ? {}
+      : {warehouseId:{in:u.locations}},
+    include:{supplier:true,lines:true},
+    orderBy:{createdAt:'desc'},
+    take:200
+  });
+}
  @Post('orders') async order(@Body() dto:PoDto,@CurrentUser() u:Principal){
   assertLocation(u,dto.warehouseId);
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
