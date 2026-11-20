@@ -15,33 +15,81 @@ export class FinanceControlsV2Controller {
   async stageInvoice(@Param('invoiceId') invoiceId:string,
     @Body() body:{idempotencyKey:string;expenseAccountCode:string;payableAccountCode:string;memo:string},
     @CurrentUser() user:Principal) {
-    const invoice=await this.db.supplierInvoice.findUnique({where:{id:invoiceId}});
-    if(!invoice) throw new BadRequestException('Invoice not found');
-    assertLocation(user,invoice.warehouseId);
-    const periodLock=await this.db.financePeriodLock.findFirst({where:{
-      locationId:invoice.warehouseId,periodStart:{lte:invoice.invoiceDate},
-      periodEnd:{gt:invoice.invoiceDate}
-    }});
-    if(periodLock)throw new ConflictException('Invoice accounting period is locked');
-    if(invoice.status!=='REVIEWED') throw new BadRequestException('Invoice must be reviewed');
     if(!body.idempotencyKey?.trim()||!body.memo?.trim()||
        !/^[A-Za-z0-9_-]{2,32}$/.test(body.expenseAccountCode||'')||
        !/^[A-Za-z0-9_-]{2,32}$/.test(body.payableAccountCode||'')||
        body.expenseAccountCode===body.payableAccountCode)
-      throw new BadRequestException('Valid idempotency key, distinct account codes and memo required');
-    if(invoice.totalAmount.lte(0))throw new BadRequestException('Invoice amount must be positive');
+      throw new BadRequestException(
+        'Valid idempotency key, distinct account codes and memo required'
+      );
+
     try {
-      return await this.db.financePostingBatch.create({data:{
-        locationId:invoice.warehouseId,sourceType:'SUPPLIER_INVOICE',sourceId:invoice.id,
-        idempotencyKey:body.idempotencyKey.trim(),memo:body.memo.trim(),createdById:user.id,
-        lines:{create:[
-          {accountCode:body.expenseAccountCode,debit:invoice.totalAmount,credit:new Prisma.Decimal(0)},
-          {accountCode:body.payableAccountCode,debit:new Prisma.Decimal(0),credit:invoice.totalAmount}
-        ]}
-      },include:{lines:true}});
-    } catch(e) {
+      return await this.db.$transaction(async tx=>{
+        await tx.$executeRaw`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${`supplier-invoice-posting:${invoiceId}`})
+          )
+        `;
+
+        const invoice=await tx.supplierInvoice.findUnique({
+          where:{id:invoiceId}
+        });
+
+        if(!invoice)
+          throw new BadRequestException('Invoice not found');
+
+        assertLocation(user,invoice.warehouseId);
+
+        if(invoice.status!=='REVIEWED')
+          throw new BadRequestException('Invoice must be reviewed');
+
+        if(invoice.totalAmount.lte(0))
+          throw new BadRequestException('Invoice amount must be positive');
+
+        const periodLock=await tx.financePeriodLock.findFirst({
+          where:{
+            locationId:invoice.warehouseId,
+            periodStart:{lte:invoice.invoiceDate},
+            periodEnd:{gt:invoice.invoiceDate}
+          }
+        });
+
+        if(periodLock)
+          throw new ConflictException(
+            'Invoice accounting period is locked'
+          );
+
+        return tx.financePostingBatch.create({
+          data:{
+            locationId:invoice.warehouseId,
+            sourceType:'SUPPLIER_INVOICE',
+            sourceId:invoice.id,
+            idempotencyKey:body.idempotencyKey.trim(),
+            memo:body.memo.trim(),
+            createdById:user.id,
+            lines:{
+              create:[
+                {
+                  accountCode:body.expenseAccountCode,
+                  debit:invoice.totalAmount,
+                  credit:new Prisma.Decimal(0)
+                },
+                {
+                  accountCode:body.payableAccountCode,
+                  debit:new Prisma.Decimal(0),
+                  credit:invoice.totalAmount
+                }
+              ]
+            }
+          },
+          include:{lines:true}
+        });
+      });
+    }catch(e){
       if(e instanceof Prisma.PrismaClientKnownRequestError&&e.code==='P2002')
-        throw new ConflictException('Invoice already staged or idempotency key already used');
+        throw new ConflictException(
+          'Invoice already staged or idempotency key already used'
+        );
       throw e;
     }
   }
