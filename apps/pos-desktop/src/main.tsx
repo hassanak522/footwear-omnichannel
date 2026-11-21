@@ -10,7 +10,10 @@ function App(){const[api,setApi]=useState(DEFAULT_API_URL);const[email,setEmail]
 const[clearanceQuote,setClearanceQuote]=useState<any>(null);
 const[clearanceSignature,setClearanceSignature]=useState('');
 const[clearanceBusy,setClearanceBusy]=useState(false);
-useEffect(()=>{(async()=>{setApi(DEFAULT_API_URL);setDevice(await window.pos.getConfig('deviceId')||'');setLocation(await window.pos.getConfig('locationId')||'');setShift(await window.pos.getConfig('shiftId')||'');setItems(await window.pos.listCatalog());await refreshHistory();await refreshDiscountAttempts();})();const yes=()=>setOnline(true),no=()=>setOnline(false);window.addEventListener('online',yes);window.addEventListener('offline',no);return()=>{window.removeEventListener('online',yes);window.removeEventListener('offline',no);};},[]);
+const[clearanceAttempts,setClearanceAttempts]=useState<any[]>([]);
+const clearanceCheckoutEnabled=
+ import.meta.env.VITE_ENABLE_CLEARANCE_CHECKOUT==='true';
+useEffect(()=>{(async()=>{setApi(DEFAULT_API_URL);setDevice(await window.pos.getConfig('deviceId')||'');setLocation(await window.pos.getConfig('locationId')||'');setShift(await window.pos.getConfig('shiftId')||'');setItems(await window.pos.listCatalog());await refreshHistory();await refreshDiscountAttempts();await refreshClearanceAttempts();})();const yes=()=>setOnline(true),no=()=>setOnline(false);window.addEventListener('online',yes);window.addEventListener('offline',no);return()=>{window.removeEventListener('online',yes);window.removeEventListener('offline',no);};},[]);
 async function refreshHistory(){const[h,p]=await Promise.all([window.pos.listSales(),window.pos.pendingSales()]);setHistory(h);setPending(p.length);}
 async function request(path:string,method='GET',body?:unknown){
   const qaBridge = window.pos as typeof window.pos & {
@@ -24,7 +27,7 @@ async function request(path:string,method='GET',body?:unknown){
   const res=await fetch(api.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(Array.isArray(data.message)?data.message.join(', '):data.message||'HTTP '+res.status);return data;}
 async function login(){setBusy(true);try{const data=await request('/auth/login','POST',{email,password});setToken(data.accessToken);authBlockedRef.current=false;setStatus('Logged in. Set branch and device, then open shift.');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function loadBranches(){setBusy(true);try{const rows=await request('/inventory/locations');const list=Array.isArray(rows)?rows:(rows?.locations||[]);setBranches(list.filter((r:any)=>r.type==='BRANCH'&&r.active));setStatus('Branches loaded. Select the branch assigned to this terminal.');}catch(e){setStatus('Unable to load branches: '+String(e));}finally{setBusy(false);}}
-async function registerDevice(){if(!token){setStatus('Sign in before registering a device');return;}if(!location){setStatus('Select a branch first');return;}if(!/^[A-Z0-9_-]{3,50}$/.test(deviceCode)){setStatus('Device code must be 3Ã¢â‚¬â€œ50 uppercase letters, digits, underscores or hyphens');return;}if(device){setStatus('This terminal already has a registered device ID. Do not create another without administrator approval.');return;}setBusy(true);try{const created=await request('/pos/devices','POST',{code:deviceCode,locationId:location});if(!created?.id)throw new Error('Server did not return a device ID');setDevice(created.id);await window.pos.setConfig('deviceId',created.id);await window.pos.setConfig('locationId',location);await window.pos.setConfig('apiUrl',api);setStatus('POS device registered and saved. Open a cashier shift next.');}catch(e){setStatus('Device registration failed: '+String(e));}finally{setBusy(false);}}
+async function registerDevice(){if(!token){setStatus('Sign in before registering a device');return;}if(!location){setStatus('Select a branch first');return;}if(!/^[A-Z0-9_-]{3,50}$/.test(deviceCode)){setStatus('Device code must be 3ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“50 uppercase letters, digits, underscores or hyphens');return;}if(device){setStatus('This terminal already has a registered device ID. Do not create another without administrator approval.');return;}setBusy(true);try{const created=await request('/pos/devices','POST',{code:deviceCode,locationId:location});if(!created?.id)throw new Error('Server did not return a device ID');setDevice(created.id);await window.pos.setConfig('deviceId',created.id);await window.pos.setConfig('locationId',location);await window.pos.setConfig('apiUrl',api);setStatus('POS device registered and saved. Open a cashier shift next.');}catch(e){setStatus('Device registration failed: '+String(e));}finally{setBusy(false);}}
 async function openShift(){setBusy(true);try{const r=await request('/pos/shifts/open','POST',{deviceId:device,openingCash:Number(opening)});setShift(r.id);setServerShiftSummary(null);setServerSummaryFetchedAt("");setReviewAcknowledged(false);await window.pos.setConfig('shiftId',r.id);setStatus('Shift opened successfully');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function cacheCatalog(){setBusy(true);try{const products=await request('/catalog/products');const variants:Variant[]=products.flatMap((p:any)=>(p.variants||[]).filter((v:any)=>v.active).map((v:any)=>({id:v.id,barcode:v.barcode,sku:v.sku,title:p.title,size:v.size,color:v.color,price:Number(v.price)})));await window.pos.replaceCatalog(variants);setItems(variants);setStatus(`Cached ${variants.length} variants for offline lookup`);}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function sync(silent=false){if(!token||syncingRef.current||authBlockedRef.current){if(authBlockedRef.current&&!silent)setStatus('Session expired or unauthorized. Sign in again under Setup & shift before retrying.');return;}syncingRef.current=true;if(!silent)setBusy(true);let ok=0,conflicts=0;try{for(const row of await window.pos.pendingSales()){try{const result=await recoverPendingSale(row,device,request);if(result.status==='ACCEPTED'){await window.pos.setSaleResult(row.id,'ACCEPTED');ok++;}else if(result.status==='STOCK_CONFLICT'){await window.pos.setSaleResult(row.id,'STOCK_CONFLICT',result.conflictReason ?? undefined);conflicts++;}else await window.pos.setSaleResult(row.id,'PENDING','Unexpected server status');}catch(e){await window.pos.setSaleResult(row.id,'PENDING',String(e));if(/Unauthorized|HTTP 401/i.test(String(e))){authBlockedRef.current=true;setStatus('POS sync paused: session unauthorized. Sign in again under Setup & shift. Local sales are preserved.');}else if(!silent)setStatus('Sync paused: '+String(e));break;}}await refreshHistory();if(!silent||ok||conflicts)if(!authBlockedRef.current)setStatus(`Sync complete: ${ok} accepted, ${conflicts} stock conflicts. Pending items remain queued.`);}catch(e){if(!silent)setStatus('Sync failed: '+String(e));}finally{syncingRef.current=false;if(!silent)setBusy(false);}}
@@ -121,6 +124,251 @@ async function quotePromotion(){
   setPromoQuote(r);
   setStatus(r.promotion.eligible?'Promotion preview calculated; checkout remains at full price.':'Promotion unavailable: '+r.promotion.reason);
  }catch(e){setPromoQuote(null);setStatus('Promotion quote failed: '+String(e));}finally{setBusy(false)}
+}
+// R8_01G_4B5B2_CLEARANCE_CHECKOUT
+
+async function refreshClearanceAttempts(){
+ setClearanceAttempts(await window.pos.listClearance());
+}
+
+async function reconcileClearanceAttempt(a:any){
+ if(!token){
+  setStatus('Sign in before clearance reconciliation.');
+  return;
+ }
+
+ setBusy(true);
+
+ try{
+  const payload=JSON.parse(a.payload);
+
+  const result=await request(
+   '/pos/checkout/clearance-status/'+
+   encodeURIComponent(payload.deviceId)+'/'+
+   encodeURIComponent(payload.localSaleId)
+  );
+
+  if(
+   result.found===true&&
+   result.clearanceSale===true&&
+   result.status==='ACCEPTED'&&
+   result.paymentState==='SALE_RECORDED'&&
+   result.integrity?.allocationValid===true
+  ){
+   await window.pos.updateClearance(
+    a.id,'ACCEPTED',result
+   );
+
+   setStatus(
+    'Clearance sale confirmed. Receipt available: '+
+    a.id.slice(0,8)
+   );
+  }else{
+   await window.pos.updateClearance(
+    a.id,
+    'UNKNOWN',
+    undefined,
+    'Manager reconciliation required. Do not collect payment again.'
+   );
+
+   setStatus(
+    'Clearance sale not confirmed. Do not charge or resubmit. '+
+    'Manager reconciliation required.'
+   );
+  }
+
+  await refreshClearanceAttempts();
+ }catch(e){
+  setStatus(
+   'Clearance recovery unavailable: '+String(e)+
+   '. Do not collect payment again.'
+  );
+ }finally{
+  setBusy(false);
+ }
+}
+
+async function completeClearanceCheckout(){
+ if(!clearanceCheckoutEnabled){
+  setStatus('Clearance checkout is disabled in this desktop build.');
+  return;
+ }
+
+ if(checkoutLockRef.current||busy)return;
+
+ if(!token||!online||!device||!shift||!location||!cart.length){
+  setStatus('Online login, branch, device, shift and cart required.');
+  return;
+ }
+
+ const quote=currentClearanceQuote;
+
+ if(!quote||!quote.stockReady){
+  setStatus('Obtain a stock-ready clearance quote first.');
+  return;
+ }
+
+ if(
+  !Number.isFinite(Date.parse(quote.expiresAt))||
+  Date.now()>=Date.parse(quote.expiresAt)
+ ){
+  setStatus('Clearance quote expired. Request a new quote.');
+  return;
+ }
+
+ const due=Math.round(Number(quote.total)*100);
+ const discount=Math.round(Number(quote.discount)*100);
+
+ if(
+  !Number.isSafeInteger(due)||
+  due<0||
+  !Number.isSafeInteger(discount)||
+  discount<=0
+ ){
+  setStatus('A valid positive clearance discount is required.');
+  return;
+ }
+
+ const cash=tender==='CASH'
+  ?due
+  :tender==='CARD'
+   ?0
+   :Math.round(Number(cashAmount)*100);
+
+ if(
+  !Number.isSafeInteger(cash)||
+  cash<0||
+  cash>due||
+  (tender==='SPLIT'&&(cash===0||cash===due))
+ ){
+  setStatus('Invalid clearance tender split.');
+  return;
+ }
+
+ if(
+  (tender==='CARD'||tender==='SPLIT')&&
+  !reference.trim()
+ ){
+  setStatus('Card terminal reference required.');
+  return;
+ }
+
+ const existing=await window.pos.listClearance();
+
+ if(existing.some(a=>
+  a.status==='PREPARED'||a.status==='UNKNOWN'
+ )){
+  setStatus(
+   'An unresolved clearance attempt exists. '+
+   'Reconcile it before another clearance checkout.'
+  );
+  return;
+ }
+
+ if(!window.confirm(
+  'CLEARANCE CHECKOUT: This records a real sale and reduces '+
+  'branch stock. Confirm payment has already been authorized '+
+  'for the discounted amount. Continue?'
+ ))return;
+
+ checkoutLockRef.current=true;
+ setBusy(true);
+
+ try{
+  const snapshot={
+   deviceId:device,
+   shiftId:shift,
+   locationId:location,
+   ...(selectedCustomer?{customerId:selectedCustomer.id}:{}),
+   lines:cart.map(l=>({
+    variantId:l.item.id,
+    quantity:l.qty,
+    unitPrice:l.item.price
+   })),
+   tenders:[
+    ...(cash>0?[{
+     type:'CASH',
+     amount:cash/100
+    }]:[]),
+    ...(due-cash>0?[{
+     type:'CARD',
+     amount:(due-cash)/100,
+     reference:reference.trim()
+    }]:[])
+   ]
+  };
+
+  // Persist before any network submission.
+  const attempt=await window.pos.prepareClearance(snapshot);
+
+  await refreshClearanceAttempts();
+
+  try{
+   const response=await request(
+    '/pos/checkout/clearance-sale',
+    'POST',
+    attempt.payload
+   );
+
+   // A response alone is not enough to finalize a receipt.
+   // Retrieve the authoritative server-side allocation.
+   const confirmed=await request(
+    '/pos/checkout/clearance-status/'+
+    encodeURIComponent(attempt.payload.deviceId)+'/'+
+    encodeURIComponent(attempt.payload.localSaleId)
+   );
+
+   if(
+    response.status!=='ACCEPTED'||
+    confirmed.found!==true||
+    confirmed.clearanceSale!==true||
+    confirmed.status!=='ACCEPTED'||
+    confirmed.paymentState!=='SALE_RECORDED'||
+    confirmed.integrity?.allocationValid!==true
+   ){
+    throw Error('Sale requires server reconciliation.');
+   }
+
+   await window.pos.updateClearance(
+    attempt.id,'ACCEPTED',confirmed
+   );
+
+   setCart([]);
+   setClearanceQuote(null);
+   setClearanceSignature('');
+   setSelectedCustomer(null);
+   setReference('');
+   setCashAmount('0');
+
+   setStatus(
+    'Clearance sale accepted: '+
+    attempt.id.slice(0,8)+
+    '. Receipt available in Sales & sync.'
+   );
+  }catch(e){
+   await window.pos.updateClearance(
+    attempt.id,
+    'UNKNOWN',
+    undefined,
+    String(e)
+   );
+
+   setStatus(
+    'Clearance transaction uncertain: '+String(e)+
+    '. Do not charge again. Reconcile using Sales & sync.'
+   );
+  }
+
+  await refreshClearanceAttempts();
+ }catch(e){
+  setStatus(
+   'Clearance preparation failed: '+String(e)+
+   '. Check the clearance ledger before attempting again.'
+  );
+ }finally{
+  checkoutLockRef.current=false;
+  setBusy(false);
+ }
 }
 async function refreshDiscountAttempts(){setDiscountAttempts(await window.pos.listDiscounted());}
 async function reconcileDiscountAttempt(a:any){
@@ -360,7 +608,7 @@ async function closeShift(){
  }
 }
 async function saveSettings(){await Promise.all([window.pos.setConfig('apiUrl',api),window.pos.setConfig('deviceId',device),window.pos.setConfig('locationId',location)]);setStatus('Device settings saved locally');}
-return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop Ã‚Â· v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier shift'}</h1><p>Barcode-first checkout Ã‚Â· Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now {pending>0?`(${pending})`:''}</button></header>{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>Ãƒâ€”</button></div>}
+return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop Ãƒâ€šÃ‚Â· v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier shift'}</h1><p>Barcode-first checkout Ãƒâ€šÃ‚Â· Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now {pending>0?`(${pending})`:''}</button></header>{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>ÃƒÆ’Ã¢â‚¬â€</button></div>}
 {tab==='settings'&&<div className="settingsgrid"><section className="panel"><h2>1. API login</h2><label>Backend API URL<input value={api} readOnly title="API endpoint is locked for this testing environment"/></label><label>Email<input value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button onClick={login} disabled={busy||!email||!password}>Sign in to central API</button><div className="hint">{token?'Authenticated for this session':'Not signed in'}. Login again after restarting.</div></section><section className="panel"><h2>2. Register branch device</h2><button className="secondary" onClick={()=>void loadBranches()} disabled={!token||busy}>Load available branches</button><label>Assigned branch<select value={location} disabled={!!device||!!shift} onChange={e=>setLocation(e.target.value)}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}{location&&!branches.some(b=>b.id===location)&&<option value={location}>Previously configured branch ({location})</option>}</select></label><label>Device registration code<input value={deviceCode} disabled={!!device} onChange={e=>setDeviceCode(e.target.value.toUpperCase())} placeholder="BRANCH1-POS01"/></label><button onClick={()=>void registerDevice()} disabled={!token||!location||!!device||busy}>Register this terminal</button><label>Registered POS device UUID<input value={device} readOnly/></label><button className="secondary" onClick={()=>void saveSettings()} disabled={!device||!location||!!shift}>Save connection settings</button><div className="hint">Register once per physical terminal. The registered device is bound to its branch; changing branch requires administrator-assisted reprovisioning. Do not delete local sales data.</div></section><section className="panel"><h2>3. Cashier shift</h2><label>Opening cash (PKR)<input type="number" min="0" value={opening} onChange={e=>setOpening(e.target.value)}/></label><label>Current shift UUID<input value={shift} readOnly/></label><button onClick={openShift} disabled={busy||!token||!device||!!shift}>Open shift</button><div className="hint">Close requires all local shift sales accepted centrally. Stock conflicts must be reconciled first.</div><button className="secondary" onClick={refreshHistory}>Refresh reconciliation</button><button className="secondary" onClick={()=>void loadShiftSummary()} disabled={!shift||!token||busy}>Fetch central shift summary</button>{centralSummary&&(
  <div className="panel">
   <h3>Central cash reconciliation</h3>
@@ -397,7 +645,7 @@ return <div className="app"><aside className="sidebar"><div className="brand"><d
    Refresh after any refund or drawer activity.
   </p>
  </div>
-)}<div className="hint">Local shift transactions: {shiftSales.length} Ã‚Â· Accepted: {accepted.length} Ã‚Â· Pending: {queued.length} Ã‚Â· Stock conflicts: {conflicted.length}</div>{conflicted.length>0&&<label className="hint"><input type="checkbox" checked={reviewAcknowledged} onChange={e=>setReviewAcknowledged(e.target.checked)}/> I reviewed {conflicted.length} stock-conflicted sale(s). These are NOT accepted sales and require manager follow-up.</label>}<div className="hint">Accepted cash sales: {money(shiftCash)} Ã‚Â· Card sales: {money(shiftCard)} Ã‚Â· Unresolved: {unsettled.length}</div><div className="hint">Local estimate only (excludes drawer movements): {money(localCashEstimate)}</div><label>Counted closing cash (PKR)<input type="number" min="0" step="0.01" value={closingCash} onChange={e=>setClosingCash(e.target.value)}/></label><div className="hint">
+)}<div className="hint">Local shift transactions: {shiftSales.length} Ãƒâ€šÃ‚Â· Accepted: {accepted.length} Ãƒâ€šÃ‚Â· Pending: {queued.length} Ãƒâ€šÃ‚Â· Stock conflicts: {conflicted.length}</div>{conflicted.length>0&&<label className="hint"><input type="checkbox" checked={reviewAcknowledged} onChange={e=>setReviewAcknowledged(e.target.checked)}/> I reviewed {conflicted.length} stock-conflicted sale(s). These are NOT accepted sales and require manager follow-up.</label>}<div className="hint">Accepted cash sales: {money(shiftCash)} Ãƒâ€šÃ‚Â· Card sales: {money(shiftCard)} Ãƒâ€šÃ‚Â· Unresolved: {unsettled.length}</div><div className="hint">Local estimate only (excludes drawer movements): {money(localCashEstimate)}</div><label>Counted closing cash (PKR)<input type="number" min="0" step="0.01" value={closingCash} onChange={e=>setClosingCash(e.target.value)}/></label><div className="hint">
  {centralVariance===null
   ? 'Central variance unavailable. Fetch central shift summary.'
   : 'Variance against last central snapshot: '+
@@ -407,6 +655,37 @@ return <div className="app"><aside className="sidebar"><div className="brand"><d
 <h2>Checkout preflight (online, advisory)</h2>
 <button className="secondary" disabled={busy||!token||!cart.length} onClick={()=>void checkCheckout()}>Check HQ prices and branch stock</button>
 <p className="hint">This check does not authorize discounts or reserve stock. Offline sales still require reconciliation.</p>
+<section aria-label="Clearance checkout control">
+<h3>Clearance checkout</h3>
+<p className="hint">
+Online-only transaction. The original clearance attempt
+is saved locally before submission.
+</p>
+<button
+ className="secondary"
+ disabled={
+  !clearanceCheckoutEnabled||
+  busy||
+  clearanceBusy||
+  !online||
+  !token||
+  !shift||
+  !currentClearanceQuote||
+  !currentClearanceQuote.stockReady||
+  Number(currentClearanceQuote.discount)<=0||
+  Date.now()>=Date.parse(currentClearanceQuote.expiresAt)
+ }
+ onClick={()=>void completeClearanceCheckout()}
+>
+ {clearanceCheckoutEnabled
+  ?'Record clearance sale at HQ discounted total'
+  :'Clearance checkout disabled'}
+</button>
+<p className="hint">
+Never retry an uncertain transaction automatically.
+Use Sales &amp; sync to recover its original transaction ID.
+</p>
+</section>
 <section aria-label="Clearance quotation">
 <h2>Clearance campaign quote (online preview)</h2>
 <p className="hint">
@@ -468,15 +747,72 @@ or change the normal checkout total.
 </section>
 <h2>Promotion quote (preview only)</h2>
 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}><input placeholder="Promotion code" value={promoCode} onChange={e=>{setPromoCode(e.target.value.toUpperCase());setPromoQuote(null)}}/><button className="secondary" disabled={busy||!token||!cart.length} onClick={()=>void quotePromotion()}>Get HQ promotion quote</button></div>
-{promoQuote&&<p className="hint">Catalog subtotal: {money(Number(promoQuote.subtotal))} Ã‚Â· Preview discount: {money(Number(promoQuote.discount))} Ã‚Â· Preview total: {money(Number(promoQuote.total))} Ã‚Â· {promoQuote.promotion.reason}. This is NOT the amount charged; checkout still uses the normal total.</p>}
+{promoQuote&&<p className="hint">Catalog subtotal: {money(Number(promoQuote.subtotal))} Ãƒâ€šÃ‚Â· Preview discount: {money(Number(promoQuote.discount))} Ãƒâ€šÃ‚Â· Preview total: {money(Number(promoQuote.total))} Ãƒâ€šÃ‚Â· {promoQuote.promotion.reason}. This is NOT the amount charged; checkout still uses the normal total.</p>}
 <h2>Customer (optional)</h2>
-{selectedCustomer?<div><strong>{selectedCustomer.name}</strong> Ã¢â‚¬â€ {selectedCustomer.phone} <button className="secondary" onClick={()=>setSelectedCustomer(null)}>Remove customer</button></div>:<div>
+{selectedCustomer?<div><strong>{selectedCustomer.name}</strong> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {selectedCustomer.phone} <button className="secondary" onClick={()=>setSelectedCustomer(null)}>Remove customer</button></div>:<div>
 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}><input placeholder="Search customer by phone (online)" value={customerQuery} onChange={e=>setCustomerQuery(e.target.value)}/><button className="secondary" disabled={!token||busy||customerQuery.trim().length<5} onClick={()=>void findCustomers()}>Search</button></div>
-{customerMatches.map(c=><div key={c.id} style={{marginTop:6}}><button className="secondary" onClick={()=>{setSelectedCustomer(c);setCustomerMatches([])}}>{c.name} Ã¢â‚¬â€ {c.phone}</button></div>)}
+{customerMatches.map(c=><div key={c.id} style={{marginTop:6}}><button className="secondary" onClick={()=>{setSelectedCustomer(c);setCustomerMatches([])}}>{c.name} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â {c.phone}</button></div>)}
 </div>}
 <p className="hint">Customer search needs an internet connection. Once selected, the customer ID is saved with the offline sale and synchronized later. No loyalty points or discounts are applied yet.</p>
-</section><section className="panel searchpanel"><h2>Find footwear</h2><div className="search"><Search size={21}/><input autoFocus placeholder="Scan barcode or search product, SKU, size..." value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&results.length===1)add(results[0]);}}/></div><div className="hint">Barcode scanners that act as keyboards work in this field. Press Enter for an exact single match.</div><div className="results">{query&&results.length===0&&<div className="empty">No matching cached products</div>}{results.map(v=><button className="product" key={v.id} onClick={()=>add(v)}><div className="shoe"><Package size={22}/></div><div className="productinfo"><strong>{v.title}</strong><small>{v.sku} Ã‚Â· Size {v.size} Ã‚Â· {v.color}</small><small>Barcode: {v.barcode}</small></div><strong>{money(v.price)}</strong><Plus size={18}/></button>)}{!query&&<div className="empty"><Search size={34}/><h3>Ready to scan</h3><p>Search a product or scan a barcode to add it to the sale.</p></div>}</div></section><section className="panel cartpanel"><div className="carthead"><h2>Current sale</h2><span>{cart.reduce((s,l)=>s+l.qty,0)} pairs</span></div><div className="cartitems">{cart.length===0?<div className="empty">Your cart is empty</div>:cart.map(l=><div className="cartline" key={l.item.id}><div className="productinfo"><strong>{l.item.title}</strong><small>{l.item.sku} Ã‚Â· {l.item.size} Ã‚Â· {l.item.color}</small><small>{money(l.item.price)} each</small></div><div className="qty"><button onClick={()=>change(l.item.id,-1)}><Minus size={14}/></button>{l.qty}<button onClick={()=>change(l.item.id,1)}><Plus size={14}/></button></div><strong>{money(l.item.price*l.qty)}</strong><button className="iconbutton" onClick={()=>setCart(old=>old.filter(x=>x.item.id!==l.item.id))}><Trash2 size={16}/></button></div>)}</div><div className="summary"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Discount / Tax</span><span>Not configured</span></div><div className="grand"><span>Total due</span><strong>{money(total)}</strong></div><div className="tenders"><button className={tender==='CASH'?'selected':''} onClick={()=>setTender('CASH')}>Cash</button><button className={tender==='CARD'?'selected':''} onClick={()=>setTender('CARD')}>Card</button><button className={tender==='SPLIT'?'selected':''} onClick={()=>setTender('SPLIT')}>Split</button></div>{tender==='SPLIT'&&<label>Cash portion (PKR)<input type="number" min="0" max={total} step="0.01" value={cashAmount} onChange={e=>setCashAmount(e.target.value)}/><span className="hint">Card portion: {money(Math.max(0,total-(Number(cashAmount)||0)))}</span></label>}{(tender==='CARD'||tender==='SPLIT')&&<label>Card reference<input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Approved terminal reference"/></label>}<button className="secondary" disabled={import.meta.env.VITE_ENABLE_DISCOUNT_SANDBOX!=='true'||busy||!online||!token||!promoQuote?.promotion?.eligible||!cart.length||!shift} onClick={()=>void completeDiscountedSandbox()}>SANDBOX ONLY Ã‚Â· Record discounted test sale</button><p className="hint">Posts real database inventory movement; use test data only. Not approved for real payments.</p><button className="checkout" onClick={complete} disabled={busy||!cart.length||!shift}>Complete sale Ã‚Â· Save locally</button><p className="hint">Offline sales are provisional until HQ accepts them. A stock conflict requires manager reconciliation; a card reference is not proof of payment authorization.</p></div></section></div>}
+</section><section className="panel searchpanel"><h2>Find footwear</h2><div className="search"><Search size={21}/><input autoFocus placeholder="Scan barcode or search product, SKU, size..." value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&results.length===1)add(results[0]);}}/></div><div className="hint">Barcode scanners that act as keyboards work in this field. Press Enter for an exact single match.</div><div className="results">{query&&results.length===0&&<div className="empty">No matching cached products</div>}{results.map(v=><button className="product" key={v.id} onClick={()=>add(v)}><div className="shoe"><Package size={22}/></div><div className="productinfo"><strong>{v.title}</strong><small>{v.sku} Ãƒâ€šÃ‚Â· Size {v.size} Ãƒâ€šÃ‚Â· {v.color}</small><small>Barcode: {v.barcode}</small></div><strong>{money(v.price)}</strong><Plus size={18}/></button>)}{!query&&<div className="empty"><Search size={34}/><h3>Ready to scan</h3><p>Search a product or scan a barcode to add it to the sale.</p></div>}</div></section><section className="panel cartpanel"><div className="carthead"><h2>Current sale</h2><span>{cart.reduce((s,l)=>s+l.qty,0)} pairs</span></div><div className="cartitems">{cart.length===0?<div className="empty">Your cart is empty</div>:cart.map(l=><div className="cartline" key={l.item.id}><div className="productinfo"><strong>{l.item.title}</strong><small>{l.item.sku} Ãƒâ€šÃ‚Â· {l.item.size} Ãƒâ€šÃ‚Â· {l.item.color}</small><small>{money(l.item.price)} each</small></div><div className="qty"><button onClick={()=>change(l.item.id,-1)}><Minus size={14}/></button>{l.qty}<button onClick={()=>change(l.item.id,1)}><Plus size={14}/></button></div><strong>{money(l.item.price*l.qty)}</strong><button className="iconbutton" onClick={()=>setCart(old=>old.filter(x=>x.item.id!==l.item.id))}><Trash2 size={16}/></button></div>)}</div><div className="summary"><div><span>Subtotal</span><strong>{money(total)}</strong></div><div><span>Discount / Tax</span><span>Not configured</span></div><div className="grand"><span>Total due</span><strong>{money(total)}</strong></div><div className="tenders"><button className={tender==='CASH'?'selected':''} onClick={()=>setTender('CASH')}>Cash</button><button className={tender==='CARD'?'selected':''} onClick={()=>setTender('CARD')}>Card</button><button className={tender==='SPLIT'?'selected':''} onClick={()=>setTender('SPLIT')}>Split</button></div>{tender==='SPLIT'&&<label>Cash portion (PKR)<input type="number" min="0" max={total} step="0.01" value={cashAmount} onChange={e=>setCashAmount(e.target.value)}/><span className="hint">Card portion: {money(Math.max(0,total-(Number(cashAmount)||0)))}</span></label>}{(tender==='CARD'||tender==='SPLIT')&&<label>Card reference<input value={reference} onChange={e=>setReference(e.target.value)} placeholder="Approved terminal reference"/></label>}<button className="secondary" disabled={import.meta.env.VITE_ENABLE_DISCOUNT_SANDBOX!=='true'||busy||!online||!token||!promoQuote?.promotion?.eligible||!cart.length||!shift} onClick={()=>void completeDiscountedSandbox()}>SANDBOX ONLY Ãƒâ€šÃ‚Â· Record discounted test sale</button><p className="hint">Posts real database inventory movement; use test data only. Not approved for real payments.</p><button className="checkout" onClick={complete} disabled={busy||!cart.length||!shift}>Complete sale Ãƒâ€šÃ‚Â· Save locally</button><p className="hint">Offline sales are provisional until HQ accepts them. A stock conflict requires manager reconciliation; a card reference is not proof of payment authorization.</p></div></section></div>}
 {tab==='history'&&<section className="panel"><h2>Discounted checkout recovery</h2><button className="secondary" onClick={()=>void refreshDiscountAttempts()}>Refresh attempts</button><div className="tablewrap"><table><thead><tr><th>Attempt</th><th>Status</th><th>Recorded</th><th>Action</th></tr></thead><tbody>{discountAttempts.map(a=><tr key={a.id}><td>{a.id.slice(0,8)}</td><td>{a.status}</td><td>{new Date(a.created_at).toLocaleString()}</td><td>{a.status==='ACCEPTED'?<button className="secondary" onClick={async()=>{try{const r=await window.pos.printDiscounted(a.id);if(!r.success)setStatus('Print failed: '+r.reason)}catch(e){setStatus(String(e))}}}>Print discounted receipt</button>:<button className="secondary" disabled={busy||!token} onClick={()=>void reconcileDiscountAttempt(a)}>Check server status</button>}</td></tr>)}</tbody></table></div></section>}
+{tab==='history'&&
+<section className="panel">
+<h2>Clearance checkout recovery</h2>
+<p className="hint">
+These records are separate from ordinary offline sales.
+UNKNOWN and PREPARED attempts must be reconciled.
+</p>
+<button
+ className="secondary"
+ onClick={()=>void refreshClearanceAttempts()}
+ disabled={busy}
+>
+ Refresh clearance attempts
+</button>
+<div className="tablewrap">
+<table>
+<thead>
+<tr>
+<th>Transaction</th>
+<th>Status</th>
+<th>Created</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+{clearanceAttempts.map(a=>(
+<tr key={a.id}>
+<td>{a.id.slice(0,8)}</td>
+<td>{a.status}</td>
+<td>{new Date(a.created_at).toLocaleString()}</td>
+<td>
+{a.status==='ACCEPTED'
+ ?<button
+   className="secondary"
+   onClick={async()=>{
+    try{
+     const result=await window.pos.printClearance(a.id);
+     if(!result.success)setStatus('Receipt: '+result.reason);
+    }catch(e){setStatus(String(e));}
+   }}
+  >
+   Print clearance receipt
+  </button>
+ :<button
+   className="secondary"
+   disabled={busy||!token}
+   onClick={()=>void reconcileClearanceAttempt(a)}
+  >
+   Check server status
+  </button>}
+</td>
+</tr>
+))}
+</tbody>
+</table>
+</div>
+</section>}
 {tab==='history'&&<ReturnsPanel request={request} location={location} token={token} shiftId={shift}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
   <div className="hint">
     Total recorded: <strong>{history.length}</strong>
@@ -507,6 +843,6 @@ or change the normal checkout total.
     or collect customer payment again without reconciliation.
   </p>
 }
-<div className="tablewrap"><table><thead><tr><th>Local sale</th><th>Created</th><th>Total</th><th>Status</th><th>Details</th><th>Receipt</th></tr></thead><tbody>{history.filter(s=>historyFilter==='ALL'||s.status===historyFilter).map(s=><tr key={s.id}><td>{s.id.slice(0,8)}Ã¢â‚¬Â¦</td><td>{new Date(s.created_at).toLocaleString()}</td><td>{money(JSON.parse(s.payload).tenders.reduce((n:number,t:any)=>n+t.amount,0))}</td><td><span className={'status '+s.status.toLowerCase()}>{s.status}</span></td><td>{s.error||'Ã¢â‚¬â€'}</td><td><button className="secondary" onClick={async()=>{try{const result=await window.pos.printReceipt(s.id);if(!result.success)setStatus('Print cancelled or failed: '+(result.reason||''));}catch(e){setStatus(String(e));}}}>Print</button></td></tr>)}</tbody></table>{!history.filter(s=>historyFilter==='ALL'||s.status===historyFilter).length&&<div className="empty">No transactions match this filter</div>}</div></section>}
+<div className="tablewrap"><table><thead><tr><th>Local sale</th><th>Created</th><th>Total</th><th>Status</th><th>Details</th><th>Receipt</th></tr></thead><tbody>{history.filter(s=>historyFilter==='ALL'||s.status===historyFilter).map(s=><tr key={s.id}><td>{s.id.slice(0,8)}ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</td><td>{new Date(s.created_at).toLocaleString()}</td><td>{money(JSON.parse(s.payload).tenders.reduce((n:number,t:any)=>n+t.amount,0))}</td><td><span className={'status '+s.status.toLowerCase()}>{s.status}</span></td><td>{s.error||'ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â'}</td><td><button className="secondary" onClick={async()=>{try{const result=await window.pos.printReceipt(s.id);if(!result.success)setStatus('Print cancelled or failed: '+(result.reason||''));}catch(e){setStatus(String(e));}}}>Print</button></td></tr>)}</tbody></table>{!history.filter(s=>historyFilter==='ALL'||s.status===historyFilter).length&&<div className="empty">No transactions match this filter</div>}</div></section>}
 </main></div>}
 createRoot(document.getElementById('root')!).render(<App/>);

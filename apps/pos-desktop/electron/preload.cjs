@@ -2,6 +2,7 @@ const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('pos',{
  isQaOffline:()=>ipcRenderer.invoke('qa:is-offline'),
  prepareClearance:payload=>ipcRenderer.invoke('clearance:prepare',payload),
+ printClearance:id=>ipcRenderer.invoke('clearance:receipt',id),
  listClearance:()=>ipcRenderer.invoke('clearance:list'),
  updateClearance:(id,status,response,error)=>ipcRenderer.invoke('clearance:update',id,status,response,error), prepareDiscounted:payload=>ipcRenderer.invoke('discounted:prepare',payload),listDiscounted:()=>ipcRenderer.invoke('discounted:list'),updateDiscounted:(id,status,response,error)=>ipcRenderer.invoke('discounted:update',id,status,response,error),printDiscounted:id=>ipcRenderer.invoke('discounted:receipt',id),
  getConfig:key=>ipcRenderer.invoke('config:get',key),setConfig:(key,value)=>ipcRenderer.invoke('config:set',key,value),
