@@ -333,6 +333,13 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    promotion:{eligible:true,reason:'Preview eligible; not authorized for settlement',code:promo.code,title:promo.title}};
  }
  async clearanceSale(dto:ClearanceSaleDto,u:Principal){
+  // Disabled by default until clearance rollout is approved.
+  if(process.env.POS_CLEARANCE_CHECKOUT_ENABLED!=='true'){
+   throw new ForbiddenException(
+    'Clearance checkout is not enabled for this deployment'
+   );
+  }
+
   this.branchAccess(u,dto.locationId);
 
   if(dto.lines.length>1000)
@@ -944,9 +951,110 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    }
 
    this.branchAccess(u, sale.locationId);
-   const redemption=await tx.promotionRedemption.findFirst({where:{saleId:sale.id}});
-   const discountCents=redemption?Math.round(redemption.discountAmount.toNumber()*100):0;
-   const lineNet=discountedLineNets(sale.lines,discountCents);
+   // CLEARANCE_RETURN_ALLOCATION_V1
+   // Use immutable original clearance allocations, never current campaigns.
+   const clearance=await tx.posClearanceAllocation.findMany({
+    where:{saleId:sale.id}
+   });
+
+   const redemption=await tx.promotionRedemption.findFirst({
+    where:{saleId:sale.id}
+   });
+
+   if(clearance.length>0&&redemption){
+    throw new ConflictException(
+     'Mixed promotion and clearance discounts require manual review'
+    );
+   }
+
+   const cents=(value:Prisma.Decimal)=>
+    value.mul(100)
+     .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+     .toNumber();
+
+   const lineNet=new Map<string,number>();
+
+   if(clearance.length>0){
+    const allocations=new Map(
+     clearance.map(a=>[a.saleLineId,a])
+    );
+
+    if(allocations.size!==clearance.length){
+     throw new ConflictException(
+      'Duplicate clearance allocations require review'
+     );
+    }
+
+    for(const sold of sale.lines){
+     const allocation=allocations.get(sold.id);
+
+     const gross=cents(sold.unitPrice)*sold.quantity;
+
+     if(!Number.isSafeInteger(gross)||gross<0){
+      throw new ConflictException('Invalid original sale amount');
+     }
+
+     if(!allocation){
+      // Non-clearance lines retain their original catalog value.
+      lineNet.set(sold.variantId,gross);
+      continue;
+     }
+
+     const allocatedGross=cents(allocation.grossAmount);
+     const allocatedDiscount=cents(allocation.discountAmount);
+     const allocatedNet=cents(allocation.netAmount);
+
+     if(
+      allocation.saleId!==sale.id||
+      allocation.variantId!==sold.variantId||
+      allocation.quantity!==sold.quantity||
+      allocatedGross!==gross||
+      allocatedDiscount<0||
+      allocatedNet<0||
+      allocatedGross!==allocatedDiscount+allocatedNet
+     ){
+      throw new ConflictException(
+       'Original clearance allocation inconsistent; manual review required'
+      );
+     }
+
+     lineNet.set(sold.variantId,allocatedNet);
+    }
+
+    if(clearance.some(a=>
+      !sale.lines.some(l=>l.id===a.saleLineId)
+    )){
+     throw new ConflictException(
+      'Orphan clearance allocation requires review'
+     );
+    }
+
+    const calculatedTotal=[...lineNet.values()]
+     .reduce((sum,value)=>sum+value,0);
+
+    if(
+     !Number.isSafeInteger(calculatedTotal)||
+     calculatedTotal!==cents(sale.total)
+    ){
+     throw new ConflictException(
+      'Clearance allocation total does not match original payment'
+     );
+    }
+   }
+   else{
+    // Preserve existing promotion and standard-sale refund behavior.
+    const discountCents=redemption
+     ?cents(redemption.discountAmount)
+     :0;
+
+    const originalNets=discountedLineNets(
+     sale.lines,discountCents
+    );
+
+    for(const [variantId,net] of originalNets){
+     lineNet.set(variantId,net);
+    }
+   }
    const records=[];
    for(const line of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     const sold=sale.lines.find(l=>l.variantId===line.variantId);
@@ -955,9 +1063,36 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     if(line.quantity>sold.quantity-previouslyReturned)throw new ConflictException('Return exceeds unreturned quantity');
     const net=lineNet.get(line.variantId);
     if(net===undefined)throw new ConflictException('Missing line discount allocation');
-    const cumulative=(qty:number)=>Math.floor(net*qty/sold.quantity);
-    const refundCents=cumulative(previouslyReturned+line.quantity)-cumulative(previouslyReturned);
-    records.push({variantId:line.variantId,quantity:line.quantity,quarantined:line.quarantined===true,refundAmount:new Prisma.Decimal(refundCents).div(100)});
+    if(
+     !Number.isSafeInteger(net)||
+     net<0||
+     sold.quantity<=0
+    ){
+     throw new ConflictException('Invalid refundable line amount');
+    }
+
+    // Cumulative rounding prevents over-refunds and ensures that
+    // multiple partial returns equal the exact original net line value.
+    const cumulative=(qty:number)=>
+     Math.floor(net*qty/sold.quantity);
+
+    const refundCents=
+     cumulative(previouslyReturned+line.quantity)-
+     cumulative(previouslyReturned);
+
+    if(
+     !Number.isSafeInteger(refundCents)||
+     refundCents<0
+    ){
+     throw new ConflictException('Invalid calculated refund');
+    }
+
+    records.push({
+     variantId:line.variantId,
+     quantity:line.quantity,
+     quarantined:line.quarantined===true,
+     refundAmount:new Prisma.Decimal(refundCents).div(100)
+    });
    }
    const ret=await tx.posReturn.create({data:{saleId:sale.id,locationId:sale.locationId,idempotencyKey:dto.idempotencyKey,reason:dto.reason,approvedById:u.id,lines:{create:records}},include:{lines:true}});
    for(const line of records){
