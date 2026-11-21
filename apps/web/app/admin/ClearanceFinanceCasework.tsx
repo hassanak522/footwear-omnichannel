@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 // R8_01G_4B15_CLEARANCE_CASEWORK
 import {useEffect,useState} from 'react';
@@ -35,6 +35,20 @@ type Evidence={
  createdAt:string;
 };
 
+type CaseEvent={
+ id:string;
+ actorId:string|null;
+ action:string;
+ before:unknown;
+ after:unknown;
+ createdAt:string;
+};
+
+type EventReport={
+ caseId:string;
+ truncated:boolean;
+ events:CaseEvent[];
+};
 type Props={
  locationId:string;
  transactions:Transaction[];
@@ -80,6 +94,10 @@ export default function ClearanceFinanceCasework({
  const [evidenceNote,setEvidenceNote]=useState('');
  const [reviewStatus,setReviewStatus]=useState('UNDER_REVIEW');
  const [reviewNote,setReviewNote]=useState('');
+ // R8_01G_4B17_EVENT_VIEW
+ const [events,setEvents]=useState<EventReport|null>(null);
+ const [eventsLoading,setEventsLoading]=useState(false);
+ const [eventsError,setEventsError]=useState('');
 
  async function refresh(){
   if(!locationId)return;
@@ -157,6 +175,22 @@ export default function ClearanceFinanceCasework({
   });
  }
 
+ async function loadEvents(id:string){
+  setEventsLoading(true);
+  setEventsError('');
+  setEvents(null);
+
+  try{
+   const result=await request<EventReport>(
+    '/payment-exceptions/'+encodeURIComponent(id)+'/events'
+   );
+   setEvents(result);
+  }catch(e){
+   setEventsError(String(e));
+  }finally{
+   setEventsLoading(false);
+  }
+ }
  async function attachEvidence(){
   if(!selected)return;
 
@@ -314,6 +348,57 @@ export default function ClearanceFinanceCasework({
      <p><strong>Reason:</strong> {selected.reason}</p>
      <p><strong>Review:</strong> {selected.reviewNote||'Pending'}</p>
 
+     <div className="card stack">
+      <h4>Server audit event history</h4>
+
+      <button
+       className="secondary"
+       disabled={eventsLoading||busy}
+       onClick={()=>loadEvents(selected.id)}
+      >
+       {eventsLoading?'Loading...':'Load audit events'}
+      </button>
+
+      {eventsError&&<p role="alert">{eventsError}</p>}
+
+      {events&&(
+       <>
+        {events.truncated&&(
+         <p role="alert">
+          Event history exceeds 1,000 records.
+          This view is incomplete.
+         </p>
+        )}
+
+        {events.events.map(event=>(
+         <div key={event.id} className="card">
+          <p><strong>Action:</strong> {event.action}</p>
+          <p><strong>Actor:</strong> {event.actorId||'System'}</p>
+          <p>
+           <strong>Recorded:</strong>{' '}
+           {new Date(event.createdAt).toISOString()}
+          </p>
+          <details>
+           <summary>Event changes</summary>
+           <pre style={{
+            whiteSpace:'pre-wrap',
+            overflowWrap:'anywhere'
+           }}>
+            {JSON.stringify({
+             before:event.before,
+             after:event.after
+            },null,2)}
+           </pre>
+          </details>
+         </div>
+        ))}
+
+        {events.events.length===0&&(
+         <p>No server audit events found for this case.</p>
+        )}
+       </>
+      )}
+     </div>
      <h4>Supporting evidence</h4>
 
      {(selected.evidences||[]).map(e=>(
