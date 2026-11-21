@@ -661,6 +661,30 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
      )
     `;
 
+    // R8_01G_4B8B_REGISTERED_CHECKOUT
+    const registered=await tx.posClearanceAttempt.findUnique({
+     where:{
+      deviceId_localSaleId:{
+       deviceId:dto.deviceId,
+       localSaleId:dto.localSaleId
+      }
+     }
+    });
+
+    if(!registered){
+     throw new ConflictException(
+      'Clearance attempt must be registered centrally before checkout'
+     );
+    }
+
+    if(
+     registered.shiftId!==dto.shiftId||
+     registered.locationId!==dto.locationId
+    ){
+     throw new ConflictException(
+      'Clearance attempt registration identity mismatch'
+     );
+    }
     const previous=await tx.posSale.findUnique({
      where:{
       deviceId_localSaleId:{
@@ -685,6 +709,15 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
       where:{saleId:previous.id}
      });
 
+     if(
+      previous.status==='ACCEPTED'&&
+      registered.status!=='ACCEPTED'
+     ){
+      await tx.posClearanceAttempt.update({
+       where:{id:registered.id},
+       data:{status:'ACCEPTED'}
+      });
+     }
      return {
       id:previous.id,
       localSaleId:previous.localSaleId,
@@ -712,6 +745,17 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
        !u.roles.includes('BRANCH_MANAGER'))
      throw new ForbiddenException('Not shift owner');
 
+    if(registered.cashierId!==shift.cashierId){
+     throw new ConflictException(
+      'Clearance registration cashier mismatch'
+     );
+    }
+
+    if(registered.status!=='REGISTERED'){
+     throw new ConflictException(
+      'Clearance attempt is not available for checkout'
+     );
+    }
     const now=new Date();
 
     const ids=dto.lines.map(l=>l.variantId);
@@ -997,6 +1041,11 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
      }
     });
 
+    // Commit sale and central acceptance atomically.
+    await tx.posClearanceAttempt.update({
+     where:{id:registered.id},
+     data:{status:'ACCEPTED'}
+    });
     return {
      id:sale.id,
      localSaleId:sale.localSaleId,
