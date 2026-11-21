@@ -195,6 +195,94 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    include:{tenders:true}
   });
 
+  // R8_01G_4B7_SERVER_SHIFT_GUARD
+  // Validate server-recorded clearance allocations before shift closure.
+  const clearanceAllocations=await tx.posClearanceAllocation.findMany({
+   where:{
+    saleId:{in:sales.map(s=>s.id)}
+   }
+  });
+
+  const allocationsBySale=new Map<string,typeof clearanceAllocations>();
+
+  for(const allocation of clearanceAllocations){
+   const group=allocationsBySale.get(allocation.saleId)||[];
+   group.push(allocation);
+   allocationsBySale.set(allocation.saleId,group);
+  }
+
+  for(const sale of sales){
+   const allocations=allocationsBySale.get(sale.id)||[];
+
+   if(!allocations.length)continue;
+
+   if(sale.status!=='ACCEPTED'){
+    throw new ConflictException(
+     'Unresolved server-recorded clearance sale blocks shift closing'
+    );
+   }
+
+   const lines=await tx.posSaleLine.findMany({
+    where:{saleId:sale.id}
+   });
+
+   const cents=(v:Prisma.Decimal)=>
+    v.mul(100)
+     .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+     .toNumber();
+
+   const total=cents(sale.total);
+
+   const gross=lines.reduce(
+    (sum,l)=>sum+cents(l.unitPrice)*l.quantity,
+    0
+   );
+
+   const discount=allocations.reduce(
+    (sum,a)=>sum+cents(a.discountAmount),
+    0
+   );
+
+   const tenders=sale.tenders.reduce(
+    (sum,t)=>sum+cents(t.amount),
+    0
+   );
+
+   const lineIds=new Set(lines.map(l=>l.id));
+
+   const uniqueAllocations=
+    new Set(allocations.map(a=>a.saleLineId)).size===
+    allocations.length;
+
+   const validAllocations=
+    uniqueAllocations&&
+    allocations.every(a=>{
+     const line=lines.find(l=>l.id===a.saleLineId);
+
+     return (
+      lineIds.has(a.saleLineId)&&
+      !!line&&
+      line.variantId===a.variantId&&
+      line.quantity===a.quantity&&
+      cents(a.grossAmount)===
+       cents(line.unitPrice)*line.quantity&&
+      cents(a.grossAmount)===
+       cents(a.discountAmount)+cents(a.netAmount)
+     );
+    });
+
+   if(
+    !validAllocations||
+    discount<=0||
+    gross-discount!==total||
+    tenders!==total
+   ){
+    throw new ConflictException(
+     'Clearance allocation or tender mismatch. '+
+     'Manager reconciliation required before shift closing.'
+    );
+   }
+  }
   const movements=await tx.drawerMovement.findMany({
    where:{shiftId:id,status:'APPROVED'}
   });
