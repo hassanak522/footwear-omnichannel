@@ -98,6 +98,16 @@ class OnlineDiscountSaleDto extends QuoteCartDto {
  @IsOptional() @IsUUID() customerId?:string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!:SaleTenderDto[];
 }
+class ResolveClearanceAttemptDto {
+ @IsUUID() deviceId!:string;
+ @IsUUID() localSaleId!:string;
+ @IsString() @MinLength(20) @MaxLength(1000)
+ reason!:string;
+ @IsString() @MinLength(5) @MaxLength(200)
+ paymentEvidenceReference!:string;
+ @IsBoolean()
+ externalPaymentReconciled!:boolean;
+}
 class RegisterClearanceAttemptDto {
  @IsUUID() deviceId!:string;
  @IsUUID() localSaleId!:string;
@@ -206,7 +216,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    await tx.posClearanceAttempt.count({
     where:{
      shiftId:id,
-     status:{not:'ACCEPTED'}
+     status:{notIn:['ACCEPTED','RESOLVED_NO_SALE']}
     }
    });
 
@@ -491,6 +501,159 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   });
  }
 
+ // R8_01G_4B8C_MANAGER_RESOLUTION
+ async listClearanceExceptions(
+  locationId:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId)){
+   throw new BadRequestException('Valid branch UUID required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  return this.db.posClearanceAttempt.findMany({
+   where:{
+    locationId,
+    status:{in:['REGISTERED','REVIEW_REQUIRED']}
+   },
+   orderBy:{createdAt:'asc'},
+   take:200,
+   select:{
+    id:true,
+    deviceId:true,
+    localSaleId:true,
+    shiftId:true,
+    locationId:true,
+    cashierId:true,
+    status:true,
+    createdAt:true,
+    updatedAt:true
+   }
+  });
+ }
+
+ async resolveClearanceAttempt(
+  dto:ResolveClearanceAttemptDto,
+  u:Principal
+ ){
+  if(dto.externalPaymentReconciled!==true){
+   throw new BadRequestException(
+    'External payment reconciliation confirmation required'
+   );
+  }
+
+  const reason=dto.reason.trim();
+  const evidence=dto.paymentEvidenceReference.trim();
+
+  if(reason.length<20||evidence.length<5){
+   throw new BadRequestException(
+    'Detailed reason and payment evidence reference required'
+   );
+  }
+
+  return this.db.$transaction(async tx=>{
+   const attempt=await tx.posClearanceAttempt.findUnique({
+    where:{
+     deviceId_localSaleId:{
+      deviceId:dto.deviceId,
+      localSaleId:dto.localSaleId
+     }
+    }
+   });
+
+   if(!attempt){
+    throw new NotFoundException('Clearance attempt not found');
+   }
+
+   this.branchAccess(u,attempt.locationId);
+
+   await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+     hashtext(${`pos-shift-id:${attempt.shiftId}`})
+    )
+   `;
+
+   const current=await tx.posClearanceAttempt.findUniqueOrThrow({
+    where:{id:attempt.id}
+   });
+
+   const shift=await tx.posShift.findUnique({
+    where:{id:current.shiftId}
+   });
+
+   if(!shift||shift.status!=='OPEN'){
+    throw new ConflictException(
+     'Resolution requires an open shift'
+    );
+   }
+
+   if(
+    current.status!=='REGISTERED'&&
+    current.status!=='REVIEW_REQUIRED'
+   ){
+    throw new ConflictException(
+     'Attempt is not eligible for no-sale resolution'
+    );
+   }
+
+   const sale=await tx.posSale.findUnique({
+    where:{
+     deviceId_localSaleId:{
+      deviceId:dto.deviceId,
+      localSaleId:dto.localSaleId
+     }
+    }
+   });
+
+   if(sale){
+    throw new ConflictException(
+     'A recorded sale exists. Reconcile the sale; '+
+     'no-sale resolution is prohibited.'
+    );
+   }
+
+   const updated=await tx.posClearanceAttempt.update({
+    where:{id:current.id},
+    data:{status:'RESOLVED_NO_SALE'}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'POS_CLEARANCE_NO_SALE_RESOLVED',
+     entityType:'PosClearanceAttempt',
+     entityId:current.id,
+     after:{
+      previousStatus:current.status,
+      newStatus:'RESOLVED_NO_SALE',
+      deviceId:current.deviceId,
+      localSaleId:current.localSaleId,
+      shiftId:current.shiftId,
+      locationId:current.locationId,
+      reason,
+      paymentEvidenceReference:evidence,
+      externalPaymentReconciled:true
+     }
+    }
+   });
+
+   return {
+    id:updated.id,
+    status:updated.status,
+    localSaleId:updated.localSaleId,
+    action:
+     'No-sale exception resolved with manager attestation. '+
+     'Original transaction ID must never be reused.'
+   };
+  },{
+   isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+   timeout:15000
+  });
+ }
  async clearanceAttemptStatus(
   deviceId:string,
   localSaleId:string,
@@ -2719,6 +2882,23 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+ @Get('checkout/clearance-exceptions/:locationId')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ listClearanceExceptionsRoute(
+  @Param('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.listClearanceExceptions(locationId,u);
+ }
+
+ @Post('checkout/clearance-attempt/resolve-no-sale')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ resolveClearanceAttemptRoute(
+  @Body() dto:ResolveClearanceAttemptDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.resolveClearanceAttempt(dto,u);
+ }
  @Post('checkout/clearance-attempt/register')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  registerClearanceAttemptRoute(
