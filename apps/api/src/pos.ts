@@ -502,6 +502,98 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
  }
 
  // R8_01G_4B8C_MANAGER_RESOLUTION
+ // R8_01G_4B8E_RESOLUTION_HISTORY
+ async clearanceResolutionHistory(
+  locationId:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId)){
+   throw new BadRequestException('Valid branch UUID required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const attempts=await this.db.posClearanceAttempt.findMany({
+   where:{
+    locationId,
+    status:'RESOLVED_NO_SALE'
+   },
+   orderBy:{updatedAt:'desc'},
+   take:100,
+   select:{
+    id:true,
+    deviceId:true,
+    localSaleId:true,
+    shiftId:true,
+    cashierId:true,
+    locationId:true,
+    status:true,
+    createdAt:true,
+    updatedAt:true
+   }
+  });
+
+  if(!attempts.length){
+   return {
+    locationId,
+    records:[],
+    limit:100
+   };
+  }
+
+  const audits=await this.db.auditLog.findMany({
+   where:{
+    entityType:'PosClearanceAttempt',
+    action:'POS_CLEARANCE_NO_SALE_RESOLVED',
+    entityId:{in:attempts.map(a=>a.id)}
+   },
+   orderBy:{createdAt:'desc'},
+   select:{
+    id:true,
+    entityId:true,
+    actorId:true,
+    createdAt:true,
+    after:true
+   }
+  });
+
+  const auditByAttempt=new Map(
+   audits.map(a=>[a.entityId,a])
+  );
+
+  return {
+   locationId,
+   limit:100,
+   records:attempts.map(attempt=>{
+    const audit=auditByAttempt.get(attempt.id);
+    const detail=audit?.after;
+
+    const data=detail&&
+     typeof detail==='object'&&
+     !Array.isArray(detail)
+      ?detail as Record<string,unknown>
+      :{};
+
+    return {
+     ...attempt,
+     resolvedAt:audit?.createdAt??null,
+     resolvedBy:audit?.actorId??null,
+     reason:typeof data.reason==='string'
+      ?data.reason:null,
+     paymentEvidenceReference:
+      typeof data.paymentEvidenceReference==='string'
+       ?data.paymentEvidenceReference:null,
+     externalPaymentReconciled:
+      data.externalPaymentReconciled===true,
+     auditId:audit?.id??null,
+     auditAvailable:!!audit
+    };
+   })
+  };
+ }
  async listClearanceExceptions(
   locationId:string,
   u:Principal
@@ -2882,6 +2974,14 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+ @Get('checkout/clearance-resolution-history/:locationId')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ clearanceResolutionHistoryRoute(
+  @Param('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.clearanceResolutionHistory(locationId,u);
+ }
  @Get('checkout/clearance-exceptions/:locationId')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  listClearanceExceptionsRoute(

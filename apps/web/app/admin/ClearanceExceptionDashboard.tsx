@@ -1,6 +1,7 @@
-﻿'use client';
+'use client';
 
 import {useEffect,useState} from 'react';
+import ClearanceResolutionHistory from './ClearanceResolutionHistory';
 
 type Location={
   id:string;
@@ -311,6 +312,14 @@ export default function ClearanceExceptionDashboard(){
           </button>
         </article>
       ))}
+
+      {/* R8_01G_4B8E_HISTORY_PANEL */}
+      {branchId&&(
+        <ClearanceResolutionHistory
+          key={branchId}
+          locationId={branchId}
+        />
+      )}
 
       {selected&&(
         <section className="card stack">
