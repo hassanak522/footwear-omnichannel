@@ -1121,6 +1121,209 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    return ret;
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
+ async clearanceSaleStatus(
+  deviceId:string,
+  localSaleId:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(deviceId)||!uuid.test(localSaleId)){
+   throw new BadRequestException('Valid UUIDs required');
+  }
+
+  const device=await this.db.posDevice.findUnique({
+   where:{id:deviceId}
+  });
+
+  if(!device){
+   throw new NotFoundException('POS device not found');
+  }
+
+  this.branchAccess(u,device.locationId);
+
+  const sale=await this.db.posSale.findUnique({
+   where:{
+    deviceId_localSaleId:{
+     deviceId,
+     localSaleId
+    }
+   },
+   include:{
+    lines:true,
+    tenders:true
+   }
+  });
+
+  if(!sale){
+   return {
+    found:false,
+    deviceId,
+    localSaleId,
+    paymentState:'UNKNOWN',
+    action:
+     'Sale not found. Do not collect payment again '+
+     'until the original attempt is reconciled.'
+   };
+  }
+
+  if(sale.locationId!==device.locationId){
+   throw new ConflictException(
+    'Sale location and device location mismatch'
+   );
+  }
+
+  if(
+   sale.cashierId!==u.id&&
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Not shift owner');
+  }
+
+  const allocations=await this.db.posClearanceAllocation.findMany({
+   where:{saleId:sale.id},
+   include:{
+    campaign:{
+     select:{
+      id:true,
+      code:true,
+      title:true
+     }
+    }
+   }
+  });
+
+  const cents=(value:Prisma.Decimal)=>
+   value.mul(100)
+    .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+
+  const fmt=(value:number)=>(value/100).toFixed(2);
+
+  const allocationMap=new Map(
+   allocations.map(a=>[a.saleLineId,a])
+  );
+
+  const lines=sale.lines.map(line=>{
+   const allocation=allocationMap.get(line.id);
+   const gross=cents(line.unitPrice)*line.quantity;
+   const discount=allocation
+    ?cents(allocation.discountAmount)
+    :0;
+   const net=gross-discount;
+
+   return {
+    saleLineId:line.id,
+    variantId:line.variantId,
+    quantity:line.quantity,
+    catalogUnitPrice:line.unitPrice.toString(),
+    gross:fmt(gross),
+    discount:fmt(discount),
+    net:fmt(net),
+    clearanceCampaign:allocation?{
+     id:allocation.campaign.id,
+     code:allocation.campaign.code,
+     title:allocation.campaign.title
+    }:null
+   };
+  });
+
+  const subtotal=lines.reduce(
+   (sum,line)=>sum+Math.round(Number(line.gross)*100),
+   0
+  );
+
+  const discount=allocations.reduce(
+   (sum,a)=>sum+cents(a.discountAmount),
+   0
+  );
+
+  const net=lines.reduce(
+   (sum,line)=>sum+Math.round(Number(line.net)*100),
+   0
+  );
+
+  const total=cents(sale.total);
+
+  const tenderTotal=sale.tenders.reduce(
+   (sum,t)=>sum+cents(t.amount),
+   0
+  );
+
+  const hasClearance=allocations.length>0;
+
+  const allocationValid=
+   hasClearance&&
+   allocationMap.size===allocations.length&&
+   allocations.every(a=>
+    sale.lines.some(l=>
+     l.id===a.saleLineId&&
+     l.variantId===a.variantId&&
+     l.quantity===a.quantity&&
+     cents(a.grossAmount)===
+      cents(l.unitPrice)*l.quantity&&
+     cents(a.grossAmount)===
+      cents(a.discountAmount)+cents(a.netAmount)
+    )
+   )&&
+   subtotal-discount===net&&
+   net===total&&
+   tenderTotal===total;
+
+  if(!hasClearance){
+   return {
+    found:true,
+    clearanceSale:false,
+    id:sale.id,
+    localSaleId:sale.localSaleId,
+    status:sale.status,
+    action:
+     'This sale has no clearance allocation. '+
+     'Use the appropriate standard sale recovery workflow.'
+   };
+  }
+
+  return {
+   found:true,
+   clearanceSale:true,
+   id:sale.id,
+   deviceId,
+   localSaleId:sale.localSaleId,
+   locationId:sale.locationId,
+   shiftId:sale.shiftId,
+   status:sale.status,
+   soldAt:sale.soldAt,
+   currency:'PKR',
+   receipt:{
+    subtotal:fmt(subtotal),
+    discount:fmt(discount),
+    total:sale.total.toString(),
+    lines,
+    tenders:sale.tenders.map(t=>({
+     type:t.type,
+     amount:t.amount.toString(),
+     reference:t.reference
+    }))
+   },
+   integrity:{
+    allocationValid,
+    tenderMatchesTotal:tenderTotal===total,
+    netMatchesTotal:net===total
+   },
+   paymentState:
+    sale.status==='ACCEPTED'&&allocationValid
+     ?'SALE_RECORDED'
+     :'REVIEW_REQUIRED',
+   action:
+    sale.status==='ACCEPTED'&&allocationValid
+     ?'Sale recorded. Do not charge again. Use receipt details.'
+     :'Manager review required. Do not collect payment again.',
+   checkoutMode:'ONLINE_ONLY',
+   offlineReplayAllowed:false
+  };
+ }
  async discountedSaleStatus(deviceId:string,localSaleId:string,u:Principal){
   if(!/^[0-9a-fA-F-]{36}$/.test(deviceId)||!/^[0-9a-fA-F-]{36}$/.test(localSaleId))throw new BadRequestException('Valid UUIDs required');
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:deviceId}});
@@ -2211,6 +2414,19 @@ export class PosController {
   return this.pos.clearanceSale(dto,u);
  }
  @Post('checkout/online-discounted-sale') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') discounted(@Body() dto:OnlineDiscountSaleDto,@CurrentUser() u:Principal){return this.pos.onlineDiscountSale(dto,u);}
+ @Get('checkout/clearance-status/:deviceId/:localSaleId')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ clearanceStatus(
+  @Param('deviceId') deviceId:string,
+  @Param('localSaleId') localSaleId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.clearanceSaleStatus(
+   deviceId,
+   localSaleId,
+   u
+  );
+ }
  @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  discountedStatus(@Param('deviceId') deviceId:string,@Param('localSaleId') localSaleId:string,@CurrentUser() u:Principal){
   return this.pos.discountedSaleStatus(deviceId,localSaleId,u);
