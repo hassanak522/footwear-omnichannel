@@ -72,13 +72,24 @@ export class PurchasingController {
   assertLocation(u,dto.warehouseId);
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
   const loc=await this.db.location.findUniqueOrThrow({where:{id:dto.warehouseId}});
-  if(loc.type!=='WAREHOUSE')throw new BadRequestException('Purchase receiving location must be warehouse');
+  if(loc.type!=='WAREHOUSE'||!loc.active)throw new BadRequestException('Purchase receiving location must be an active warehouse');
   const supplier=await this.db.supplier.findUnique({
    where:{id:dto.supplierId}
   });
   if(!supplier)throw new BadRequestException('Supplier not found');
   if(!supplier.active)
    throw new BadRequestException('Cannot order from inactive supplier');
+  // R9_2_RETAIL_INTEGRITY
+  const activeVariants=await this.db.productVariant.count({
+   where:{
+    id:{in:dto.lines.map(l=>l.variantId)},
+    active:true
+   }
+  });
+
+  if(activeVariants!==dto.lines.length)
+   throw new BadRequestException('Unknown or inactive product variant');
+
   return this.db.purchaseOrder.create({data:{supplierId:dto.supplierId,warehouseId:dto.warehouseId,reference:dto.reference,status:'SUBMITTED',lines:{create:dto.lines.map(l=>({variantId:l.variantId,orderedQty:l.quantity,unitCost:new Prisma.Decimal(l.unitCost.toFixed(2))}))}},include:{lines:true}});
  }
  // R3-B1 PURCHASE ORDER CANCELLATION
@@ -209,6 +220,14 @@ export class PurchasingController {
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`purchase:${id}`}))`;
    const order=await tx.purchaseOrder.findUniqueOrThrow({where:{id},include:{lines:true}});
    assertLocation(u,order.warehouseId);
+
+   const warehouse=await tx.location.findUnique({
+    where:{id:order.warehouseId}
+   });
+
+   if(!warehouse?.active||warehouse.type!=='WAREHOUSE')
+    throw new ConflictException('Receiving warehouse is inactive');
+
    if(order.status==='RECEIVED')throw new ConflictException('Already received');
    if(order.status!=='SUBMITTED')throw new ConflictException('Purchase order not submitted');
    if(dto.lines.length===0)throw new BadRequestException('No receipt lines');
@@ -261,8 +280,60 @@ export class StockCountsController {
  @Post() async create(@Body() dto:CountDto,@CurrentUser() u:Principal){
   assertLocation(u,dto.locationId);
   if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
+  const location=await this.db.location.findUnique({
+   where:{id:dto.locationId}
+  });
+
+  if(!location?.active||
+     !['WAREHOUSE','BRANCH'].includes(location.type))
+   throw new BadRequestException('Invalid stock-count location');
+
+  const variants=await this.db.productVariant.count({
+   where:{
+    id:{in:dto.lines.map(x=>x.variantId)},
+    active:true
+   }
+  });
+
+  if(variants!==dto.lines.length)
+   throw new BadRequestException('Unknown or inactive count variant');
+
   const balances=await this.db.stockBalance.findMany({where:{locationId:dto.locationId,variantId:{in:dto.lines.map(x=>x.variantId)}}});
   return this.db.stockCount.create({data:{locationId:dto.locationId,reference:dto.reference,lines:{create:dto.lines.map(x=>({variantId:x.variantId,countedQty:x.countedQty,expectedQty:balances.find(b=>b.variantId===x.variantId)?.onHand??0}))}},include:{lines:true}});
+ }
+ @Post(':id/cancel')
+ async cancelCount(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.db.$transaction(async tx=>{
+   const count=await tx.stockCount.findUniqueOrThrow({
+    where:{id}
+   });
+
+   assertLocation(u,count.locationId);
+
+   const result=await tx.stockCount.updateMany({
+    where:{id,status:'OPEN'},
+    data:{status:'CANCELLED'}
+   });
+
+   if(result.count!==1)
+    throw new ConflictException('Only open counts can be cancelled');
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'STOCK_COUNT_CANCELLED',
+     entityType:'StockCount',
+     entityId:id,
+     before:{status:'OPEN'},
+     after:{status:'CANCELLED'}
+    }
+   });
+
+   return {id,status:'CANCELLED'};
+  });
  }
  @Post(':id/post') async post(@Param('id') id:string,@CurrentUser() u:Principal){
   return this.db.$transaction(async tx=>{
@@ -282,7 +353,29 @@ export class StockCountsController {
     }
    }
    await tx.stockCount.update({where:{id},data:{status:'POSTED',postedAt:new Date()}});
-   await tx.auditLog.create({data:{actorId:u.id,action:'STOCK_COUNT_POSTED',entityType:'StockCount',entityId:id}});
+   const varianceLines=count.lines
+    .filter(line=>line.countedQty!==line.expectedQty)
+    .map(line=>({
+     variantId:line.variantId,
+     expectedQty:line.expectedQty,
+     countedQty:line.countedQty,
+     delta:line.countedQty-line.expectedQty
+    }));
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'STOCK_COUNT_POSTED',
+     entityType:'StockCount',
+     entityId:id,
+     after:{
+      status:'POSTED',
+      locationId:count.locationId,
+      varianceCount:varianceLines.length,
+      varianceLines
+     }
+    }
+   });
    return {id,status:'POSTED'};
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
