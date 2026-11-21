@@ -1256,3 +1256,46 @@ model StockAvailabilitySnapshot {
   @@index([locationId, variantId, capturedAt])
   @@index([batchId])
 }
+
+// R8-01G: HQ-managed clearance campaigns.
+// Catalog prices remain unchanged.
+
+model ClearanceCampaign {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  title       String
+  description String?
+  type        String
+  value       Decimal  @db.Decimal(12, 2)
+  startsAt    DateTime
+  endsAt      DateTime
+  status      String   @default("DRAFT")
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  variants    ClearanceCampaignVariant[]
+  branches    ClearanceCampaignBranch[]
+
+  @@index([status, startsAt, endsAt])
+}
+
+model ClearanceCampaignVariant {
+  campaignId String @db.Uuid
+  variantId  String @db.Uuid
+
+  campaign ClearanceCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, variantId])
+  @@index([variantId])
+}
+
+model ClearanceCampaignBranch {
+  campaignId String @db.Uuid
+  locationId String @db.Uuid
+
+  campaign ClearanceCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, locationId])
+  @@index([locationId])
+}
