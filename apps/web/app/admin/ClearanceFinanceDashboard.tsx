@@ -2,6 +2,7 @@
 
 import {useEffect,useState} from 'react';
 import ClearanceFinanceCasework from './ClearanceFinanceCasework';
+import ClearanceFinanceAudit from './ClearanceFinanceAudit';
 
 type Branch={
  id:string;
@@ -470,6 +471,11 @@ export default function ClearanceFinanceDashboard(){
      <ClearanceFinanceCasework
       locationId={locationId}
       transactions={caseworkTransactions}
+     />
+     <ClearanceFinanceAudit
+      locationId={locationId}
+      from={from}
+      to={to}
      />
      <div className="card stack">
       <h3>Accepted clearance transactions</h3>
