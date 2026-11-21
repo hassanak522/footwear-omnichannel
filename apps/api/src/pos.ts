@@ -940,6 +940,21 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
       'Clearance attempt registration identity mismatch'
      );
     }
+    // R8_01G_4B11_TERMINAL_CLEARANCE_GUARD
+    if(registered.status==='RESOLVED_NO_SALE'){
+     throw new ConflictException(
+      'Clearance transaction was resolved as no sale. '+
+      'Original transaction ID is permanently retired.'
+     );
+    }
+
+    if(registered.status==='REVIEW_REQUIRED'){
+     throw new ConflictException(
+      'Clearance transaction requires manager review. '+
+      'Checkout is prohibited until reconciliation.'
+     );
+    }
+
     const previous=await tx.posSale.findUnique({
      where:{
       deviceId_localSaleId:{
