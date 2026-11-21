@@ -1324,3 +1324,18 @@ model PosClearanceAllocation {
   @@index([campaignId, createdAt])
   @@index([variantId])
 }
+model PosClearanceAttempt {
+  id          String   @id @default(uuid()) @db.Uuid
+  deviceId    String   @db.Uuid
+  localSaleId String   @db.Uuid
+  shiftId     String   @db.Uuid
+  locationId  String   @db.Uuid
+  cashierId   String   @db.Uuid
+  status      String   @default("REGISTERED")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([deviceId, localSaleId])
+  @@index([shiftId, status])
+  @@index([locationId, createdAt])
+}

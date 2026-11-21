@@ -98,6 +98,12 @@ class OnlineDiscountSaleDto extends QuoteCartDto {
  @IsOptional() @IsUUID() customerId?:string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!:SaleTenderDto[];
 }
+class RegisterClearanceAttemptDto {
+ @IsUUID() deviceId!:string;
+ @IsUUID() localSaleId!:string;
+ @IsUUID() shiftId!:string;
+ @IsUUID() locationId!:string;
+}
 class ClearanceSaleDto {
  @IsUUID() locationId!:string;
  @IsUUID() deviceId!:string;
@@ -195,6 +201,22 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    include:{tenders:true}
   });
 
+  // R8_01G_4B8_CENTRAL_SHIFT_BLOCK
+  const unresolvedCentralAttempts=
+   await tx.posClearanceAttempt.count({
+    where:{
+     shiftId:id,
+     status:{not:'ACCEPTED'}
+    }
+   });
+
+  if(unresolvedCentralAttempts>0){
+   throw new ConflictException(
+    'Shift closing blocked: '+
+    unresolvedCentralAttempts+
+    ' registered clearance attempt(s) require reconciliation'
+   );
+  }
   // R8_01G_4B7_SERVER_SHIFT_GUARD
   // Validate server-recorded clearance allocations before shift closure.
   const clearanceAllocations=await tx.posClearanceAllocation.findMany({
@@ -370,6 +392,161 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
  });
 }
 
+ // R8_01G_4B8_CENTRAL_REGISTRATION
+ async registerClearanceAttempt(
+  dto:RegisterClearanceAttemptDto,
+  u:Principal
+ ){
+  this.branchAccess(u,dto.locationId);
+
+  return this.db.$transaction(async tx=>{
+   await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+     hashtext(${`pos-shift-id:${dto.shiftId}`})
+    )
+   `;
+
+   const shift=await tx.posShift.findUnique({
+    where:{id:dto.shiftId}
+   });
+
+   if(
+    !shift||
+    shift.status!=='OPEN'||
+    shift.deviceId!==dto.deviceId||
+    shift.locationId!==dto.locationId
+   ){
+    throw new ConflictException(
+     'Valid open shift required for clearance registration'
+    );
+   }
+
+   if(
+    shift.cashierId!==u.id&&
+    !u.roles.includes('SUPER_ADMIN')&&
+    !u.roles.includes('BRANCH_MANAGER')
+   ){
+    throw new ForbiddenException('Not shift owner');
+   }
+
+   const device=await tx.posDevice.findUnique({
+    where:{id:dto.deviceId}
+   });
+
+   if(
+    !device||
+    !device.active||
+    device.locationId!==dto.locationId
+   ){
+    throw new BadRequestException('Invalid POS device');
+   }
+
+   const existing=await tx.posClearanceAttempt.findUnique({
+    where:{
+     deviceId_localSaleId:{
+      deviceId:dto.deviceId,
+      localSaleId:dto.localSaleId
+     }
+    }
+   });
+
+   if(existing){
+    if(
+     existing.shiftId!==dto.shiftId||
+     existing.locationId!==dto.locationId||
+     existing.cashierId!==shift.cashierId
+    ){
+     throw new ConflictException(
+      'Clearance transaction identity mismatch'
+     );
+    }
+
+    return {
+     id:existing.id,
+     localSaleId:existing.localSaleId,
+     status:existing.status,
+     duplicate:true
+    };
+   }
+
+   const attempt=await tx.posClearanceAttempt.create({
+    data:{
+     deviceId:dto.deviceId,
+     localSaleId:dto.localSaleId,
+     shiftId:dto.shiftId,
+     locationId:dto.locationId,
+     cashierId:shift.cashierId,
+     status:'REGISTERED'
+    }
+   });
+
+   return {
+    id:attempt.id,
+    localSaleId:attempt.localSaleId,
+    status:attempt.status,
+    duplicate:false
+   };
+  },{
+   isolationLevel:Prisma.TransactionIsolationLevel.Serializable
+  });
+ }
+
+ async clearanceAttemptStatus(
+  deviceId:string,
+  localSaleId:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(deviceId)||!uuid.test(localSaleId)){
+   throw new BadRequestException('Valid UUIDs required');
+  }
+
+  const device=await this.db.posDevice.findUnique({
+   where:{id:deviceId}
+  });
+
+  if(!device){
+   throw new NotFoundException('Device not found');
+  }
+
+  this.branchAccess(u,device.locationId);
+
+  const attempt=await this.db.posClearanceAttempt.findUnique({
+   where:{
+    deviceId_localSaleId:{deviceId,localSaleId}
+   }
+  });
+
+  if(!attempt){
+   return {
+    found:false,
+    paymentState:'UNKNOWN',
+    action:'Do not collect payment again without reconciliation'
+   };
+  }
+
+  if(
+   attempt.cashierId!==u.id&&
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Not shift owner');
+  }
+
+  return {
+   found:true,
+   id:attempt.id,
+   deviceId,
+   localSaleId,
+   shiftId:attempt.shiftId,
+   locationId:attempt.locationId,
+   status:attempt.status,
+   createdAt:attempt.createdAt,
+   updatedAt:attempt.updatedAt
+  };
+ }
  async preflight(dto:PreflightDto,u:Principal){
   this.branchAccess(u,dto.locationId);
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variants');
@@ -2493,6 +2670,24 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+ @Post('checkout/clearance-attempt/register')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ registerClearanceAttemptRoute(
+  @Body() dto:RegisterClearanceAttemptDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.registerClearanceAttempt(dto,u);
+ }
+
+ @Get('checkout/clearance-attempt/:deviceId/:localSaleId')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ clearanceAttemptStatusRoute(
+  @Param('deviceId') deviceId:string,
+  @Param('localSaleId') localSaleId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.clearanceAttemptStatus(deviceId,localSaleId,u);
+ }
  @Post('checkout/clearance-sale')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  clearanceSale(
