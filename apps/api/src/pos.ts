@@ -98,6 +98,19 @@ class OnlineDiscountSaleDto extends QuoteCartDto {
  @IsOptional() @IsUUID() customerId?:string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleTenderDto) tenders!:SaleTenderDto[];
 }
+class ClearanceSaleDto {
+ @IsUUID() locationId!:string;
+ @IsUUID() deviceId!:string;
+ @IsUUID() shiftId!:string;
+ @IsUUID() localSaleId!:string;
+ @IsOptional() @IsUUID() customerId?:string;
+ @IsArray() @ArrayMinSize(1)
+ @ValidateNested({each:true}) @Type(()=>SaleLineDto)
+ lines!:SaleLineDto[];
+ @IsArray() @ArrayMinSize(1)
+ @ValidateNested({each:true}) @Type(()=>SaleTenderDto)
+ tenders!:SaleTenderDto[];
+}
 class SyncSaleDto {
  @IsOptional() @IsUUID() customerId?: string;
  @IsUUID() deviceId!: string;
@@ -318,6 +331,423 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    :Math.min(subtotalCents,Math.round(promo.value.toNumber()*100));
   return {...result,discount:(discountCents/100).toFixed(2),total:((subtotalCents-discountCents)/100).toFixed(2),
    promotion:{eligible:true,reason:'Preview eligible; not authorized for settlement',code:promo.code,title:promo.title}};
+ }
+ async clearanceSale(dto:ClearanceSaleDto,u:Principal){
+  this.branchAccess(u,dto.locationId);
+
+  if(dto.lines.length>1000)
+   throw new BadRequestException('Too many sale lines');
+
+  if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)
+   throw new BadRequestException('Duplicate variants');
+
+  const device=await this.db.posDevice.findUnique({
+   where:{id:dto.deviceId}
+  });
+
+  if(!device||!device.active||device.locationId!==dto.locationId)
+   throw new BadRequestException('Invalid POS device or location');
+
+  const location=await this.db.location.findUnique({
+   where:{id:dto.locationId}
+  });
+
+  if(!location||!location.active||location.type!=='BRANCH')
+   throw new BadRequestException('Active retail branch required');
+
+  const payloadHash=hash({
+   checkoutType:'CLEARANCE',
+   locationId:dto.locationId,
+   deviceId:dto.deviceId,
+   shiftId:dto.shiftId,
+   localSaleId:dto.localSaleId,
+   customerId:dto.customerId??null,
+   lines:[...dto.lines].sort((a,b)=>
+    a.variantId.localeCompare(b.variantId)),
+   tenders:dto.tenders
+  });
+
+  const toCents=(v:Prisma.Decimal)=>
+   v.mul(100)
+    .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+
+  const fmt=(n:number)=>(n/100).toFixed(2);
+  const decimal=(n:number)=>new Prisma.Decimal(fmt(n));
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${dto.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-sale:${dto.deviceId}:${dto.localSaleId}`})
+     )
+    `;
+
+    const previous=await tx.posSale.findUnique({
+     where:{
+      deviceId_localSaleId:{
+       deviceId:dto.deviceId,
+       localSaleId:dto.localSaleId
+      }
+     }
+    });
+
+    if(previous){
+     if(previous.cashierId!==u.id&&
+        !u.roles.includes('SUPER_ADMIN')&&
+        !u.roles.includes('BRANCH_MANAGER'))
+      throw new ForbiddenException('Not shift owner');
+
+     if(previous.payloadHash!==payloadHash)
+      throw new ConflictException(
+       'Sale ID reused with different payload'
+      );
+
+     const allocations=await tx.posClearanceAllocation.findMany({
+      where:{saleId:previous.id}
+     });
+
+     return {
+      id:previous.id,
+      localSaleId:previous.localSaleId,
+      status:previous.status,
+      duplicate:true,
+      total:previous.total.toString(),
+      discount:fmt(allocations.reduce(
+       (sum,a)=>sum+toCents(a.discountAmount),0
+      ))
+     };
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:dto.shiftId}
+    });
+
+    if(!shift||
+       shift.deviceId!==device.id||
+       shift.locationId!==device.locationId||
+       shift.status!=='OPEN')
+     throw new ConflictException('Open POS shift required');
+
+    if(shift.cashierId!==u.id&&
+       !u.roles.includes('SUPER_ADMIN')&&
+       !u.roles.includes('BRANCH_MANAGER'))
+     throw new ForbiddenException('Not shift owner');
+
+    const now=new Date();
+
+    const ids=dto.lines.map(l=>l.variantId);
+
+    const campaigns=await tx.clearanceCampaign.findMany({
+     where:{
+      status:'ACTIVE',
+      startsAt:{lte:now},
+      endsAt:{gt:now},
+      branches:{some:{locationId:dto.locationId}},
+      variants:{some:{variantId:{in:ids}}}
+     },
+     include:{
+      variants:{select:{variantId:true}}
+     },
+     orderBy:[{createdAt:'asc'},{id:'asc'}]
+    });
+
+    const calculated=[] as {
+     variantId:string;
+     quantity:number;
+     priceCents:number;
+     grossCents:number;
+     discountCents:number;
+     netCents:number;
+     campaignId:string|null;
+     balanceId:string;
+    }[];
+
+    for(const line of [...dto.lines].sort((a,b)=>
+     a.variantId.localeCompare(b.variantId))){
+
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${dto.locationId+':'+line.variantId})
+      )
+     `;
+
+     const variant=await tx.productVariant.findUnique({
+      where:{id:line.variantId},
+      include:{product:{select:{active:true}}}
+     });
+
+     if(!variant||!variant.active||!variant.product.active)
+      throw new ConflictException('Variant inactive');
+
+     const priceCents=toCents(variant.price);
+     const submittedCents=Math.round(line.unitPrice*100);
+
+     if(!Number.isSafeInteger(priceCents)||priceCents<0)
+      throw new ConflictException('Invalid catalog price');
+
+     if(priceCents!==submittedCents)
+      throw new ConflictException(
+       'Price changed. Refresh cart before payment'
+      );
+
+     const grossCents=priceCents*line.quantity;
+
+     if(!Number.isSafeInteger(grossCents))
+      throw new BadRequestException('Sale amount exceeds safe range');
+
+     const balance=await tx.stockBalance.upsert({
+      where:{
+       locationId_variantId:{
+        locationId:dto.locationId,
+        variantId:line.variantId
+       }
+      },
+      create:{
+       locationId:dto.locationId,
+       variantId:line.variantId
+      },
+      update:{}
+     });
+
+     const available=
+      balance.onHand-
+      balance.reservedOnline-
+      balance.reservedReplenish-
+      balance.quarantined-
+      balance.safetyBuffer;
+
+     if(available<line.quantity)
+      throw new ConflictException('Insufficient branch stock');
+
+     const eligible=campaigns
+      .filter(c=>
+       c.variants.some(v=>v.variantId===line.variantId)&&
+       ['PERCENT','FIXED'].includes(c.type)&&
+       c.value.gt(0)&&
+       (c.type!=='PERCENT'||c.value.lte(100))
+      )
+      .map(c=>{
+       const discount=c.type==='PERCENT'
+        ?new Prisma.Decimal(grossCents)
+          .mul(c.value)
+          .div(100)
+          .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+          .toNumber()
+        :toCents(c.value)*line.quantity;
+
+       return {
+        campaignId:c.id,
+        code:c.code,
+        discountCents:Math.min(grossCents,discount)
+       };
+      })
+      .sort((a,b)=>
+       b.discountCents-a.discountCents||
+       a.code.localeCompare(b.code)
+      );
+
+     const best=eligible[0];
+     const discountCents=best?.discountCents??0;
+
+     if(!Number.isSafeInteger(discountCents))
+      throw new BadRequestException('Invalid discount amount');
+
+     calculated.push({
+      variantId:line.variantId,
+      quantity:line.quantity,
+      priceCents,
+      grossCents,
+      discountCents,
+      netCents:grossCents-discountCents,
+      campaignId:best?.campaignId??null,
+      balanceId:balance.id
+     });
+    }
+
+    const subtotal=calculated.reduce(
+     (sum,l)=>sum+l.grossCents,0
+    );
+    const discount=calculated.reduce(
+     (sum,l)=>sum+l.discountCents,0
+    );
+    const due=subtotal-discount;
+
+    if(!Number.isSafeInteger(subtotal)||
+       !Number.isSafeInteger(discount)||
+       !Number.isSafeInteger(due))
+     throw new BadRequestException('Sale total exceeds safe range');
+
+    if(discount<=0)
+     throw new ConflictException(
+      'No active clearance discount applies'
+     );
+
+    const tenderTotal=dto.tenders.reduce(
+     (sum,t)=>sum+Math.round(t.amount*100),0
+    );
+
+    if(!Number.isSafeInteger(tenderTotal)||tenderTotal!==due)
+     throw new BadRequestException(
+      'Tender amounts must equal discounted total'
+     );
+
+    if(dto.customerId){
+     const customer=await tx.retailCustomer.findUnique({
+      where:{id:dto.customerId}
+     });
+
+     if(!customer)
+      throw new BadRequestException('Unknown customer');
+    }
+
+    const sale=await tx.posSale.create({
+     data:{
+      deviceId:device.id,
+      localSaleId:dto.localSaleId,
+      payloadHash,
+      locationId:dto.locationId,
+      shiftId:shift.id,
+      cashierId:shift.cashierId,
+      status:'ACCEPTED',
+      soldAt:now,
+      total:decimal(due),
+      lines:{
+       create:calculated.map(l=>({
+        variantId:l.variantId,
+        quantity:l.quantity,
+        unitPrice:decimal(l.priceCents)
+       }))
+      },
+      tenders:{
+       create:dto.tenders.map(t=>({
+        type:t.type,
+        amount:money(t.amount),
+        reference:t.reference
+       }))
+      }
+     },
+     include:{lines:true}
+    });
+
+    for(const l of calculated){
+     if(l.campaignId){
+      const saleLine=sale.lines.find(
+       sl=>sl.variantId===l.variantId
+      );
+
+      if(!saleLine)
+       throw new ConflictException('Sale line allocation missing');
+
+      await tx.posClearanceAllocation.create({
+       data:{
+        saleId:sale.id,
+        saleLineId:saleLine.id,
+        campaignId:l.campaignId,
+        variantId:l.variantId,
+        quantity:l.quantity,
+        grossAmount:decimal(l.grossCents),
+        discountAmount:decimal(l.discountCents),
+        netAmount:decimal(l.netCents)
+       }
+      });
+     }
+
+     await tx.stockBalance.update({
+      where:{id:l.balanceId},
+      data:{
+       onHand:{decrement:l.quantity},
+       version:{increment:1}
+      }
+     });
+
+     await tx.stockMovement.create({
+      data:{
+       locationId:dto.locationId,
+       variantId:l.variantId,
+       type:'SALE',
+       quantityDelta:-l.quantity,
+       referenceType:'POS_SALE',
+       referenceId:sale.id,
+       idempotencyKey:`pos:${sale.id}:${l.variantId}`,
+       actorId:shift.cashierId
+      }
+     });
+    }
+
+    if(dto.customerId){
+     await tx.saleCustomerLink.create({
+      data:{
+       saleId:sale.id,
+       customerId:dto.customerId,
+       linkedById:u.id
+      }
+     });
+
+     const points=Math.floor(due/10000)*pointsPer100();
+
+     if(points>0){
+      await tx.loyaltyLedgerEntry.create({
+       data:{
+        customerId:dto.customerId,
+        saleId:sale.id,
+        points,
+        reason:'SALE_EARN'
+       }
+      });
+     }
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_CLEARANCE_SALE',
+      entityType:'PosSale',
+      entityId:sale.id,
+      after:{
+       subtotal:fmt(subtotal),
+       discount:fmt(discount),
+       total:fmt(due),
+       clearanceAllocations:calculated
+        .filter(l=>l.campaignId!==null)
+        .map(l=>({
+         variantId:l.variantId,
+         campaignId:l.campaignId,
+         discount:fmt(l.discountCents)
+        }))
+      }
+     }
+    });
+
+    return {
+     id:sale.id,
+     localSaleId:sale.localSaleId,
+     status:'ACCEPTED',
+     duplicate:false,
+     subtotal:fmt(subtotal),
+     discount:fmt(discount),
+     total:fmt(due),
+     lines:calculated.map(l=>({
+      variantId:l.variantId,
+      quantity:l.quantity,
+      gross:fmt(l.grossCents),
+      discount:fmt(l.discountCents),
+      net:fmt(l.netCents),
+      campaignId:l.campaignId
+     }))
+    };
+   },
+   {
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
  }
  async onlineDiscountSale(dto:OnlineDiscountSaleDto,u:Principal){
   if(!dto.promotionCode?.trim())throw new BadRequestException('Promotion code required');
@@ -1637,6 +2067,14 @@ export class PosController {
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
+ @Post('checkout/clearance-sale')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ clearanceSale(
+  @Body() dto:ClearanceSaleDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.clearanceSale(dto,u);
+ }
  @Post('checkout/online-discounted-sale') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') discounted(@Body() dto:OnlineDiscountSaleDto,@CurrentUser() u:Principal){return this.pos.onlineDiscountSale(dto,u);}
  @Get('checkout/discounted-status/:deviceId/:localSaleId') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  discountedStatus(@Param('deviceId') deviceId:string,@Param('localSaleId') localSaleId:string,@CurrentUser() u:Principal){
