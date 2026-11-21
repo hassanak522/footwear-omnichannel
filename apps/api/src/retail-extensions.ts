@@ -337,6 +337,28 @@ export class ReplenishmentController {
    assertLocation(u,r.sourceId);
    if(r.status==='FULFILLED' || r.transferId)throw new ConflictException('Transfer already linked to request');
    if(r.status!=='APPROVED')throw new ConflictException('Request must be approved');
+   const locations=await tx.location.findMany({
+    where:{
+     id:{in:[r.sourceId,r.destinationId]},
+     active:true
+    }
+   });
+
+   if(locations.length!==2)
+    throw new ConflictException(
+     'Source or destination location is inactive'
+    );
+
+   if(!locations.some(l=>
+     l.id===r.sourceId&&
+     (l.type==='WAREHOUSE'||l.type==='BRANCH')
+   ))
+    throw new ConflictException('Invalid replenishment source');
+
+   if(!locations.some(l=>
+     l.id===r.destinationId&&l.type==='BRANCH'
+   ))
+    throw new ConflictException('Invalid replenishment destination');
    const transfer=await tx.stockTransfer.create({data:{transferNumber:`TR-${randomUUID()}`,sourceId:r.sourceId,destinationId:r.destinationId,items:{create:[{variantId:r.variantId,requestedQty:r.quantity}]}},include:{items:true}});
    await tx.replenishmentRequest.update({where:{id},data:{transferId:transfer.id}});
    await tx.auditLog.create({data:{actorId:u.id,action:'REPLENISHMENT_TRANSFER_CREATED',entityType:'ReplenishmentRequest',entityId:id,after:{transferId:transfer.id}}});
@@ -361,14 +383,91 @@ export class ReplenishmentController {
    return {requestId:id,status:'FULFILLED',transferStatus:t.status};
   });
  }
- @Post('requests/:id/reject') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async reject(@Param('id') id:string,@CurrentUser() u:Principal){
-  const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'REJECTED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
+ // R9_REPLENISHMENT_GOVERNANCE
+ @Post('requests/:id/reject')
+ @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async reject(@Param('id') id:string,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   const r=await tx.replenishmentRequest.findUniqueOrThrow({
+    where:{id}
+   });
+
+   assertLocation(u,r.sourceId);
+
+   const result=await tx.replenishmentRequest.updateMany({
+    where:{id,status:'REQUESTED'},
+    data:{status:'REJECTED',reviewedAt:new Date()}
+   });
+
+   if(result.count!==1)
+    throw new ConflictException('Request already reviewed');
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'REPLENISHMENT_REJECTED',
+     entityType:'ReplenishmentRequest',
+     entityId:id,
+     before:{status:r.status},
+     after:{status:'REJECTED'}
+    }
+   });
+
+   return tx.replenishmentRequest.findUniqueOrThrow({
+    where:{id}
+   });
+  });
  }
- // Approval records intent only. Physical stock must move through the existing audited transfer workflow.
- @Post('requests/:id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async approve(@Param('id') id:string,@CurrentUser() u:Principal){
-  const r=await this.db.replenishmentRequest.findUniqueOrThrow({where:{id}});assertLocation(u,r.sourceId);
-  if(r.status!=='REQUESTED')throw new ConflictException('Already reviewed');
-  return this.db.replenishmentRequest.update({where:{id,status:'REQUESTED'},data:{status:'APPROVED',reviewedAt:new Date()}}).catch(()=>{throw new ConflictException('Request already reviewed');});
+
+ @Post('requests/:id/approve')
+ @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async approve(@Param('id') id:string,@CurrentUser() u:Principal){
+  return this.db.$transaction(async tx=>{
+   const r=await tx.replenishmentRequest.findUniqueOrThrow({
+    where:{id}
+   });
+
+   assertLocation(u,r.sourceId);
+
+   const source=await tx.location.findUnique({
+    where:{id:r.sourceId}
+   });
+
+   const destination=await tx.location.findUnique({
+    where:{id:r.destinationId}
+   });
+
+   if(!source?.active||!destination?.active)
+    throw new ConflictException('Replenishment location inactive');
+
+   const result=await tx.replenishmentRequest.updateMany({
+    where:{id,status:'REQUESTED'},
+    data:{status:'APPROVED',reviewedAt:new Date()}
+   });
+
+   if(result.count!==1)
+    throw new ConflictException('Request already reviewed');
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'REPLENISHMENT_APPROVED',
+     entityType:'ReplenishmentRequest',
+     entityId:id,
+     before:{status:r.status},
+     after:{
+      status:'APPROVED',
+      sourceId:r.sourceId,
+      destinationId:r.destinationId,
+      variantId:r.variantId,
+      quantity:r.quantity
+     }
+    }
+   });
+
+   return tx.replenishmentRequest.findUniqueOrThrow({
+    where:{id}
+   });
+  });
  }
 }
