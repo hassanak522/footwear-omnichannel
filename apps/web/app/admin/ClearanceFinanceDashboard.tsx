@@ -1,6 +1,7 @@
 'use client';
 
 import {useEffect,useState} from 'react';
+import ClearanceFinanceCasework from './ClearanceFinanceCasework';
 
 type Branch={
  id:string;
@@ -241,6 +242,31 @@ export default function ClearanceFinanceDashboard(){
   medium:intelligence.filter(x=>x.priority==='MEDIUM').length,
   info:intelligence.filter(x=>x.priority==='INFO').length
  };
+ // R8_01G_4B15_CASEWORK_MAPPING
+ const caseworkTransactions=current?[
+  ...current.sales
+   .filter(s=>!s.allocationMatchesSale||!s.tenderMatchesSale)
+   .map(s=>({
+    deviceId:s.deviceId,
+    localSaleId:s.localSaleId,
+    saleId:s.saleId,
+    category:'FINANCIAL_MISMATCH',
+    reason:'Clearance finance mismatch. '+
+     (!s.allocationMatchesSale?'Allocation discrepancy. ':'')+
+     (!s.tenderMatchesSale?'Tender discrepancy.':''),
+    expectedAmount:Number(s.saleTotal),
+    observedAmount:Number(s.cashTender)+
+     Number(s.cardTender)+Number(s.otherTender)
+   })),
+  ...current.unresolvedAttempts.map(a=>({
+   deviceId:a.deviceId,
+   localSaleId:a.localSaleId,
+   category:a.status,
+   reason:a.status==='REVIEW_REQUIRED'
+    ?'Central clearance attempt requires manager review.'
+    :'Registered clearance attempt remains unresolved.'
+  }))
+ ]:[];
  const metric=(label:string,value:string|number)=>(
   <div className="card" key={label}>
    <div className="muted">{label}</div>
@@ -441,6 +467,10 @@ export default function ClearanceFinanceDashboard(){
        </p>
       )}
      </div>
+     <ClearanceFinanceCasework
+      locationId={locationId}
+      transactions={caseworkTransactions}
+     />
      <div className="card stack">
       <h3>Accepted clearance transactions</h3>
 
