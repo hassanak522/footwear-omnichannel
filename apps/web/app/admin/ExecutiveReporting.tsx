@@ -101,10 +101,15 @@ export default function ExecutiveReporting() {
 
   const rows = salesRows
     .map(row => ({
-      ...row,
-      name: locationNames.get(row.locationId) || row.locationId
+      locationId: String(row.locationId ?? ''),
+      name: locationNames.get(row.locationId) || String(row.locationId ?? ''),
+      gross: Number(row.gross ?? 0),
+      acceptedSales: Number(row.acceptedSales ?? 0),
+      cash: Number(row.cash ?? 0),
+      card: Number(row.card ?? 0),
+      stockConflicts: Number(row.stockConflicts ?? 0)
     }))
-    .sort((a, b) => Number(b.gross) - Number(a.gross));
+    .sort((a, b) => b.gross - a.gross);
 
   async function generate(
     start = from,
@@ -487,3 +492,6 @@ export default function ExecutiveReporting() {
     </section>
   );
 }
+
+
+

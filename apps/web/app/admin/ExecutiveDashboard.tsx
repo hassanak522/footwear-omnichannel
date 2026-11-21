@@ -113,9 +113,10 @@ export default function ExecutiveDashboard() {
 
   const branches = rows
     .map(row => ({
-      ...row,
-      name: branchNames.get(row.locationId) || row.locationId,
-      grossNumber: Number(row.gross || 0)
+      locationId: String(row.locationId ?? ''),
+      name: branchNames.get(row.locationId) || String(row.locationId ?? ''),
+      grossNumber: Number(row.gross ?? 0),
+      acceptedSales: Number(row.acceptedSales ?? 0)
     }))
     .sort((a, b) => b.grossNumber - a.grossNumber);
 
@@ -261,7 +262,7 @@ export default function ExecutiveDashboard() {
                     marginBottom: 7
                   }}>
                     <strong>{branch.name}</strong>
-                    <span>{money(branch.gross)}</span>
+                    <span>{money(branch.grossNumber)}</span>
                   </div>
 
                   <div style={{
@@ -376,3 +377,5 @@ export default function ExecutiveDashboard() {
     </section>
   );
 }
+
+
