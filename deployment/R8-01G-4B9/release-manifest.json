@@ -1,0 +1,18 @@
+﻿{
+    "milestone":  "R8-01G.4B.9",
+    "gitCommit":  "cc0d543c6c2f0346b35aea154d60f50691327d78",
+    "gitBranch":  "main",
+    "createdAtUtc":  "2026-11-21T15:39:24.0594149Z",
+    "releaseState":  "PREPARED_NOT_ACTIVATED",
+    "backendClearanceCheckoutEnabled":  false,
+    "desktopClearanceCheckoutEnabled":  false,
+    "productionActivationApproved":  false,
+    "scope":  [
+                  "NestJS API",
+                  "HQ clearance exception management",
+                  "Electron branch POS"
+              ],
+    "excludedScope":  [
+                          "Customer e-commerce storefront"
+                      ]
+}

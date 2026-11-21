@@ -1,0 +1,20 @@
+﻿[
+    {
+        "FileName":  "RoyalStep-POS-Setup-0.1.0.exe",
+        "FullPath":  "G:\\footwear-omnichannel\\apps\\pos-desktop\\release\\RoyalStep-POS-Setup-0.1.0.exe",
+        "SizeBytes":  100514289,
+        "SHA256":  "4F30CC2C459B6D73BAE0A91F0519ED6CD52175CCCC81AAE0EB753CD60A59069E"
+    },
+    {
+        "FileName":  "Royal Step POS.exe",
+        "FullPath":  "G:\\footwear-omnichannel\\apps\\pos-desktop\\release\\win-unpacked\\Royal Step POS.exe",
+        "SizeBytes":  188784128,
+        "SHA256":  "B638939F64531E51A5F802DE02BBE4137B65C0768551BA5E140EFEBB1A4AF9C1"
+    },
+    {
+        "FileName":  "elevate.exe",
+        "FullPath":  "G:\\footwear-omnichannel\\apps\\pos-desktop\\release\\win-unpacked\\resources\\elevate.exe",
+        "SizeBytes":  107520,
+        "SHA256":  "9B1FBF0C11C520AE714AF8AA9AF12CFD48503EEDECD7398D8992EE94D1B4DC37"
+    }
+]
