@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import {useEffect,useState} from 'react';
 
@@ -192,6 +192,55 @@ export default function ClearanceFinanceDashboard(){
  const current=loadedKey===key?report:null;
  const summary=current?.summary;
 
+ // R8_01G_4B14_EXCEPTION_INTELLIGENCE
+ const intelligence=current?[
+  ...current.sales
+   .filter(s=>!s.allocationMatchesSale||!s.tenderMatchesSale)
+   .map(s=>({
+    id:'sale-'+s.saleId,
+    priority:'CRITICAL',
+    category:
+     !s.allocationMatchesSale&&!s.tenderMatchesSale
+      ?'Allocation and tender mismatch'
+      :!s.allocationMatchesSale
+       ?'Clearance allocation mismatch'
+       :'Recorded tender mismatch',
+    reference:s.saleId,
+    createdAt:s.soldAt,
+    action:'Investigate sale, allocation and tender records.'
+   })),
+  ...current.unresolvedAttempts.map(a=>({
+   id:'attempt-'+a.id,
+   priority:a.status==='REVIEW_REQUIRED'?'HIGH':'MEDIUM',
+   category:a.status==='REVIEW_REQUIRED'
+    ?'Manager review required'
+    :'Unresolved registered attempt',
+   reference:a.localSaleId,
+   createdAt:a.createdAt,
+   action:'Reconcile centrally. Do not collect payment again.'
+  })),
+  ...current.resolvedNoSaleAttempts.map(a=>({
+   id:'resolved-'+a.id,
+   priority:'INFO',
+   category:'Manager resolved no sale',
+   reference:a.localSaleId,
+   createdAt:a.updatedAt,
+   action:'Review manager attestation and audit evidence if required.'
+  }))
+ ].sort((a,b)=>{
+  const rank:Record<string,number>={
+   CRITICAL:0,HIGH:1,MEDIUM:2,INFO:3
+  };
+  return rank[a.priority]-rank[b.priority]||
+   b.createdAt.localeCompare(a.createdAt);
+ }):[];
+
+ const intelligenceCounts={
+  critical:intelligence.filter(x=>x.priority==='CRITICAL').length,
+  high:intelligence.filter(x=>x.priority==='HIGH').length,
+  medium:intelligence.filter(x=>x.priority==='MEDIUM').length,
+  info:intelligence.filter(x=>x.priority==='INFO').length
+ };
  const metric=(label:string,value:string|number)=>(
   <div className="card" key={label}>
    <div className="muted">{label}</div>
@@ -340,6 +389,58 @@ export default function ClearanceFinanceDashboard(){
       </p>
      </div>
 
+     <div className="card stack">
+      <h3>Finance exception intelligence</h3>
+
+      <p className="muted">
+       Read-only investigation priorities derived from
+       clearance finance records. These are not independently
+       verified settlement exceptions or newly created cases.
+      </p>
+
+      <div className="grid">
+       {metric('Critical discrepancies',intelligenceCounts.critical)}
+       {metric('High priority',intelligenceCounts.high)}
+       {metric('Medium priority',intelligenceCounts.medium)}
+       {metric('Informational',intelligenceCounts.info)}
+      </div>
+
+      <div style={{overflowX:'auto'}}>
+       <table>
+        <thead>
+         <tr>
+          <th>Priority</th>
+          <th>Classification</th>
+          <th>Reference</th>
+          <th>Date (UTC)</th>
+          <th>Recommended action</th>
+         </tr>
+        </thead>
+        <tbody>
+         {intelligence.map(item=>(
+          <tr key={item.id}>
+           <td><strong>{item.priority}</strong></td>
+           <td>{item.category}</td>
+           <td>{item.reference}</td>
+           <td>{dateTime(item.createdAt)}</td>
+           <td>{item.action}</td>
+          </tr>
+         ))}
+        </tbody>
+       </table>
+      </div>
+
+      {intelligence.length===0&&(
+       <p>No classified discrepancies or outstanding attempts
+        in the selected reporting period.</p>
+      )}
+
+      {current.truncated&&(
+       <p role="alert">
+        Report is truncated. Classification counts are incomplete.
+       </p>
+      )}
+     </div>
      <div className="card stack">
       <h3>Accepted clearance transactions</h3>
 
