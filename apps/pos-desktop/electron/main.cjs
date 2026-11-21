@@ -10,7 +10,7 @@ if (process.env.POS_QA_MODE === '1') {
   app.setPath('userData', qaUserData);
 }
 let db;let SQL;const allowed=['config','catalog','sales','outbox'];
-async function init(){const mod=await import('sql.js');SQL=await mod.default({locateFile:f=>require.resolve('sql.js/dist/'+f)});const file=path.join(app.getPath('userData'),'pos.sqlite');db=fs.existsSync(file)?new SQL.Database(fs.readFileSync(file)):new SQL.Database();db.run(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE IF NOT EXISTS catalog (id TEXT PRIMARY KEY,barcode TEXT,sku TEXT,title TEXT,size TEXT,color TEXT,price REAL NOT NULL);CREATE TABLE IF NOT EXISTS sales (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,sale_id TEXT NOT NULL UNIQUE,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT);CREATE TABLE IF NOT EXISTS discount_attempts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,server_response TEXT,error TEXT);`);persist();}
+async function init(){const mod=await import('sql.js');SQL=await mod.default({locateFile:f=>require.resolve('sql.js/dist/'+f)});const file=path.join(app.getPath('userData'),'pos.sqlite');db=fs.existsSync(file)?new SQL.Database(fs.readFileSync(file)):new SQL.Database();db.run(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE IF NOT EXISTS catalog (id TEXT PRIMARY KEY,barcode TEXT,sku TEXT,title TEXT,size TEXT,color TEXT,price REAL NOT NULL);CREATE TABLE IF NOT EXISTS sales (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,sale_id TEXT NOT NULL UNIQUE,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT);CREATE TABLE IF NOT EXISTS clearance_attempts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,server_response TEXT,error TEXT);CREATE TABLE IF NOT EXISTS discount_attempts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,server_response TEXT,error TEXT);`);persist();}
 function persist(){const file=path.join(app.getPath('userData'),'pos.sqlite');const temp=file+'.tmp';fs.writeFileSync(temp,Buffer.from(db.export()));fs.renameSync(temp,file);}
 function rows(sql,params=[]){const st=db.prepare(sql);st.bind(params);const result=[];while(st.step())result.push(st.getAsObject());st.free();return result;}
 function saveConfig(key,value){db.run('INSERT INTO config(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,JSON.stringify(value)]);persist();}
@@ -76,7 +76,124 @@ if (process.env.POS_QA_MODE === '1') {
     }
   );
 }
-session.defaultSession.webRequest.onHeadersReceived((details,callback)=>{if(details.resourceType==='mainFrame'){callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[`default-src 'self'; script-src 'self'${process.env.POS_QA_MODE === '1' ? " 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://royal-step-api-production.up.railway.app http://127.0.0.1:3001 http://localhost:3001${process.env.POS_QA_MODE === '1' ? ' http://127.0.0.1:3002 http://localhost:3002' : ''}; object-src 'none'; base-uri 'none'; form-action 'none'`]}});}else callback({responseHeaders:details.responseHeaders});});await init();ipcMain.handle('config:get',(_,k)=>readConfig(k));ipcMain.handle('config:set',(_,k,v)=>{if(!['apiUrl','deviceId','locationId','shiftId','session'].includes(k))throw Error('Invalid setting');saveConfig(k,v);return true;});ipcMain.handle('catalog:list',()=>rows('SELECT * FROM catalog ORDER BY title,size,color'));ipcMain.handle('catalog:replace',(_,items)=>{if(!Array.isArray(items)||items.length>100000)throw Error('Invalid catalog');db.run('BEGIN');try{db.run('DELETE FROM catalog');for(const i of items){if(!i.id||!i.barcode||!Number.isFinite(Number(i.price)))throw Error('Invalid product variant');db.run('INSERT INTO catalog VALUES (?,?,?,?,?,?,?)',[i.id,i.barcode,i.sku,i.title,i.size,i.color,Number(i.price)]);}db.run('COMMIT');persist();return items.length;}catch(e){db.run('ROLLBACK');throw e;}});ipcMain.handle('sales:save',(_,payload)=>{if(!payload||!Array.isArray(payload.lines)||!payload.lines.length||!payload.deviceId||!payload.shiftId)throw Error('Invalid sale');const id=crypto.randomUUID();payload.localSaleId=id;payload.soldAt=new Date().toISOString();db.run('BEGIN');try{db.run('INSERT INTO sales VALUES (?,?,?,?,?)',[id,JSON.stringify(payload),'PENDING',payload.soldAt,null]);db.run('INSERT INTO outbox(id,sale_id) VALUES (?,?)',[crypto.randomUUID(),id]);db.run('COMMIT');persist();return id;}catch(e){db.run('ROLLBACK');throw e;}});ipcMain.handle('receipt:print',async(_,id)=>{const sale=rows('SELECT * FROM sales WHERE id=?',[id])[0];if(!sale)throw Error('Unknown receipt');const payload=JSON.parse(sale.payload);const win=new BrowserWindow({show:false,webPreferences:{sandbox:true,nodeIntegration:false}});const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const catalog=new Map(rows('SELECT * FROM catalog').map(x=>[x.id,x]));const total=payload.tenders.reduce((n,t)=>n+Math.round(t.amount*100),0)/100;const html=`<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px monospace;width:76mm;margin:5mm}table{width:100%;border-collapse:collapse}td{padding:4px 0;border-bottom:1px dashed #bbb}h2{text-align:center}</style></head><body><h2>ROYAL STEP</h2><p>Receipt: ${esc(id)}<br>Sale: ${esc(payload.soldAt)}<br>Status: ${esc(sale.status)}${payload.customerId?`<br>Customer ID: ${esc(payload.customerId.slice(0,8))}`:""}</p><table>${payload.lines.map(l=>{const v=catalog.get(l.variantId)||{};return `<tr><td>${esc(v.title||l.variantId)}<br>${esc(v.sku||'')} / ${esc(v.size||'')}</td><td>${esc(l.quantity)} Ãƒâ€” ${esc(l.unitPrice)}</td></tr>`}).join('')}</table><h3>Total: Rs ${esc(total.toFixed(2))}</h3><p>${payload.tenders.map(t=>esc(t.type)+': Rs '+esc(t.amount)).join('<br>')}</p><p>Thank you for shopping at Royal Step.</p><hr><p style="text-align:center;font-size:10px">Software by 7Solutions<br>03313621464</p></body></html>`;await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));return new Promise(resolve=>win.webContents.print({silent:false,printBackground:false},(success,reason)=>{win.close();resolve({success,reason});}));});ipcMain.handle('discounted:prepare',(_,payload)=>{
+session.defaultSession.webRequest.onHeadersReceived((details,callback)=>{if(details.resourceType==='mainFrame'){callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[`default-src 'self'; script-src 'self'${process.env.POS_QA_MODE === '1' ? " 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://royal-step-api-production.up.railway.app http://127.0.0.1:3001 http://localhost:3001${process.env.POS_QA_MODE === '1' ? ' http://127.0.0.1:3002 http://localhost:3002' : ''}; object-src 'none'; base-uri 'none'; form-action 'none'`]}});}else callback({responseHeaders:details.responseHeaders});});await init();ipcMain.handle('config:get',(_,k)=>readConfig(k));ipcMain.handle('config:set',(_,k,v)=>{if(!['apiUrl','deviceId','locationId','shiftId','session'].includes(k))throw Error('Invalid setting');saveConfig(k,v);return true;});ipcMain.handle('catalog:list',()=>rows('SELECT * FROM catalog ORDER BY title,size,color'));ipcMain.handle('catalog:replace',(_,items)=>{if(!Array.isArray(items)||items.length>100000)throw Error('Invalid catalog');db.run('BEGIN');try{db.run('DELETE FROM catalog');for(const i of items){if(!i.id||!i.barcode||!Number.isFinite(Number(i.price)))throw Error('Invalid product variant');db.run('INSERT INTO catalog VALUES (?,?,?,?,?,?,?)',[i.id,i.barcode,i.sku,i.title,i.size,i.color,Number(i.price)]);}db.run('COMMIT');persist();return items.length;}catch(e){db.run('ROLLBACK');throw e;}});ipcMain.handle('sales:save',(_,payload)=>{if(!payload||!Array.isArray(payload.lines)||!payload.lines.length||!payload.deviceId||!payload.shiftId)throw Error('Invalid sale');const id=crypto.randomUUID();payload.localSaleId=id;payload.soldAt=new Date().toISOString();db.run('BEGIN');try{db.run('INSERT INTO sales VALUES (?,?,?,?,?)',[id,JSON.stringify(payload),'PENDING',payload.soldAt,null]);db.run('INSERT INTO outbox(id,sale_id) VALUES (?,?)',[crypto.randomUUID(),id]);db.run('COMMIT');persist();return id;}catch(e){db.run('ROLLBACK');throw e;}});ipcMain.handle('receipt:print',async(_,id)=>{const sale=rows('SELECT * FROM sales WHERE id=?',[id])[0];if(!sale)throw Error('Unknown receipt');const payload=JSON.parse(sale.payload);const win=new BrowserWindow({show:false,webPreferences:{sandbox:true,nodeIntegration:false}});const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const catalog=new Map(rows('SELECT * FROM catalog').map(x=>[x.id,x]));const total=payload.tenders.reduce((n,t)=>n+Math.round(t.amount*100),0)/100;const html=`<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px monospace;width:76mm;margin:5mm}table{width:100%;border-collapse:collapse}td{padding:4px 0;border-bottom:1px dashed #bbb}h2{text-align:center}</style></head><body><h2>ROYAL STEP</h2><p>Receipt: ${esc(id)}<br>Sale: ${esc(payload.soldAt)}<br>Status: ${esc(sale.status)}${payload.customerId?`<br>Customer ID: ${esc(payload.customerId.slice(0,8))}`:""}</p><table>${payload.lines.map(l=>{const v=catalog.get(l.variantId)||{};return `<tr><td>${esc(v.title||l.variantId)}<br>${esc(v.sku||'')} / ${esc(v.size||'')}</td><td>${esc(l.quantity)} ÃƒÆ’Ã¢â‚¬â€ ${esc(l.unitPrice)}</td></tr>`}).join('')}</table><h3>Total: Rs ${esc(total.toFixed(2))}</h3><p>${payload.tenders.map(t=>esc(t.type)+': Rs '+esc(t.amount)).join('<br>')}</p><p>Thank you for shopping at Royal Step.</p><hr><p style="text-align:center;font-size:10px">Software by 7Solutions<br>03313621464</p></body></html>`;await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));return new Promise(resolve=>win.webContents.print({silent:false,printBackground:false},(success,reason)=>{win.close();resolve({success,reason});}));});/* R8_01G_4B5B_CLEARANCE_LEDGER */
+
+ipcMain.handle('clearance:prepare',(_,payload)=>{
+ if(
+  !payload||
+  !payload.deviceId||
+  !payload.shiftId||
+  !payload.locationId||
+  !Array.isArray(payload.lines)||
+  !payload.lines.length||
+  !Array.isArray(payload.tenders)||
+  !payload.tenders.length
+ ){
+  throw Error('Invalid clearance checkout payload');
+ }
+
+ if(
+  payload.localSaleId||
+  payload.promotionCode||
+  payload.clearanceCampaignId
+ ){
+  throw Error('Clearance attempt must receive a new local sale ID');
+ }
+
+ const id=crypto.randomUUID();
+
+ const saved={
+  ...payload,
+  localSaleId:id
+ };
+
+ db.run(
+  'INSERT INTO clearance_attempts '+
+  '(id,payload,status,created_at,server_response,error) '+
+  'VALUES (?,?,?,?,?,?)',
+  [
+   id,
+   JSON.stringify(saved),
+   'PREPARED',
+   new Date().toISOString(),
+   null,
+   null
+  ]
+ );
+
+ persist();
+
+ return {
+  id,
+  payload:saved
+ };
+});
+
+ipcMain.handle('clearance:list',()=>rows(
+ 'SELECT * FROM clearance_attempts '+
+ 'ORDER BY created_at DESC LIMIT 100'
+));
+
+ipcMain.handle('clearance:update',(_,id,status,response,error)=>{
+ if(!['PREPARED','UNKNOWN','ACCEPTED','REJECTED'].includes(status)){
+  throw Error('Invalid clearance attempt status');
+ }
+
+ const existing=rows(
+  'SELECT status FROM clearance_attempts WHERE id=?',
+  [id]
+ )[0];
+
+ if(!existing){
+  throw Error('Unknown clearance attempt');
+ }
+
+ if(
+  existing.status==='ACCEPTED'&&
+  status!=='ACCEPTED'
+ ){
+  throw Error('Accepted clearance sale cannot be downgraded');
+ }
+
+ if(
+  existing.status==='REJECTED'&&
+  status!=='REJECTED'
+ ){
+  throw Error('Rejected clearance sale cannot be reopened');
+ }
+
+ if(
+  status==='ACCEPTED'&&
+  (
+   !response||
+   response.found!==true||
+   response.clearanceSale!==true||
+   response.status!=='ACCEPTED'||
+   response.paymentState!=='SALE_RECORDED'||
+   response.integrity?.allocationValid!==true
+  )
+ ){
+  throw Error(
+   'Server-confirmed clearance receipt required before acceptance'
+  );
+ }
+
+ db.run(
+  'UPDATE clearance_attempts '+
+  'SET status=?,server_response=?,error=? WHERE id=?',
+  [
+   status,
+   response?JSON.stringify(response):null,
+   error||null,
+   id
+  ]
+ );
+
+ persist();
+
+ return true;
+});
+ipcMain.handle('discounted:prepare',(_,payload)=>{
  if(!payload||!payload.deviceId||!payload.shiftId||!payload.locationId||!payload.promotionCode||
  !Array.isArray(payload.lines)||!payload.lines.length||!Array.isArray(payload.tenders)||!payload.tenders.length)throw Error('Invalid discounted checkout');
  const id=crypto.randomUUID();
@@ -102,7 +219,7 @@ ipcMain.handle('discounted:receipt',async(_,id)=>{
  const catalog=new Map(rows('SELECT * FROM catalog').map(x=>[x.id,x]));
  const subtotal=p.lines.reduce((n,l)=>n+Math.round(l.unitPrice*100)*l.quantity,0)/100;
  const win=new BrowserWindow({show:false,webPreferences:{sandbox:true,nodeIntegration:false}});
- const html=`<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px monospace;width:76mm;margin:5mm}table{width:100%}td{padding:4px 0;border-bottom:1px dashed #bbb}h2{text-align:center}</style></head><body><h2>ROYAL STEP</h2><p>Receipt: ${esc(id)}<br>Central sale: ${esc(r.id)}<br>Accepted: ${esc(a.created_at)}<br>Status: ACCEPTED</p><table>${p.lines.map(l=>{const v=catalog.get(l.variantId)||{};return `<tr><td>${esc(v.title||l.variantId)}<br>${esc(v.sku||'')}</td><td>${esc(l.quantity)} Ãƒâ€” ${esc(l.unitPrice)}</td></tr>`}).join('')}</table><p>Subtotal: Rs ${esc(subtotal.toFixed(2))}<br>Promotion: ${esc(p.promotionCode)}<br>Discount: Rs ${esc(r.discount)}<br><strong>PAID TOTAL: Rs ${esc(r.total)}</strong></p><p>${p.tenders.map(t=>esc(t.type)+': Rs '+esc(t.amount)).join('<br>')}</p><p>Thank you for shopping at Royal Step.</p><hr><p style="text-align:center;font-size:10px">Software by 7Solutions<br>03313621464</p></body></html>`;
+ const html=`<!doctype html><html><head><meta charset="utf-8"><style>body{font:13px monospace;width:76mm;margin:5mm}table{width:100%}td{padding:4px 0;border-bottom:1px dashed #bbb}h2{text-align:center}</style></head><body><h2>ROYAL STEP</h2><p>Receipt: ${esc(id)}<br>Central sale: ${esc(r.id)}<br>Accepted: ${esc(a.created_at)}<br>Status: ACCEPTED</p><table>${p.lines.map(l=>{const v=catalog.get(l.variantId)||{};return `<tr><td>${esc(v.title||l.variantId)}<br>${esc(v.sku||'')}</td><td>${esc(l.quantity)} ÃƒÆ’Ã¢â‚¬â€ ${esc(l.unitPrice)}</td></tr>`}).join('')}</table><p>Subtotal: Rs ${esc(subtotal.toFixed(2))}<br>Promotion: ${esc(p.promotionCode)}<br>Discount: Rs ${esc(r.discount)}<br><strong>PAID TOTAL: Rs ${esc(r.total)}</strong></p><p>${p.tenders.map(t=>esc(t.type)+': Rs '+esc(t.amount)).join('<br>')}</p><p>Thank you for shopping at Royal Step.</p><hr><p style="text-align:center;font-size:10px">Software by 7Solutions<br>03313621464</p></body></html>`;
  await win.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(html));
  return new Promise(resolve=>win.webContents.print({silent:false,printBackground:false},(success,reason)=>{win.close();resolve({success,reason})}));
 });
