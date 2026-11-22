@@ -3792,6 +3792,140 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D15_NOTIFICATION_MANAGEMENT
+ async manageHqSlaNotification(
+  id:string,
+  body:{status:string;note:string},
+  u:Principal
+ ){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(id||'')){
+   throw new BadRequestException('Valid notification ID required');
+  }
+
+  if(!body||!['ACKNOWLEDGED','CLOSED'].includes(body.status)){
+   throw new BadRequestException('Invalid notification status');
+  }
+
+  const note=typeof body.note==='string'?body.note.trim():'';
+
+  if(note.length<10||note.length>2000){
+   throw new BadRequestException('Note must contain 10-2000 characters');
+  }
+
+  return this.db.$transaction(async tx=>{
+   const existing=await tx.hqClosingSlaBreach.findUnique({
+    where:{id}
+   });
+
+   if(!existing){
+    throw new NotFoundException('Notification not found');
+   }
+
+   const allowed=
+    (existing.status==='PENDING'&&body.status==='ACKNOWLEDGED')||
+    (existing.status==='ACKNOWLEDGED'&&body.status==='CLOSED');
+
+   if(!allowed){
+    throw new ConflictException(
+     'Invalid or outdated notification transition'
+    );
+   }
+
+   if(body.status==='CLOSED'){
+    const escalation=await tx.hqClosingEscalation.findUnique({
+     where:{id:existing.escalationId},
+     select:{status:true}
+    });
+
+    if(!escalation||escalation.status!=='RESOLVED'){
+     throw new ConflictException(
+      'Resolve the associated escalation before closing its notification'
+     );
+    }
+   }
+
+   const changed=await tx.hqClosingSlaBreach.updateMany({
+    where:{id,status:existing.status},
+    data:{status:body.status}
+   });
+
+   if(changed.count!==1){
+    throw new ConflictException(
+     'Notification changed concurrently; refresh'
+    );
+   }
+
+   const saved=await tx.hqClosingSlaBreach.findUniqueOrThrow({
+    where:{id}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'HQ_SLA_NOTIFICATION_'+body.status,
+     entityType:'HqClosingSlaBreach',
+     entityId:id,
+     before:{
+      status:existing.status
+     },
+     after:{
+      status:saved.status,
+      note,
+      escalationId:saved.escalationId,
+      actorId:u.id
+     }
+    }
+   });
+
+   return saved;
+  });
+ }
+
+ async hqSlaNotificationHistory(
+  id:string,
+  u:Principal
+ ){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(id||'')){
+   throw new BadRequestException('Valid notification ID required');
+  }
+
+  const breach=await this.db.hqClosingSlaBreach.findUnique({
+   where:{id},
+   select:{id:true}
+  });
+
+  if(!breach){
+   throw new NotFoundException('Notification not found');
+  }
+
+  return this.db.auditLog.findMany({
+   where:{
+    entityType:'HqClosingSlaBreach',
+    entityId:id
+   },
+   select:{
+    id:true,
+    actorId:true,
+    action:true,
+    after:true,
+    createdAt:true
+   },
+   orderBy:{createdAt:'desc'},
+   take:100
+  });
+ }
  // R10_3D13_BREACH_SCAN
  async hqClosingSlaBreaches(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -4677,6 +4811,25 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D15_NOTIFICATION_ROUTES
+ @Post('finance/hq-closing-sla-breaches/:id/transition')
+ @Roles('SUPER_ADMIN')
+ manageHqSlaNotificationRoute(
+  @Param('id') id:string,
+  @Body() body:{status:string;note:string},
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.manageHqSlaNotification(id,body,u);
+ }
+
+ @Get('finance/hq-closing-sla-breaches/:id/history')
+ @Roles('SUPER_ADMIN')
+ hqSlaNotificationHistoryRoute(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.hqSlaNotificationHistory(id,u);
  }
  // R10_3D13_BREACH_ROUTES
  @Get('finance/hq-closing-sla-breaches')
