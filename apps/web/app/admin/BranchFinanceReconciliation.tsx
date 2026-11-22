@@ -1,6 +1,7 @@
 'use client';
 
 import {useEffect,useState} from 'react';
+import BranchPaymentCasework from './BranchPaymentCasework';
 
 type Branch={
  id:string;
@@ -362,6 +363,8 @@ export default function BranchFinanceReconciliation(){
     {!current.refunds.rows.length&&
      <p className="muted">No returns in this period.</p>}
    </div>
+
+   <BranchPaymentCasework locationId={current.location.id}/>
 
    <div style={panel}>
     <h3>Reporting limitations</h3>
