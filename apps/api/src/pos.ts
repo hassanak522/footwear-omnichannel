@@ -3566,6 +3566,7 @@ async saleReturnHistory(saleId:string,u:Principal){
    priority:string;
    status:string;
    note:string;
+   expectedUpdatedAt?:string;
   },
   u:Principal
  ){
@@ -3642,29 +3643,153 @@ async saleReturnHistory(saleId:string,u:Principal){
    );
   }
 
-  const data={
-   ownerId:body.ownerId,
-   priority:body.priority,
-   status:body.status,
-   note,
-   updatedById:u.id,
-   resolvedAt:body.status==='RESOLVED'?new Date():null
+  // R10_3D11_AUDIT
+  if(body.status==='RESOLVED'){
+   if(note.length<30||
+      !/(?:Evidence|Reference):\s*\S+/i.test(note)){
+    throw new BadRequestException(
+     'Resolution requires at least 30 characters and an Evidence: or Reference: identifier'
+    );
+   }
+  }
+
+  const key={
+   locationId:body.locationId,
+   closingDate
   };
 
-  return this.db.hqClosingEscalation.upsert({
-   where:{
-    locationId_closingDate:{
-     locationId:body.locationId,
-     closingDate
+  return this.db.$transaction(async tx=>{
+   const existing=await tx.hqClosingEscalation.findUnique({
+    where:{locationId_closingDate:key}
+   });
+
+   if(existing && !body.expectedUpdatedAt){
+    throw new ConflictException(
+     'Reload the escalation before updating it'
+    );
+   }
+
+   if(!existing && body.expectedUpdatedAt){
+    throw new ConflictException(
+     'Escalation was changed or removed; reload'
+    );
+   }
+
+   const data={
+    ownerId:body.ownerId,
+    priority:body.priority,
+    status:body.status,
+    note,
+    updatedById:u.id,
+    resolvedAt:body.status==='RESOLVED'
+     ?(existing?.status==='RESOLVED'
+       ?existing.resolvedAt||new Date()
+       :new Date())
+     :null
+   };
+
+   let saved;
+
+   if(existing){
+    const expected=new Date(body.expectedUpdatedAt!);
+
+    if(Number.isNaN(expected.getTime())){
+     throw new BadRequestException('Invalid update version');
     }
+
+    const changed=await tx.hqClosingEscalation.updateMany({
+     where:{
+      id:existing.id,
+      updatedAt:expected
+     },
+     data:{
+      ...data,
+      updatedAt:new Date()
+     }
+    });
+
+    if(changed.count!==1){
+     throw new ConflictException(
+      'Another administrator updated this escalation; reload'
+     );
+    }
+
+    saved=await tx.hqClosingEscalation.findUniqueOrThrow({
+     where:{id:existing.id}
+    });
+   }else{
+    saved=await tx.hqClosingEscalation.create({
+     data:{
+      ...key,
+      createdById:u.id,
+      ...data
+     }
+    });
+   }
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:existing
+      ?'HQ_CLOSING_ESCALATION_UPDATED'
+      :'HQ_CLOSING_ESCALATION_CREATED',
+     entityType:'HqClosingEscalation',
+     entityId:saved.id,
+     before:existing?{
+      ownerId:existing.ownerId,
+      priority:existing.priority,
+      status:existing.status,
+      note:existing.note,
+      resolvedAt:existing.resolvedAt?.toISOString()||null
+     }:undefined,
+     after:{
+      ownerId:saved.ownerId,
+      priority:saved.priority,
+      status:saved.status,
+      note:saved.note,
+      resolvedAt:saved.resolvedAt?.toISOString()||null
+     }
+    }
+   });
+
+   return saved;
+  });
+ }
+ // R10_3D11_HISTORY
+ async hqEscalationHistory(id:string,u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(id)){
+   throw new BadRequestException('Valid escalation ID required');
+  }
+
+  const escalation=await this.db.hqClosingEscalation.findUnique({
+   where:{id}
+  });
+
+  if(!escalation){
+   throw new NotFoundException('Escalation not found');
+  }
+
+  return this.db.auditLog.findMany({
+   where:{
+    entityType:'HqClosingEscalation',
+    entityId:id
    },
-   create:{
-    locationId:body.locationId,
-    closingDate,
-    createdById:u.id,
-    ...data
+   select:{
+    id:true,
+    actorId:true,
+    action:true,
+    before:true,
+    after:true,
+    createdAt:true
    },
-   update:data
+   orderBy:{createdAt:'desc'},
+   take:100
   });
  }
  // R10_3D7_HQ_OVERSIGHT
@@ -4473,6 +4598,15 @@ export class PosController {
  hqEscalationOwnersRoute(@CurrentUser() u:Principal){
   return this.pos.hqEscalationOwners(u);
  }
+ // R10_3D11_HISTORY_ROUTE
+ @Get('finance/hq-closing-escalations/:id/history')
+ @Roles('SUPER_ADMIN')
+ hqEscalationHistoryRoute(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.hqEscalationHistory(id,u);
+ }
  // R10_3D10_ESCALATION_ROUTES
  @Get('finance/hq-closing-escalations')
  @Roles('SUPER_ADMIN')
@@ -4490,6 +4624,7 @@ export class PosController {
    priority:string;
    status:string;
    note:string;
+   expectedUpdatedAt?:string;
   },
   @CurrentUser() u:Principal
  ){

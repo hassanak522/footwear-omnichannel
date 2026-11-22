@@ -28,6 +28,15 @@ type EligibleOwner={
  roles:string[];
  locationIds:string[];
 };
+// R10_3D11_UI
+type AuditEntry={
+ id:string;
+ actorId:string|null;
+ action:string;
+ before:unknown;
+ after:unknown;
+ createdAt:string;
+};
 type Props={
  branches:Branch[];
  dates:string[];
@@ -75,6 +84,9 @@ export default function HqEscalationAssignments({
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const [message,setMessage]=useState('');
+ const [editingVersion,setEditingVersion]=useState('');
+ const [history,setHistory]=useState<AuditEntry[]>([]);
+ const [historyId,setHistoryId]=useState('');
 
  const loadOwners=useCallback(async()=>{
   try{
@@ -110,6 +122,24 @@ export default function HqEscalationAssignments({
   void loadOwners();
  },[load,loadOwners]);
 
+ async function viewHistory(id:string){
+  setError('');
+  try{
+   const response=await fetch(
+    endpoint+'/'+id+'/history',
+    {credentials:'same-origin',cache:'no-store'}
+   );
+
+   if(!response.ok){
+    throw new Error('Unable to load escalation history');
+   }
+
+   setHistory(await response.json() as AuditEntry[]);
+   setHistoryId(id);
+  }catch(e){
+   setError(e instanceof Error?e.message:'History unavailable');
+  }
+ }
  function edit(row:Escalation){
   setLocationId(row.locationId);
   setDate(row.closingDate.slice(0,10));
@@ -117,6 +147,7 @@ export default function HqEscalationAssignments({
   setPriority(row.priority);
   setStatus(row.status);
   setNote(row.note);
+  setEditingVersion(row.updatedAt);
   setMessage('');
  }
 
@@ -133,10 +164,12 @@ export default function HqEscalationAssignments({
     ownerId:ownerId.trim(),
     priority,
     status,
-    note:note.trim()
+    note:note.trim(),
+    ...(editingVersion?{expectedUpdatedAt:editingVersion}:{})
    });
 
    await load();
+   setEditingVersion('');
    setMessage('Escalation record saved.');
   }catch(e){
    setError(e instanceof Error?e.message:'Unable to save');
@@ -295,6 +328,11 @@ export default function HqEscalationAssignments({
             onClick={()=>edit(row)}>
             Edit
            </button>
+           {' '}
+           <button type="button"
+            onClick={()=>void viewHistory(row.id)}>
+            History
+           </button>
           </td>
          </tr>
         );
@@ -309,6 +347,36 @@ export default function HqEscalationAssignments({
     </div>
    </div>
 
+   {historyId&&(
+    <section style={{marginTop:24}}>
+     <h3>Escalation audit history</h3>
+     <p>Record ID: {historyId}</p>
+
+     {history.length===0&&(
+      <p>No audit entries recorded.</p>
+     )}
+
+     {history.map(entry=>(
+      <details key={entry.id}
+       style={{marginBottom:12}}>
+       <summary>
+        {entry.action} — {new Date(
+         entry.createdAt
+        ).toLocaleString()}
+       </summary>
+       <p>Actor ID: {entry.actorId||'Unknown'}</p>
+       <strong>Previous values</strong>
+       <pre style={{whiteSpace:'pre-wrap'}}>
+        {JSON.stringify(entry.before,null,2)}
+       </pre>
+       <strong>New values</strong>
+       <pre style={{whiteSpace:'pre-wrap'}}>
+        {JSON.stringify(entry.after,null,2)}
+       </pre>
+      </details>
+     ))}
+    </section>
+   )}
    <p>
     Resolving an HQ escalation does not resolve its
     underlying drift incident. Updates overwrite the
