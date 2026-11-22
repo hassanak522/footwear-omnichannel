@@ -3504,6 +3504,140 @@ async saleReturnHistory(saleId:string,u:Principal){
  }
 
 
+ // R10_3D7_HQ_OVERSIGHT
+ async hqClosingOversight(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ administrator access required');
+  }
+
+  const branches=await this.db.location.findMany({
+   where:{type:'BRANCH',active:true},
+   select:{id:true,code:true,name:true},
+   orderBy:{code:'asc'}
+  });
+
+  const now=new Date();
+  const today=new Date(Date.UTC(
+   now.getUTCFullYear(),
+   now.getUTCMonth(),
+   now.getUTCDate()
+  ));
+
+  // Seven completed UTC dates; today's closing is not due yet.
+  const dates=Array.from({length:7},(_,i)=>{
+   const d=new Date(today);
+   d.setUTCDate(d.getUTCDate()-(i+1));
+   return d.toISOString().slice(0,10);
+  });
+
+  const from=new Date(dates[6]+'T00:00:00.000Z');
+  const ids=branches.map(b=>b.id);
+
+  if(ids.length===0){
+   return {
+    generatedAt:now.toISOString(),
+    dates,
+    summary:{
+     branches:0,
+     expectedClosings:0,
+     acknowledgedClosings:0,
+     missingClosings:0,
+     openIncidents:0
+    },
+    branches:[]
+   };
+  }
+
+  const [reviews,incidents]=await Promise.all([
+   this.db.branchClosingReview.findMany({
+    where:{
+     locationId:{in:ids},
+     closingDate:{gte:from,lt:today}
+    },
+    select:{
+     locationId:true,
+     closingDate:true,
+     status:true,
+     signedAt:true
+    }
+   }),
+   this.db.branchClosingDriftIncident.findMany({
+    where:{
+     locationId:{in:ids},
+     status:{not:'RESOLVED'}
+    },
+    select:{
+     locationId:true,
+     status:true,
+     changedSections:true,
+     currentIssues:true,
+     closingDate:true
+    }
+   })
+  ]);
+
+  const rows=branches.map(branch=>{
+   const branchReviews=reviews.filter(
+    r=>r.locationId===branch.id
+   );
+   const branchIncidents=incidents.filter(
+    i=>i.locationId===branch.id
+   );
+
+   const reviewDates=new Set(
+    branchReviews.map(r=>
+     r.closingDate.toISOString().slice(0,10)
+    )
+   );
+
+   return {
+    locationId:branch.id,
+    code:branch.code,
+    name:branch.name,
+    expectedClosings:dates.length,
+    acknowledgedClosings:reviewDates.size,
+    missingClosings:dates.filter(
+     date=>!reviewDates.has(date)
+    ).length,
+    missingDates:dates.filter(
+     date=>!reviewDates.has(date)
+    ),
+    openIncidents:branchIncidents.length,
+    incidentStatuses:branchIncidents.reduce(
+     (acc:Record<string,number>,incident)=>{
+      acc[incident.status]=(acc[incident.status]||0)+1;
+      return acc;
+     },
+     {}
+    ),
+    lastAcknowledgedAt:branchReviews
+     .map(r=>r.signedAt.toISOString())
+     .sort()
+     .reverse()[0]||null
+   };
+  });
+
+  return {
+   generatedAt:now.toISOString(),
+   dates,
+   summary:{
+    branches:rows.length,
+    expectedClosings:rows.reduce(
+     (n,r)=>n+r.expectedClosings,0
+    ),
+    acknowledgedClosings:rows.reduce(
+     (n,r)=>n+r.acknowledgedClosings,0
+    ),
+    missingClosings:rows.reduce(
+     (n,r)=>n+r.missingClosings,0
+    ),
+    openIncidents:rows.reduce(
+     (n,r)=>n+r.openIncidents,0
+    )
+   },
+   branches:rows
+  };
+ }
  // R10_3D_CLOSING_REVIEW
  async closingReviews(locationId:string,u:Principal){
   if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(locationId||'')){
@@ -4169,6 +4303,12 @@ async saleReturnHistory(saleId:string,u:Principal){
 export class PosController {
  constructor(private pos:PosService){}
 
+ // R10_3D7_HQ_OVERSIGHT_ROUTE
+ @Get('finance/hq-closing-oversight')
+ @Roles('SUPER_ADMIN')
+ hqClosingOversightRoute(@CurrentUser() u:Principal){
+  return this.pos.hqClosingOversight(u);
+ }
  @Get('finance/closing-incidents')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  closingIncidentsRoute(
