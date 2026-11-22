@@ -1392,3 +1392,20 @@ model HqClosingEscalation {
   @@index([status, updatedAt])
   @@index([ownerId, status])
 }
+
+/// R10.3D13 - Persistent HQ closing escalation SLA breaches.
+/// One initial breach per escalation; notifications are not sent automatically.
+model HqClosingSlaBreach {
+  id           String   @id @default(uuid()) @db.Uuid
+  escalationId String   @unique @db.Uuid
+  locationId   String   @db.Uuid
+  priority     String
+  slaHours     Int
+  dueAt        DateTime
+  detectedAt   DateTime @default(now())
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+
+  @@index([status, detectedAt])
+  @@index([locationId, detectedAt])
+}

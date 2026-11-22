@@ -2,6 +2,7 @@
 
 import {useCallback,useEffect,useState} from 'react';
 import HqEscalationAssignments from './HqEscalationAssignments';
+import HqSlaBreachRegister from './HqSlaBreachRegister';
 
 type Branch={
  locationId:string;
@@ -335,6 +336,8 @@ export default function ClosingOversight(){
      </div>
 
      {/* R10.3D10B HQ ownership interface */}
+     <HqSlaBreachRegister />
+
      <HqEscalationAssignments
       branches={report.branches}
       dates={report.dates}

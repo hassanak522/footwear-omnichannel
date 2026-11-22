@@ -3792,6 +3792,77 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D13_BREACH_SCAN
+ async hqClosingSlaBreaches(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  return this.db.hqClosingSlaBreach.findMany({
+   orderBy:{detectedAt:'desc'},
+   take:200
+  });
+ }
+
+ async scanHqClosingSlaBreaches(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const now=new Date();
+  const policy:Record<string,number>={
+   CRITICAL:4,
+   HIGH:24,
+   MEDIUM:72
+  };
+
+  const escalations=await this.db.hqClosingEscalation.findMany({
+   where:{status:{not:'RESOLVED'}},
+   select:{
+    id:true,
+    locationId:true,
+    priority:true,
+    createdAt:true
+   }
+  });
+
+  const overdue=escalations.flatMap(row=>{
+   const hours=policy[row.priority];
+
+   if(!hours)return [];
+
+   const dueAt=new Date(
+    row.createdAt.getTime()+hours*3600000
+   );
+
+   if(dueAt>now)return [];
+
+   return [{
+    id:row.id,
+    escalationId:row.id,
+    locationId:row.locationId,
+    priority:row.priority,
+    slaHours:hours,
+    dueAt
+   }];
+  });
+
+  const result=await this.db.hqClosingSlaBreach.createMany({
+   data:overdue.map(({id,...data})=>({
+    ...data,
+    id
+   })),
+   skipDuplicates:true
+  });
+
+  return {
+   scanned:escalations.length,
+   overdue:overdue.length,
+   newlyRecorded:result.count,
+   detectedAt:now.toISOString(),
+   deliveryEnabled:false
+  };
+ }
  // R10_3D7_HQ_OVERSIGHT
  async hqClosingOversight(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -4606,6 +4677,18 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D13_BREACH_ROUTES
+ @Get('finance/hq-closing-sla-breaches')
+ @Roles('SUPER_ADMIN')
+ hqClosingSlaBreachesRoute(@CurrentUser() u:Principal){
+  return this.pos.hqClosingSlaBreaches(u);
+ }
+
+ @Post('finance/hq-closing-sla-breaches/scan')
+ @Roles('SUPER_ADMIN')
+ scanHqClosingSlaBreachesRoute(@CurrentUser() u:Principal){
+  return this.pos.scanHqClosingSlaBreaches(u);
  }
  // R10_3D10_ESCALATION_ROUTES
  @Get('finance/hq-closing-escalations')
