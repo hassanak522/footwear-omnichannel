@@ -2,6 +2,7 @@
 
 import {useEffect,useState} from 'react';
 import BranchPaymentCasework from './BranchPaymentCasework';
+import BranchClosingRegister from './BranchClosingRegister';
 
 type Branch={
  id:string;
@@ -365,6 +366,15 @@ export default function BranchFinanceReconciliation(){
    </div>
 
    <BranchPaymentCasework locationId={current.location.id}/>
+
+   <BranchClosingRegister
+    locationId={current.location.id}
+    from={current.period.from}
+    to={current.period.to}
+    reportStatus={current.status}
+    issues={current.issues}
+    closedShifts={current.shifts.closedInPeriod}
+   />
 
    <div style={panel}>
     <h3>Reporting limitations</h3>
