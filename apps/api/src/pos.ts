@@ -3502,10 +3502,184 @@ async saleReturnHistory(saleId:string,u:Principal){
 
   return result;
  }
+
+
+ // R10_3D_CLOSING_REVIEW
+ async closingReviews(locationId:string,u:Principal){
+  if(!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(locationId||'')){
+   throw new BadRequestException('Valid locationId required');
+  }
+
+  if(!u.roles.some(r=>
+   r==='SUPER_ADMIN'||r==='BRANCH_MANAGER'
+  )){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  return this.db.branchClosingReview.findMany({
+   where:{locationId},
+   orderBy:{closingDate:'desc'},
+   take:90
+  });
+ }
+
+ async acknowledgeClosing(
+  body:{locationId:string;date:string;note:string},
+  u:Principal
+ ){
+  if(!u.roles.some(r=>
+   r==='SUPER_ADMIN'||r==='BRANCH_MANAGER'
+  )){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  const locationId=body?.locationId;
+  const date=body?.date;
+  const note=body?.note?.trim();
+
+  if(!locationId||!date||!note||note.length>2000){
+   throw new BadRequestException(
+    'locationId, date and review note (max 2000 chars) required'
+   );
+  }
+
+  this.branchAccess(u,locationId);
+
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
+   throw new BadRequestException('Date must use YYYY-MM-DD');
+  }
+
+  const closingDate=new Date(date+'T00:00:00.000Z');
+
+  if(
+   Number.isNaN(closingDate.getTime())||
+   closingDate.toISOString().slice(0,10)!==date
+  ){
+   throw new BadRequestException('Invalid closing date');
+  }
+
+  const today=new Date().toISOString().slice(0,10);
+
+  if(date>=today){
+   throw new BadRequestException(
+    'Only completed past UTC dates can be reviewed'
+   );
+  }
+
+  const report=await this.branchReconciliation(
+   locationId,date,date,u
+  );
+
+  if(
+   report.status!=='NO_DETECTED_EXCEPTIONS'||
+   report.issues.length>0||
+   report.shifts.closedInPeriod<1
+  ){
+   throw new ConflictException(
+    'Closing review blocked: reconciliation incomplete or exceptions detected'
+   );
+  }
+
+  const pendingCases=await this.db.paymentException.count({
+   where:{
+    locationId,
+    status:{in:['OPEN','UNDER_REVIEW']}
+   }
+  });
+
+  if(pendingCases>0){
+   throw new ConflictException(
+    'Closing review blocked: unresolved payment exception cases'
+   );
+  }
+
+  const existing=await this.db.branchClosingReview.findUnique({
+   where:{
+    locationId_closingDate:{locationId,closingDate}
+   }
+  });
+
+  if(existing){
+   throw new ConflictException(
+    'This branch date already has a review acknowledgement'
+   );
+  }
+
+  try{
+   return await this.db.$transaction(async tx=>{
+    const created=await tx.branchClosingReview.create({
+     data:{
+      locationId,
+      closingDate,
+      status:'REVIEW_ACKNOWLEDGED',
+      snapshot:JSON.parse(JSON.stringify({
+       ...report,
+       pendingPaymentCases:pendingCases,
+       reviewedAt:new Date().toISOString()
+      })) as Prisma.InputJsonValue,
+      note,
+      signedById:u.id
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'BRANCH_CLOSING_REVIEW_ACKNOWLEDGED',
+      entityType:'BranchClosingReview',
+      entityId:created.id,
+      after:{
+       locationId,
+       date,
+       status:created.status,
+       signedById:u.id
+      }
+     }
+    });
+
+    return created;
+   });
+  }catch(e){
+   if(
+    e instanceof Prisma.PrismaClientKnownRequestError&&
+    e.code==='P2002'
+   ){
+    throw new ConflictException(
+     'Closing review already exists for this branch date'
+    );
+   }
+
+   throw e;
+  }
+ }
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
 export class PosController {
  constructor(private pos:PosService){}
+
+ @Get('finance/closing-reviews')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ closingReviewsRoute(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.closingReviews(locationId,u);
+ }
+
+ @Post('finance/closing-reviews/acknowledge')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ acknowledgeClosingRoute(
+  @Body() body:{
+   locationId:string;
+   date:string;
+   note:string;
+  },
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.acknowledgeClosing(body,u);
+ }
 
  @Get('finance/branch-reconciliation')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')

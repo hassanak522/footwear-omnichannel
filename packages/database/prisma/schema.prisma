@@ -1339,3 +1339,18 @@ model PosClearanceAttempt {
   @@index([shiftId, status])
   @@index([locationId, createdAt])
 }
+
+
+model BranchClosingReview {
+  id          String   @id @default(uuid()) @db.Uuid
+  locationId  String   @db.Uuid
+  closingDate DateTime @db.Date
+  status      String   @default("REVIEW_ACKNOWLEDGED")
+  snapshot    Json
+  note        String   @db.VarChar(2000)
+  signedById  String   @db.Uuid
+  signedAt    DateTime @default(now())
+
+  @@unique([locationId, closingDate])
+  @@index([locationId, signedAt])
+}
