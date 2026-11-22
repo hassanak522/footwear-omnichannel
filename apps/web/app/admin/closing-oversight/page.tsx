@@ -4,6 +4,7 @@ import {useCallback,useEffect,useState} from 'react';
 import HqEscalationAssignments from './HqEscalationAssignments';
 import HqSlaBreachRegister from './HqSlaBreachRegister';
 import HqNotificationGovernance from './HqNotificationGovernance';
+import HqNotificationAnalytics from './HqNotificationAnalytics';
 
 type Branch={
  locationId:string;
@@ -337,6 +338,7 @@ export default function ClosingOversight(){
      </div>
 
      {/* R10.3D10B HQ ownership interface */}
+     <HqNotificationAnalytics />
      <HqNotificationGovernance />
      <HqSlaBreachRegister />
 

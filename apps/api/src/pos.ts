@@ -3792,6 +3792,227 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D17_ANALYTICS_SERVICE
+ async hqSlaNotificationAnalytics(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const now=new Date();
+  const today=new Date(Date.UTC(
+   now.getUTCFullYear(),
+   now.getUTCMonth(),
+   now.getUTCDate()
+  ));
+  const since=new Date(today.getTime()-89*86400000);
+
+  const breaches=await this.db.hqClosingSlaBreach.findMany({
+   where:{detectedAt:{gte:since,lte:now}},
+   select:{
+    id:true,
+    locationId:true,
+    priority:true,
+    status:true,
+    detectedAt:true
+   },
+   orderBy:{detectedAt:'asc'}
+  });
+
+  const ids=breaches.map(b=>b.id);
+
+  const audits=ids.length
+   ?await this.db.auditLog.findMany({
+     where:{
+      entityType:'HqClosingSlaBreach',
+      entityId:{in:ids},
+      action:'HQ_SLA_NOTIFICATION_ACKNOWLEDGED'
+     },
+     select:{entityId:true,createdAt:true},
+     orderBy:{createdAt:'asc'}
+    })
+   :[];
+
+  const ackMap=new Map<string,Date>();
+
+  for(const audit of audits){
+   if(!ackMap.has(audit.entityId)){
+    ackMap.set(audit.entityId,audit.createdAt);
+   }
+  }
+
+  const locationIds=[...new Set(
+   breaches.map(b=>b.locationId)
+  )];
+
+  const locations=locationIds.length
+   ?await this.db.location.findMany({
+     where:{id:{in:locationIds}},
+     select:{id:true,code:true,name:true}
+    })
+   :[];
+
+  const locationMap=new Map(
+   locations.map(l=>[l.id,l])
+  );
+
+  const dayKey=(d:Date)=>d.toISOString().slice(0,10);
+
+  const daily=new Map<string,{
+   date:string;
+   detected:number;
+   acknowledged:number;
+   acknowledgedWithin4h:number;
+   averageAckHours:number|null;
+   ackTotalHours:number;
+  }>();
+
+  for(let i=0;i<90;i++){
+   const date=dayKey(
+    new Date(since.getTime()+i*86400000)
+   );
+
+   daily.set(date,{
+    date,
+    detected:0,
+    acknowledged:0,
+    acknowledgedWithin4h:0,
+    averageAckHours:null,
+    ackTotalHours:0
+   });
+  }
+
+  const branchMap=new Map<string,{
+   locationId:string;
+   code:string;
+   name:string;
+   total:number;
+   pending:number;
+   acknowledged:number;
+   closed:number;
+   acknowledgedWithin4h:number;
+   ackHoursTotal:number;
+   averageAckHours:number|null;
+  }>();
+
+  const priorityMap=new Map<string,number>();
+  let totalAcknowledged=0;
+  let withinTarget=0;
+  let totalAckHours=0;
+
+  for(const breach of breaches){
+   const detectedDay=dayKey(breach.detectedAt);
+   const detection=daily.get(detectedDay);
+
+   if(detection)detection.detected++;
+
+   const location=locationMap.get(breach.locationId);
+   let branch=branchMap.get(breach.locationId);
+
+   if(!branch){
+    branch={
+     locationId:breach.locationId,
+     code:location?.code||'UNKNOWN',
+     name:location?.name||'Unknown branch',
+     total:0,
+     pending:0,
+     acknowledged:0,
+     closed:0,
+     acknowledgedWithin4h:0,
+     ackHoursTotal:0,
+     averageAckHours:null
+    };
+    branchMap.set(breach.locationId,branch);
+   }
+
+   branch.total++;
+
+   if(breach.status==='PENDING')branch.pending++;
+   if(breach.status==='ACKNOWLEDGED')branch.acknowledged++;
+   if(breach.status==='CLOSED')branch.closed++;
+
+   priorityMap.set(
+    breach.priority,
+    (priorityMap.get(breach.priority)||0)+1
+   );
+
+   const ack=ackMap.get(breach.id);
+   if(!ack)continue;
+
+   const hours=Math.max(
+    0,(ack.getTime()-breach.detectedAt.getTime())/3600000
+   );
+
+   totalAcknowledged++;
+   totalAckHours+=hours;
+   branch.ackHoursTotal+=hours;
+
+   if(hours<=4){
+    withinTarget++;
+    branch.acknowledgedWithin4h++;
+   }
+
+   // Acknowledgements are plotted on their actual UTC date.
+   const ackDay=daily.get(dayKey(ack));
+
+   if(ackDay){
+    ackDay.acknowledged++;
+    ackDay.ackTotalHours+=hours;
+   }
+  }
+
+  for(const day of daily.values()){
+   day.averageAckHours=day.acknowledged
+    ?Math.round(day.ackTotalHours/day.acknowledged*100)/100
+    :null;
+  }
+
+  const branches=[...branchMap.values()].map(b=>{
+   const acknowledgedCount=b.acknowledgedWithin4h;
+   const ackCount=breaches.filter(
+    row=>row.locationId===b.locationId&&ackMap.has(row.id)
+   ).length;
+
+   return {
+    locationId:b.locationId,
+    code:b.code,
+    name:b.name,
+    total:b.total,
+    pending:b.pending,
+    acknowledged:b.acknowledged,
+    closed:b.closed,
+    acknowledgedWithin4h:acknowledgedCount,
+    averageAckHours:ackCount
+     ?Math.round(b.ackHoursTotal/ackCount*100)/100
+     :null
+   };
+  }).sort((a,b)=>b.total-a.total);
+
+  return {
+   generatedAt:now.toISOString(),
+   periodStart:since.toISOString(),
+   periodEnd:now.toISOString(),
+   acknowledgementTargetHours:4,
+   summary:{
+    total:breaches.length,
+    pending:breaches.filter(b=>b.status==='PENDING').length,
+    acknowledged:totalAcknowledged,
+    acknowledgedWithin4h:withinTarget,
+    acknowledgementRate:breaches.length
+     ?Math.round(totalAcknowledged/breaches.length*10000)/100
+     :null,
+    averageAckHours:totalAcknowledged
+     ?Math.round(totalAckHours/totalAcknowledged*100)/100
+     :null
+   },
+   daily:[...daily.values()].map(
+    ({ackTotalHours,...day})=>day
+   ),
+   branches,
+   priorities:[...priorityMap.entries()].map(
+    ([priority,count])=>({priority,count})
+   )
+  };
+ }
  // R10_3D16_GOVERNANCE_SERVICE
  async hqSlaNotificationGovernance(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -4991,6 +5212,14 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D17_ANALYTICS_ROUTE
+ @Get('finance/hq-sla-notification-analytics')
+ @Roles('SUPER_ADMIN')
+ hqSlaNotificationAnalyticsRoute(
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.hqSlaNotificationAnalytics(u);
  }
  // R10_3D16_GOVERNANCE_ROUTE
  @Get('finance/hq-sla-notification-governance')
