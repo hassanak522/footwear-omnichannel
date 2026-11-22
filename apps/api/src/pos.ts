@@ -3568,9 +3568,143 @@ async saleReturnHistory(saleId:string,u:Principal){
    );
   }
 
+  // R10_3D3_CLOSING_INTEGRITY
+  // Wait at least 24 hours after the selected UTC day ends.
+  const closingDayEnd=new Date(
+   closingDate.getTime()+86400000
+  );
+
+  const coolingOffEnds=new Date(
+   closingDayEnd.getTime()+86400000
+  );
+
+  if(new Date()<coolingOffEnds){
+   throw new ConflictException(
+    'Closing review requires a 24-hour cooling-off period'
+   );
+  }
+
   const report=await this.branchReconciliation(
    locationId,date,date,u
   );
+
+  const dayRange={
+   gte:closingDate,
+   lt:closingDayEnd
+  };
+
+  // Check every shift overlapping the selected day,
+  // including shifts opened before that day.
+  const shifts=await this.db.posShift.findMany({
+   where:{
+    locationId,
+    openedAt:{lt:closingDayEnd},
+    OR:[
+     {closedAt:{gte:closingDate}},
+     {closedAt:null}
+    ]
+   },
+   select:{
+    id:true,
+    status:true,
+    openedAt:true,
+    closedAt:true
+   }
+  });
+
+  if(shifts.some(s=>s.status!=='CLOSED'||!s.closedAt)){
+   throw new ConflictException(
+    'Closing review blocked: shift remains open'
+   );
+  }
+
+  const shiftIds=shifts.map(s=>s.id);
+
+  const snapshots=shiftIds.length
+   ?await this.db.posShiftClosingSnapshot.findMany({
+     where:{locationId,shiftId:{in:shiftIds}},
+     select:{
+      shiftId:true,
+      closedAt:true,
+      variance:true
+     }
+    })
+   :[];
+
+  const snapshotIds=new Set(snapshots.map(s=>s.shiftId));
+
+  if(
+   !shiftIds.length||
+   shiftIds.some(id=>!snapshotIds.has(id))
+  ){
+   throw new ConflictException(
+    'Closing review blocked: missing shift closing snapshot'
+   );
+  }
+
+  if(snapshots.some(s=>!s.variance.isZero())){
+   throw new ConflictException(
+    'Closing review blocked: shift cash variance'
+   );
+  }
+
+  const lateSales=await this.db.posSale.findMany({
+   where:{
+    locationId,
+    shiftId:{in:shiftIds},
+    status:'ACCEPTED'
+   },
+   select:{
+    id:true,
+    shiftId:true,
+    syncedAt:true
+   }
+  });
+
+  const closedAtByShift=new Map(
+   snapshots.map(s=>[s.shiftId,s.closedAt])
+  );
+
+  if(lateSales.some(s=>{
+   const closedAt=closedAtByShift.get(s.shiftId);
+   return !closedAt||s.syncedAt>closedAt;
+  })){
+   throw new ConflictException(
+    'Closing review blocked: late-synced sales require review'
+   );
+  }
+
+  // Outstanding POS refund obligations may originate
+  // from returns created before the selected date.
+  const allReturns=await this.db.posReturn.findMany({
+   where:{locationId,createdAt:{lt:closingDayEnd}},
+   include:{lines:true,settlements:true}
+  });
+
+  const toCents=(v:Prisma.Decimal)=>
+   v.mul(100)
+    .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+
+  const unsettled=allReturns.some(ret=>{
+   const due=ret.lines.reduce(
+    (sum,line)=>sum+toCents(line.refundAmount),0
+   );
+
+   const settled=ret.settlements
+    .filter(s=>s.settledAt<closingDayEnd)
+    .reduce(
+     (sum,s)=>sum+toCents(s.amount),0
+    );
+
+   return due!==settled;
+  });
+
+  if(unsettled){
+   throw new ConflictException(
+    'Closing review blocked: refund obligations require reconciliation'
+   );
+  }
 
   if(
    report.status!=='NO_DETECTED_EXCEPTIONS'||
