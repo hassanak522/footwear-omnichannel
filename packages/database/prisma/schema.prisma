@@ -1373,3 +1373,22 @@ model BranchClosingDriftIncident {
 
   @@index([locationId, status, lastDetectedAt])
 }
+
+model HqClosingEscalation {
+  id          String   @id @default(uuid()) @db.Uuid
+  locationId  String   @db.Uuid
+  closingDate DateTime @db.Date
+  ownerId     String   @db.Uuid
+  status      String   @default("OPEN")
+  priority    String   @default("HIGH")
+  note        String   @db.VarChar(2000)
+  createdById String   @db.Uuid
+  updatedById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  resolvedAt  DateTime?
+
+  @@unique([locationId, closingDate])
+  @@index([status, updatedAt])
+  @@index([ownerId, status])
+}

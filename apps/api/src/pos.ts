@@ -3504,6 +3504,127 @@ async saleReturnHistory(saleId:string,u:Principal){
  }
 
 
+ // R10_3D10_ESCALATION
+ async hqEscalations(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  return this.db.hqClosingEscalation.findMany({
+   orderBy:{updatedAt:'desc'},
+   take:200
+  });
+ }
+
+ async saveHqEscalation(
+  body:{
+   locationId:string;
+   date:string;
+   ownerId:string;
+   priority:string;
+   status:string;
+   note:string;
+  },
+  u:Principal
+ ){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(body.locationId||'')||
+     !uuid.test(body.ownerId||'')){
+   throw new BadRequestException('Valid branch and owner IDs required');
+  }
+
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(body.date||'')){
+   throw new BadRequestException('Valid closing date required');
+  }
+
+  const closingDate=new Date(body.date+'T00:00:00.000Z');
+
+  if(Number.isNaN(closingDate.getTime())||
+     closingDate.toISOString().slice(0,10)!==body.date){
+   throw new BadRequestException('Invalid closing date');
+  }
+
+  const priorities=['CRITICAL','HIGH','MEDIUM'];
+  const statuses=['OPEN','IN_PROGRESS','RESOLVED'];
+
+  if(!priorities.includes(body.priority)||
+     !statuses.includes(body.status)){
+   throw new BadRequestException('Invalid priority or status');
+  }
+
+  const note=(body.note||'').trim();
+
+  if(note.length<10||note.length>2000){
+   throw new BadRequestException('Note must contain 10-2000 characters');
+  }
+
+  const [branch,owner]=await Promise.all([
+   this.db.location.findUnique({
+    where:{id:body.locationId}
+   }),
+   this.db.user.findUnique({
+    where:{id:body.ownerId},
+    include:{
+     roles:{include:{role:true}},
+     locations:true
+    }
+   })
+  ]);
+
+  if(!branch||branch.type!=='BRANCH'||!branch.active){
+   throw new BadRequestException('Active branch required');
+  }
+
+  if(!owner||owner.status!=='ACTIVE'){
+   throw new BadRequestException('Active owner required');
+  }
+
+  const globalOwner=owner.roles.some(
+   r=>r.role.code==='SUPER_ADMIN'
+  );
+
+  const branchOwner=owner.roles.some(
+   r=>r.role.code==='BRANCH_MANAGER'
+  )&&owner.locations.some(
+   l=>l.locationId===body.locationId
+  );
+
+  if(!globalOwner&&!branchOwner){
+   throw new BadRequestException(
+    'Owner must be an HQ administrator or assigned branch manager'
+   );
+  }
+
+  const data={
+   ownerId:body.ownerId,
+   priority:body.priority,
+   status:body.status,
+   note,
+   updatedById:u.id,
+   resolvedAt:body.status==='RESOLVED'?new Date():null
+  };
+
+  return this.db.hqClosingEscalation.upsert({
+   where:{
+    locationId_closingDate:{
+     locationId:body.locationId,
+     closingDate
+    }
+   },
+   create:{
+    locationId:body.locationId,
+    closingDate,
+    createdById:u.id,
+    ...data
+   },
+   update:data
+  });
+ }
  // R10_3D7_HQ_OVERSIGHT
  async hqClosingOversight(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -4304,6 +4425,28 @@ export class PosController {
  constructor(private pos:PosService){}
 
  // R10_3D7_HQ_OVERSIGHT_ROUTE
+ // R10_3D10_ESCALATION_ROUTES
+ @Get('finance/hq-closing-escalations')
+ @Roles('SUPER_ADMIN')
+ hqEscalationsRoute(@CurrentUser() u:Principal){
+  return this.pos.hqEscalations(u);
+ }
+
+ @Post('finance/hq-closing-escalations')
+ @Roles('SUPER_ADMIN')
+ saveHqEscalationRoute(
+  @Body() body:{
+   locationId:string;
+   date:string;
+   ownerId:string;
+   priority:string;
+   status:string;
+   note:string;
+  },
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.saveHqEscalation(body,u);
+ }
  @Get('finance/hq-closing-oversight')
  @Roles('SUPER_ADMIN')
  hqClosingOversightRoute(@CurrentUser() u:Principal){
