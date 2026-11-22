@@ -89,6 +89,108 @@ function downloadCsv(branches:Branch[]){
  anchor.remove();
  URL.revokeObjectURL(url);
 }
+// R10_3D9_ESCALATION
+type Escalation={
+ level:'IMMEDIATE'|'MANAGER_REVIEW'|'MONITOR';
+ reason:string;
+ action:string;
+};
+
+function escalationOf(branch:Branch):Escalation{
+ if(branch.openIncidents>0){
+  return {
+   level:'IMMEDIATE',
+   reason:
+    `${branch.openIncidents} unresolved closing drift incident(s)`,
+   action:
+    'HQ finance should review the persisted incidents and their evidence.'
+  };
+ }
+
+ if(branch.missingClosings>=3){
+  return {
+   level:'MANAGER_REVIEW',
+   reason:
+    `${branch.missingClosings} missing acknowledgements in seven dates`,
+   action:
+    'Confirm operating days and request outstanding closing reviews.'
+  };
+ }
+
+ if(branch.missingClosings>0){
+  return {
+   level:'MONITOR',
+   reason:
+    `${branch.missingClosings} missing acknowledgement(s)`,
+   action:
+    'Verify the branch trading calendar and acknowledgement status.'
+  };
+ }
+
+ return {
+  level:'MONITOR',
+  reason:'No recorded closing exceptions',
+  action:'Continue routine monitoring.'
+ };
+}
+
+function exportManagementSummary(report:Report){
+ const lines=[
+  'ROYAL STEP - HQ CLOSING MANAGEMENT SUMMARY',
+  'Generated: '+report.generatedAt,
+  'Period: '+report.dates.slice().reverse().join(', '),
+  '',
+  'Active branches: '+report.summary.branches,
+  'Expected acknowledgements: '+
+   report.summary.expectedClosings,
+  'Recorded acknowledgements: '+
+   report.summary.acknowledgedClosings,
+  'Missing acknowledgements: '+
+   report.summary.missingClosings,
+  'Unresolved drift incidents: '+
+   report.summary.openIncidents,
+  '',
+  'BRANCH ESCALATIONS',
+  ''
+ ];
+
+ for(const branch of report.branches){
+  const escalation=escalationOf(branch);
+
+  lines.push(
+   branch.name+' ('+branch.code+')',
+   'Escalation: '+escalation.level,
+   'Reason: '+escalation.reason,
+   'Recommended action: '+escalation.action,
+   'Missing dates: '+
+    (branch.missingDates.join(', ')||'None'),
+   ''
+  );
+ }
+
+ lines.push(
+  'Reporting limitations:',
+  'Missing acknowledgements do not prove a branch was open.',
+  'Drift counts represent persisted unresolved incidents.',
+  'This report is not a historical incident trend or a financial-loss assessment.'
+ );
+
+ const blob=new Blob([lines.join('\r\n')],{
+  type:'text/plain;charset=utf-8'
+ });
+
+ const url=URL.createObjectURL(blob);
+ const anchor=document.createElement('a');
+
+ anchor.href=url;
+ anchor.download='royal-step-hq-closing-summary.txt';
+
+ document.body.appendChild(anchor);
+ anchor.click();
+ anchor.remove();
+
+ URL.revokeObjectURL(url);
+}
 export default function ClosingOversight(){
  const [report,setReport]=useState<Report|null>(null);
  const [loading,setLoading]=useState(true);
@@ -152,6 +254,19 @@ export default function ClosingOversight(){
      a.code.localeCompare(b.code)
     )
   :[];
+ const dailyMissing=report
+  ?report.dates.slice().reverse().map(date=>({
+   date,
+   count:report.branches.filter(
+    branch=>branch.missingDates.includes(date)
+   ).length
+  }))
+  :[];
+
+ const maxDailyMissing=Math.max(
+  1,
+  ...dailyMissing.map(day=>day.count)
+ );
  const metrics=report?[
   ['Active branches',report.summary.branches],
   ['Expected acknowledgements',report.summary.expectedClosings],
@@ -312,6 +427,121 @@ export default function ClosingOversight(){
       <p>
        Priority order: Critical, High, Medium, Clear.
        CSV exports only the currently filtered branches.
+      </p>
+     </section>
+     {/* R10.3D9 HQ escalation and acknowledgement trend */}
+     <section className="card" style={{marginBottom:20}}>
+      <div style={{
+       display:'flex',
+       justifyContent:'space-between',
+       alignItems:'center',
+       flexWrap:'wrap',
+       gap:12
+      }}>
+       <h2>HQ Closing Escalation Summary</h2>
+
+       <button
+        type="button"
+        onClick={()=>exportManagementSummary(report)}
+       >
+        Export management summary
+       </button>
+      </div>
+
+      <p>
+       Recommended actions are advisory.
+       They do not change incident status or assign owners.
+      </p>
+
+      <div style={{overflowX:'auto'}}>
+       <table style={{width:'100%'}}>
+        <thead>
+         <tr>
+          <th>Branch</th>
+          <th>Escalation</th>
+          <th>Reason</th>
+          <th>Recommended action</th>
+         </tr>
+        </thead>
+        <tbody>
+         {[...report.branches]
+          .sort((a,b)=>{
+           const rank={
+            IMMEDIATE:0,
+            MANAGER_REVIEW:1,
+            MONITOR:2
+           };
+           return rank[escalationOf(a).level]-
+            rank[escalationOf(b).level]||
+            a.code.localeCompare(b.code);
+          })
+          .map(branch=>{
+           const escalation=escalationOf(branch);
+
+           return (
+            <tr key={branch.locationId}>
+             <td>
+              <strong>{branch.name}</strong>
+              <div>{branch.code}</div>
+             </td>
+             <td>
+              <strong>{escalation.level}</strong>
+             </td>
+             <td>{escalation.reason}</td>
+             <td>{escalation.action}</td>
+            </tr>
+           );
+          })}
+        </tbody>
+       </table>
+      </div>
+     </section>
+
+     <section className="card" style={{marginBottom:20}}>
+      <h2>Seven-Day Missing Acknowledgement Trend</h2>
+
+      <p>
+       Number of active branches without a recorded
+       acknowledgement for each completed UTC date.
+      </p>
+
+      <div style={{
+       display:'grid',
+       gap:12,
+       marginTop:20
+      }}>
+       {dailyMissing.map(day=>(
+        <div key={day.date} style={{
+         display:'grid',
+         gridTemplateColumns:'110px 1fr 45px',
+         gap:12,
+         alignItems:'center'
+        }}>
+         <span>{day.date}</span>
+
+         <div style={{
+          height:20,
+          background:'#e5e7eb',
+          borderRadius:4,
+          overflow:'hidden'
+         }}>
+          <div style={{
+           width:
+            (day.count/maxDailyMissing*100)+'%',
+           height:'100%',
+           background:'#104c72'
+          }}/>
+         </div>
+
+         <strong>{day.count}</strong>
+        </div>
+       ))}
+      </div>
+
+      <p style={{marginTop:16}}>
+       This is an acknowledgement-completeness trend,
+       not a historical drift-incident trend.
+       Non-trading dates are not excluded.
       </p>
      </section>
      <section className="card">
