@@ -28,10 +28,74 @@ type Report={
  branches:Branch[];
 };
 
+// R10_3D8_PRIORITY_QUEUE
+type Priority='CRITICAL'|'HIGH'|'MEDIUM'|'CLEAR';
+
+function priorityOf(branch:Branch):Priority{
+ if(branch.openIncidents>0)return 'CRITICAL';
+ if(branch.missingClosings>=3)return 'HIGH';
+ if(branch.missingClosings>0)return 'MEDIUM';
+ return 'CLEAR';
+}
+
+const priorityRank:Record<Priority,number>={
+ CRITICAL:0,
+ HIGH:1,
+ MEDIUM:2,
+ CLEAR:3
+};
+
+function downloadCsv(branches:Branch[]){
+ const rows=[
+  [
+   'Branch Code',
+   'Branch Name',
+   'Priority',
+   'Acknowledged',
+   'Expected',
+   'Missing',
+   'Missing Dates',
+   'Open Incidents',
+   'Latest Acknowledgement'
+  ],
+  ...branches.map(branch=>[
+   branch.code,
+   branch.name,
+   priorityOf(branch),
+   String(branch.acknowledgedClosings),
+   String(branch.expectedClosings),
+   String(branch.missingClosings),
+   branch.missingDates.join('; '),
+   String(branch.openIncidents),
+   branch.lastAcknowledgedAt||''
+  ])
+ ];
+
+ const csv=rows.map(row=>
+  row.map(value=>'"'+value.replace(/"/g,'""')+'"')
+   .join(',')
+ ).join('\r\n');
+
+ const blob=new Blob(['\uFEFF'+csv],{
+  type:'text/csv;charset=utf-8'
+ });
+
+ const url=URL.createObjectURL(blob);
+ const anchor=document.createElement('a');
+ anchor.href=url;
+ anchor.download='royal-step-closing-exceptions.csv';
+ document.body.appendChild(anchor);
+ anchor.click();
+ anchor.remove();
+ URL.revokeObjectURL(url);
+}
 export default function ClosingOversight(){
  const [report,setReport]=useState<Report|null>(null);
  const [loading,setLoading]=useState(true);
  const [error,setError]=useState('');
+ const [priorityFilter,setPriorityFilter]=
+  useState<Priority|'ALL'>('ALL');
+ const [search,setSearch]=useState('');
 
  const refresh=useCallback(async()=>{
   setLoading(true);
@@ -71,6 +135,23 @@ export default function ClosingOversight(){
   void refresh();
  },[refresh]);
 
+ const prioritized=report
+  ?[...report.branches]
+    .filter(branch=>
+     (priorityFilter==='ALL'||
+      priorityOf(branch)===priorityFilter)&&
+     (branch.name+' '+branch.code)
+      .toLowerCase()
+      .includes(search.trim().toLowerCase())
+    )
+    .sort((a,b)=>
+     priorityRank[priorityOf(a)]-
+      priorityRank[priorityOf(b)]||
+     b.openIncidents-a.openIncidents||
+     b.missingClosings-a.missingClosings||
+     a.code.localeCompare(b.code)
+    )
+  :[];
  const metrics=report?[
   ['Active branches',report.summary.branches],
   ['Expected acknowledgements',report.summary.expectedClosings],
@@ -137,6 +218,102 @@ export default function ClosingOversight(){
       ))}
      </div>
 
+     <section className="card" style={{marginBottom:20}}>
+      <h2>HQ Priority Exception Queue</h2>
+
+      <p>
+       Priorities are derived from recorded exceptions.
+       They are not a financial-loss determination.
+      </p>
+
+      <div style={{
+       display:'flex',
+       gap:12,
+       flexWrap:'wrap',
+       alignItems:'center',
+       marginBottom:16
+      }}>
+       <label>
+        Priority
+        <select
+         value={priorityFilter}
+         onChange={event=>
+          setPriorityFilter(
+           event.target.value as Priority|'ALL'
+          )
+         }
+        >
+         <option value="ALL">All priorities</option>
+         <option value="CRITICAL">Critical</option>
+         <option value="HIGH">High</option>
+         <option value="MEDIUM">Medium</option>
+         <option value="CLEAR">Clear</option>
+        </select>
+       </label>
+
+       <label>
+        Branch search
+        <input
+         value={search}
+         onChange={event=>setSearch(event.target.value)}
+         placeholder="Name or code"
+        />
+       </label>
+
+       <button
+        type="button"
+        onClick={()=>downloadCsv(prioritized)}
+       >
+        Export filtered CSV
+       </button>
+      </div>
+
+      <div style={{overflowX:'auto'}}>
+       <table style={{width:'100%'}}>
+        <thead>
+         <tr>
+          <th>Priority</th>
+          <th>Branch</th>
+          <th>Missing</th>
+          <th>Unresolved drift</th>
+          <th>Follow-up</th>
+         </tr>
+        </thead>
+        <tbody>
+         {prioritized.map(branch=>(
+          <tr key={branch.locationId}>
+           <td><strong>{priorityOf(branch)}</strong></td>
+           <td>
+            {branch.name}
+            <div>{branch.code}</div>
+           </td>
+           <td>{branch.missingClosings}</td>
+           <td>{branch.openIncidents}</td>
+           <td>
+            {branch.openIncidents>0
+             ?'Review persisted drift incidents'
+             :branch.missingClosings>0
+              ?'Verify trading dates and acknowledgements'
+              :'No recorded exceptions'}
+           </td>
+          </tr>
+         ))}
+         {prioritized.length===0&&(
+          <tr>
+           <td colSpan={5}>
+            No branches match the selected filters.
+           </td>
+          </tr>
+         )}
+        </tbody>
+       </table>
+      </div>
+
+      <p>
+       Priority order: Critical, High, Medium, Clear.
+       CSV exports only the currently filtered branches.
+      </p>
+     </section>
      <section className="card">
       <h2>Branch closing register</h2>
 
