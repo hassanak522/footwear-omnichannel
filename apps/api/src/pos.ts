@@ -3792,6 +3792,186 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D16_GOVERNANCE_SERVICE
+ async hqSlaNotificationGovernance(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const now=new Date();
+  const since=new Date(now.getTime()-30*86400000);
+  const acknowledgementTargetHours=4;
+
+  const breaches=await this.db.hqClosingSlaBreach.findMany({
+   where:{detectedAt:{gte:since,lte:now}},
+   orderBy:{detectedAt:'desc'},
+   select:{
+    id:true,
+    escalationId:true,
+    locationId:true,
+    priority:true,
+    detectedAt:true,
+    dueAt:true,
+    status:true
+   }
+  });
+
+  const ids=breaches.map(b=>b.id);
+
+  const audits=ids.length
+   ?await this.db.auditLog.findMany({
+     where:{
+      entityType:'HqClosingSlaBreach',
+      entityId:{in:ids},
+      action:'HQ_SLA_NOTIFICATION_ACKNOWLEDGED'
+     },
+     select:{
+      entityId:true,
+      actorId:true,
+      createdAt:true
+     },
+     orderBy:{createdAt:'asc'}
+    })
+   :[];
+
+  const firstAcknowledgement=new Map<
+   string,{at:Date;actorId:string|null}
+  >();
+
+  for(const audit of audits){
+   if(!firstAcknowledgement.has(audit.entityId)){
+    firstAcknowledgement.set(audit.entityId,{
+     at:audit.createdAt,
+     actorId:audit.actorId
+    });
+   }
+  }
+
+  const locationIds=[...new Set(
+   breaches.map(b=>b.locationId)
+  )];
+
+  const locations=locationIds.length
+   ?await this.db.location.findMany({
+     where:{id:{in:locationIds}},
+     select:{id:true,code:true,name:true}
+    })
+   :[];
+
+  const locationMap=new Map(
+   locations.map(l=>[l.id,l])
+  );
+
+  const items=breaches.map(b=>{
+   const ack=firstAcknowledgement.get(b.id);
+   const ageHours=Math.max(
+    0,(now.getTime()-b.detectedAt.getTime())/3600000
+   );
+   const ackHours=ack
+    ?Math.max(
+      0,(ack.at.getTime()-b.detectedAt.getTime())/3600000
+     )
+    :null;
+
+   const branch=locationMap.get(b.locationId);
+
+   return {
+    id:b.id,
+    escalationId:b.escalationId,
+    locationId:b.locationId,
+    branchCode:branch?.code||'UNKNOWN',
+    branchName:branch?.name||'Unknown branch',
+    priority:b.priority,
+    status:b.status,
+    detectedAt:b.detectedAt.toISOString(),
+    dueAt:b.dueAt.toISOString(),
+    ageHours:Math.round(ageHours*100)/100,
+    acknowledgementHours:ackHours===null
+     ?null
+     :Math.round(ackHours*100)/100,
+    acknowledgedAt:ack?.at.toISOString()||null,
+    acknowledgedById:ack?.actorId||null,
+    acknowledgementOverdue:
+     !ack&&ageHours>=acknowledgementTargetHours,
+    acknowledgedLate:
+     ackHours!==null&&
+     ackHours>acknowledgementTargetHours
+   };
+  });
+
+  const acknowledged=items.filter(
+   i=>i.acknowledgementHours!==null
+  );
+
+  const pending=items.filter(
+   i=>i.status==='PENDING'
+  );
+
+  const overdue=pending.filter(
+   i=>i.acknowledgementOverdue
+  );
+
+  const avgHours=acknowledged.length
+   ?acknowledged.reduce(
+     (sum,i)=>sum+(i.acknowledgementHours||0),0
+    )/acknowledged.length
+   :null;
+
+  const branchGroups=new Map<string,typeof items>();
+
+  for(const item of items){
+   const group=branchGroups.get(item.locationId)||[];
+   group.push(item);
+   branchGroups.set(item.locationId,group);
+  }
+
+  const branches=[...branchGroups.entries()].map(
+   ([locationId,group])=>({
+    locationId,
+    branchCode:group[0].branchCode,
+    branchName:group[0].branchName,
+    total:group.length,
+    pending:group.filter(i=>i.status==='PENDING').length,
+    acknowledged:group.filter(
+     i=>i.status==='ACKNOWLEDGED'
+    ).length,
+    closed:group.filter(i=>i.status==='CLOSED').length,
+    overdueUnacknowledged:group.filter(
+     i=>i.acknowledgementOverdue
+    ).length
+   })
+  ).sort(
+   (a,b)=>
+    b.overdueUnacknowledged-a.overdueUnacknowledged||
+    b.pending-a.pending||
+    a.branchCode.localeCompare(b.branchCode)
+  );
+
+  return {
+   generatedAt:now.toISOString(),
+   periodStart:since.toISOString(),
+   periodEnd:now.toISOString(),
+   acknowledgementTargetHours,
+   summary:{
+    total:items.length,
+    pending:pending.length,
+    acknowledged:items.filter(
+     i=>i.status==='ACKNOWLEDGED'
+    ).length,
+    closed:items.filter(
+     i=>i.status==='CLOSED'
+    ).length,
+    overdueUnacknowledged:overdue.length,
+    acknowledgedLate:acknowledged.filter(
+     i=>i.acknowledgedLate
+    ).length,
+    averageAcknowledgementHours:
+     avgHours===null?null:Math.round(avgHours*100)/100
+   },
+   branches,
+   items
+  };
+ }
  // R10_3D15_NOTIFICATION_MANAGEMENT
  async manageHqSlaNotification(
   id:string,
@@ -4811,6 +4991,14 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D16_GOVERNANCE_ROUTE
+ @Get('finance/hq-sla-notification-governance')
+ @Roles('SUPER_ADMIN')
+ hqSlaNotificationGovernanceRoute(
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.hqSlaNotificationGovernance(u);
  }
  // R10_3D15_NOTIFICATION_ROUTES
  @Post('finance/hq-closing-sla-breaches/:id/transition')
