@@ -1409,3 +1409,26 @@ model HqClosingSlaBreach {
   @@index([status, detectedAt])
   @@index([locationId, detectedAt])
 }
+/// R10.3D19 - Persistent HQ corrective action tracking.
+model HqCorrectiveAction {
+  id           String    @id @default(uuid()) @db.Uuid
+  locationId   String    @db.Uuid
+  escalationId String?   @db.Uuid
+  ownerId      String    @db.Uuid
+  title        String    @db.VarChar(200)
+  description  String    @db.VarChar(2000)
+  priority     String    @default("MEDIUM")
+  status       String    @default("OPEN")
+  dueAt        DateTime
+  evidence     String?   @db.VarChar(4000)
+  createdById  String    @db.Uuid
+  updatedById  String    @db.Uuid
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([locationId, status])
+  @@index([ownerId, status])
+  @@index([dueAt, status])
+  @@index([escalationId])
+}

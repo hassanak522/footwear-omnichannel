@@ -3792,6 +3792,251 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D19_ACTION_SERVICE
+ async hqCorrectiveActionBranches(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  return this.db.location.findMany({
+   where:{type:'BRANCH',active:true},
+   select:{id:true,code:true,name:true},
+   orderBy:{code:'asc'}
+  });
+ }
+
+ async hqCorrectiveActions(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  return this.db.hqCorrectiveAction.findMany({
+   orderBy:[{dueAt:'asc'},{createdAt:'desc'}],
+   take:500
+  });
+ }
+
+ async createHqCorrectiveAction(body:{
+  locationId:string;
+  escalationId?:string;
+  ownerId:string;
+  title:string;
+  description:string;
+  priority:string;
+  dueAt:string;
+ },u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const title=typeof body?.title==='string'
+   ?body.title.trim():'';
+  const description=typeof body?.description==='string'
+   ?body.description.trim():'';
+
+  if(!uuid.test(body?.locationId||'')||
+     !uuid.test(body?.ownerId||'')){
+   throw new BadRequestException('Valid branch and owner required');
+  }
+
+  if(body.escalationId&&!uuid.test(body.escalationId)){
+   throw new BadRequestException('Invalid escalation ID');
+  }
+
+  if(title.length<5||title.length>200||
+     description.length<10||description.length>2000){
+   throw new BadRequestException('Invalid title or description');
+  }
+
+  if(!['CRITICAL','HIGH','MEDIUM'].includes(body.priority)){
+   throw new BadRequestException('Invalid priority');
+  }
+
+  const dueAt=new Date(body.dueAt);
+
+  if(!Number.isFinite(dueAt.getTime())||
+     dueAt.getTime()<=Date.now()){
+   throw new BadRequestException('Future deadline required');
+  }
+
+  const [location,owner,escalation]=await Promise.all([
+   this.db.location.findUnique({
+    where:{id:body.locationId},
+    select:{type:true,active:true}
+   }),
+   this.db.user.findUnique({
+    where:{id:body.ownerId},
+    select:{
+     status:true,
+     roles:{select:{role:{select:{code:true}}}},
+     locations:{select:{locationId:true}}
+    }
+   }),
+   body.escalationId
+    ?this.db.hqClosingEscalation.findUnique({
+      where:{id:body.escalationId},
+      select:{locationId:true}
+     })
+    :Promise.resolve(null)
+  ]);
+
+  if(!location||location.type!=='BRANCH'||!location.active){
+   throw new BadRequestException('Active branch required');
+  }
+
+  if(!owner||owner.status!=='ACTIVE'){
+   throw new BadRequestException('Active owner required');
+  }
+
+  const codes=owner.roles.map(r=>r.role.code);
+  const eligible=codes.includes('SUPER_ADMIN')||
+   (codes.includes('BRANCH_MANAGER')&&
+    owner.locations.some(l=>l.locationId===body.locationId));
+
+  if(!eligible){
+   throw new BadRequestException(
+    'Owner must be HQ admin or manager assigned to this branch'
+   );
+  }
+
+  if(body.escalationId&&
+     (!escalation||escalation.locationId!==body.locationId)){
+   throw new BadRequestException(
+    'Escalation must belong to selected branch'
+   );
+  }
+
+  return this.db.$transaction(async tx=>{
+   const action=await tx.hqCorrectiveAction.create({
+    data:{
+     locationId:body.locationId,
+     escalationId:body.escalationId||null,
+     ownerId:body.ownerId,
+     title,
+     description,
+     priority:body.priority,
+     dueAt,
+     status:'OPEN',
+     createdById:u.id,
+     updatedById:u.id
+    }
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'HQ_CORRECTIVE_ACTION_CREATED',
+     entityType:'HqCorrectiveAction',
+     entityId:action.id,
+     after:{
+      locationId:action.locationId,
+      escalationId:action.escalationId,
+      ownerId:action.ownerId,
+      title:action.title,
+      priority:action.priority,
+      dueAt:action.dueAt.toISOString(),
+      status:action.status
+     }
+    }
+   });
+
+   return action;
+  });
+ }
+
+ async transitionHqCorrectiveAction(
+  id:string,
+  body:{status:string;evidence?:string;expectedUpdatedAt?:string},
+  u:Principal
+ ){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(id||'')){
+   throw new BadRequestException('Invalid action ID');
+  }
+
+  if(!['IN_PROGRESS','COMPLETED'].includes(body?.status)){
+   throw new BadRequestException('Invalid target status');
+  }
+
+  const evidence=typeof body.evidence==='string'
+   ?body.evidence.trim():'';
+
+  if(body.status==='COMPLETED'&&evidence.length<30){
+   throw new BadRequestException(
+    'Completion evidence must contain at least 30 characters'
+   );
+  }
+
+  if(evidence.length>4000){
+   throw new BadRequestException('Evidence too long');
+  }
+
+  return this.db.$transaction(async tx=>{
+   const existing=await tx.hqCorrectiveAction.findUnique({
+    where:{id}
+   });
+
+   if(!existing){
+    throw new NotFoundException('Action not found');
+   }
+
+   const valid=
+    (existing.status==='OPEN'&&body.status==='IN_PROGRESS')||
+    (existing.status==='IN_PROGRESS'&&body.status==='COMPLETED');
+
+   if(!valid){
+    throw new ConflictException('Invalid action transition');
+   }
+
+   if(body.expectedUpdatedAt&&
+      existing.updatedAt.toISOString()!==body.expectedUpdatedAt){
+    throw new ConflictException(
+     'Action changed; refresh before updating'
+    );
+   }
+
+   const changed=await tx.hqCorrectiveAction.updateMany({
+    where:{id,status:existing.status,updatedAt:existing.updatedAt},
+    data:{
+     status:body.status,
+     evidence:body.status==='COMPLETED'?evidence:existing.evidence,
+     completedAt:body.status==='COMPLETED'?new Date():null,
+     updatedById:u.id
+    }
+   });
+
+   if(changed.count!==1){
+    throw new ConflictException('Action updated concurrently');
+   }
+
+   const saved=await tx.hqCorrectiveAction.findUniqueOrThrow({
+    where:{id}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'HQ_CORRECTIVE_ACTION_'+body.status,
+     entityType:'HqCorrectiveAction',
+     entityId:id,
+     before:{status:existing.status},
+     after:{
+      status:saved.status,
+      evidence:saved.evidence,
+      completedAt:saved.completedAt?.toISOString()||null
+     }
+    }
+   });
+
+   return saved;
+  });
+ }
  // R10_3D18_INTELLIGENCE_SERVICE
  async hqNotificationIntelligence(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -5415,6 +5660,54 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D19_ACTION_ROUTES
+ @Get('finance/hq-corrective-action-branches')
+ @Roles('SUPER_ADMIN')
+ async hqCorrectiveActionBranchesRoute(
+  @CurrentUser() u:Principal
+ ){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+  return this.pos.hqCorrectiveActionBranches(u);
+ }
+
+ @Get('finance/hq-corrective-actions')
+ @Roles('SUPER_ADMIN')
+ hqCorrectiveActionsRoute(@CurrentUser() u:Principal){
+  return this.pos.hqCorrectiveActions(u);
+ }
+
+ @Post('finance/hq-corrective-actions')
+ @Roles('SUPER_ADMIN')
+ createHqCorrectiveActionRoute(
+  @Body() body:{
+   locationId:string;
+   escalationId?:string;
+   ownerId:string;
+   title:string;
+   description:string;
+   priority:string;
+   dueAt:string;
+  },
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.createHqCorrectiveAction(body,u);
+ }
+
+ @Post('finance/hq-corrective-actions/:id/status')
+ @Roles('SUPER_ADMIN')
+ transitionHqCorrectiveActionRoute(
+  @Param('id') id:string,
+  @Body() body:{
+   status:string;
+   evidence?:string;
+   expectedUpdatedAt?:string;
+  },
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.transitionHqCorrectiveAction(id,body,u);
  }
  // R10_3D18_INTELLIGENCE_ROUTE
  @Get('finance/hq-notification-intelligence')

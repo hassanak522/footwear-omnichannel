@@ -6,6 +6,7 @@ import HqSlaBreachRegister from './HqSlaBreachRegister';
 import HqNotificationGovernance from './HqNotificationGovernance';
 import HqNotificationAnalytics from './HqNotificationAnalytics';
 import HqNotificationIntelligence from './HqNotificationIntelligence';
+import HqCorrectiveActions from './HqCorrectiveActions';
 
 type Branch={
  locationId:string;
@@ -339,6 +340,7 @@ export default function ClosingOversight(){
      </div>
 
      {/* R10.3D10B HQ ownership interface */}
+     <HqCorrectiveActions />
      <HqNotificationIntelligence />
      <HqNotificationAnalytics />
      <HqNotificationGovernance />
