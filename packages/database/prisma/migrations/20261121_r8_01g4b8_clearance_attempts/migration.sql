@@ -1,4 +1,4 @@
-﻿CREATE TABLE "PosClearanceAttempt" (
+CREATE TABLE "PosClearanceAttempt" (
     "id" UUID NOT NULL,
     "deviceId" UUID NOT NULL,
     "localSaleId" UUID NOT NULL,

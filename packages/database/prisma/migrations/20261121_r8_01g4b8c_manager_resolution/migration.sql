@@ -1,4 +1,4 @@
-﻿ALTER TABLE "PosClearanceAttempt"
+ALTER TABLE "PosClearanceAttempt"
 DROP CONSTRAINT "PosClearanceAttempt_status_check";
 
 ALTER TABLE "PosClearanceAttempt"
