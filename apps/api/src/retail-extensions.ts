@@ -365,22 +365,126 @@ export class ReplenishmentController {
    return {requestId:id,transfer};
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable});
  }
- @Post('requests/:id/refresh-status') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
- async refreshStatus(@Param('id') id:string,@CurrentUser() u:Principal){
+ // R9_3_TRANSFER_REPLENISHMENT_SYNC
+ @Post('requests/:id/refresh-status')
+ @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async refreshStatus(
+  @Param('id') id:string,
+  @CurrentUser() u:Principal
+ ){
   return this.db.$transaction(async tx=>{
-   await tx.$queryRaw`SELECT id FROM "ReplenishmentRequest" WHERE id = ${id}::uuid FOR UPDATE`;
-   const r=await tx.replenishmentRequest.findUniqueOrThrow({where:{id}});
-   if(!u.roles.includes('SUPER_ADMIN')&&!u.locations.includes(r.sourceId)&&!u.locations.includes(r.destinationId))throw new ForbiddenException('Not assigned to either location');
-   if(!r.transferId)throw new ConflictException('No linked transfer');
-   const t=await tx.stockTransfer.findUniqueOrThrow({where:{id:r.transferId},include:{items:true}});
-   if(t.status!=='RECEIVED')return {requestId:id,status:r.status,transferStatus:t.status};
+   await tx.$queryRaw`
+    SELECT id FROM "ReplenishmentRequest"
+    WHERE id = ${id}::uuid FOR UPDATE
+   `;
+
+   const r=await tx.replenishmentRequest.findUniqueOrThrow({
+    where:{id}
+   });
+
+   if(!u.roles.includes('SUPER_ADMIN')&&
+      !u.locations.includes(r.sourceId)&&
+      !u.locations.includes(r.destinationId))
+    throw new ForbiddenException('Not assigned to either location');
+
+   if(!r.transferId)
+    throw new ConflictException('No linked transfer');
+
+   const t=await tx.stockTransfer.findUniqueOrThrow({
+    where:{id:r.transferId},
+    include:{items:true}
+   });
+
+   if(t.sourceId!==r.sourceId||
+      t.destinationId!==r.destinationId)
+    throw new ConflictException(
+     'Linked transfer location mismatch'
+    );
+
    const line=t.items.find(i=>i.variantId===r.variantId);
-   if(!line || line.receivedQty<r.quantity) return {requestId:id,status:r.status,transferStatus:t.status,receivedQty:line?.receivedQty??0};
-   if(r.status!=='FULFILLED'){
-    await tx.replenishmentRequest.update({where:{id},data:{status:'FULFILLED'}});
-    await tx.auditLog.create({data:{actorId:u.id,action:'REPLENISHMENT_FULFILLED',entityType:'ReplenishmentRequest',entityId:id,after:{transferId:t.id}}});
+
+   if(!line)
+    throw new ConflictException(
+     'Linked transfer does not contain requested variant'
+    );
+
+   const received=line.receivedQty;
+   const damaged=line.damagedQty;
+   const shortage=line.shortageQty;
+   const outstanding=Math.max(
+    0,line.dispatchedQty-received-damaged-shortage
+   );
+
+   const fulfilled=
+    t.status==='RECEIVED'&&
+    received>=r.quantity&&
+    damaged===0&&
+    shortage===0;
+
+   const terminal=[
+    'RECEIVED',
+    'SHORTAGE_CLOSED',
+    'CANCELLED'
+   ].includes(t.status);
+
+   const outcome=fulfilled
+    ?'FULFILLED'
+    :t.status==='CANCELLED'
+     ?'TRANSFER_CANCELLED'
+     :t.status==='SHORTAGE_CLOSED'
+      ?'SHORTAGE_REQUIRES_ACTION'
+      :terminal
+       ?'RECEIPT_VARIANCE_REQUIRES_ACTION'
+       :received>0||damaged>0
+        ?'PARTIALLY_RECEIVED'
+        :'AWAITING_RECEIPT';
+
+   if(fulfilled&&r.status!=='FULFILLED'){
+    const result=await tx.replenishmentRequest.updateMany({
+     where:{
+      id,
+      status:'APPROVED',
+      transferId:r.transferId
+     },
+     data:{status:'FULFILLED'}
+    });
+
+    if(result.count!==1)
+     throw new ConflictException(
+      'Replenishment status changed concurrently'
+     );
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'REPLENISHMENT_FULFILLED',
+      entityType:'ReplenishmentRequest',
+      entityId:id,
+      before:{status:r.status},
+      after:{
+       status:'FULFILLED',
+       transferId:t.id,
+       receivedQty:received
+      }
+     }
+    });
    }
-   return {requestId:id,status:'FULFILLED',transferStatus:t.status};
+
+   return {
+    requestId:id,
+    status:fulfilled?'FULFILLED':r.status,
+    transferId:t.id,
+    transferStatus:t.status,
+    outcome,
+    requestedQty:r.quantity,
+    dispatchedQty:line.dispatchedQty,
+    receivedQty:received,
+    damagedQty:damaged,
+    shortageQty:shortage,
+    outstandingQty:outstanding,
+    requiresAction:terminal&&!fulfilled,
+    note:'Only good received stock satisfies replenishment.'
+   };
   });
  }
  // R9_REPLENISHMENT_GOVERNANCE
