@@ -16,6 +16,7 @@ type Escalation={
  priority:string;
  status:string;
  note:string;
+ createdAt:string;
  updatedAt:string;
  resolvedAt:string|null;
 };
@@ -69,10 +70,72 @@ async function request<T>(
  return data as T;
 }
 
+// R10_3D12_SLA
+type SlaState='OVERDUE'|'DUE_SOON'|'ON_TRACK'|'RESOLVED';
+
+const SLA_HOURS:Record<string,number>={
+ CRITICAL:4,
+ HIGH:24,
+ MEDIUM:72
+};
+
+function slaOf(row:Escalation,now:number){
+ const hours=SLA_HOURS[row.priority]??24;
+ const created=new Date(row.createdAt).getTime();
+ const deadline=created+hours*3600000;
+
+ if(!Number.isFinite(created)){
+  return {
+   state:'OVERDUE' as SlaState,
+   deadline:0,
+   hours
+  };
+ }
+
+ if(row.status==='RESOLVED'){
+  return {
+   state:'RESOLVED' as SlaState,
+   deadline,
+   hours
+  };
+ }
+
+ const remaining=deadline-now;
+
+ return {
+  state:(
+   remaining<=0?'OVERDUE':
+   remaining<=Math.min(hours*0.25,4)*3600000
+    ?'DUE_SOON':'ON_TRACK'
+  ) as SlaState,
+  deadline,
+  hours
+ };
+}
+
+function formatAge(start:string,now:number){
+ const elapsed=Math.max(
+  0,
+  now-new Date(start).getTime()
+ );
+
+ if(!Number.isFinite(elapsed)){
+  return 'Unknown';
+ }
+
+ const hours=Math.floor(elapsed/3600000);
+ const days=Math.floor(hours/24);
+
+ return days>0
+  ?`${days}d ${hours%24}h`
+  :`${hours}h`;
+}
 export default function HqEscalationAssignments({
  branches,dates
 }:Props){
  const [rows,setRows]=useState<Escalation[]>([]);
+ const [asOf,setAsOf]=useState<number|null>(null);
+ const [slaFilter,setSlaFilter]=useState<SlaState|'ALL'>('ALL');
  const [locationId,setLocationId]=useState('');
  const [date,setDate]=useState('');
  const [ownerId,setOwnerId]=useState('');
@@ -112,6 +175,7 @@ export default function HqEscalationAssignments({
   setError('');
   try{
    setRows(await request<Escalation[]>('GET'));
+   setAsOf(Date.now());
   }catch(e){
    setError(e instanceof Error?e.message:'Unable to load records');
   }
@@ -178,6 +242,31 @@ export default function HqEscalationAssignments({
   }
  }
 
+ const slaRows=asOf===null?[]:rows.map(row=>({
+  row,
+  sla:slaOf(row,asOf)
+ }));
+
+ const counts={
+  OVERDUE:slaRows.filter(x=>x.sla.state==='OVERDUE').length,
+  DUE_SOON:slaRows.filter(x=>x.sla.state==='DUE_SOON').length,
+  ON_TRACK:slaRows.filter(x=>x.sla.state==='ON_TRACK').length,
+  RESOLVED:slaRows.filter(x=>x.sla.state==='RESOLVED').length
+ };
+
+ const slaRank:Record<SlaState,number>={
+  OVERDUE:0,
+  DUE_SOON:1,
+  ON_TRACK:2,
+  RESOLVED:3
+ };
+
+ const visibleRows=slaRows
+  .filter(x=>slaFilter==='ALL'||x.sla.state===slaFilter)
+  .sort((a,b)=>
+   slaRank[a.sla.state]-slaRank[b.sla.state]||
+   a.sla.deadline-b.sla.deadline
+  );
  return (
   <section className="card" style={{marginBottom:20}}>
    <h2>HQ Escalation Assignments</h2>
@@ -188,6 +277,61 @@ export default function HqEscalationAssignments({
     against a specific branch and closing date.
    </p>
 
+   <div style={{margin:'20px 0'}}>
+    <h3>Escalation SLA Monitoring</h3>
+
+    <p>
+     Targets: Critical 4h, High 24h, Medium 72h.
+     Due Soon means within the final 25% of the target,
+     capped at four hours.
+    </p>
+
+    <div style={{
+     display:'grid',
+     gridTemplateColumns:'repeat(auto-fit,minmax(140px,1fr))',
+     gap:12
+    }}>
+     {([
+      ['OVERDUE',counts.OVERDUE],
+      ['DUE_SOON',counts.DUE_SOON],
+      ['ON_TRACK',counts.ON_TRACK],
+      ['RESOLVED',counts.RESOLVED]
+     ] as const).map(([label,count])=>(
+      <div key={label} style={{
+       border:'1px solid #ddd',
+       padding:14,
+       borderRadius:8
+      }}>
+       <strong>{label.replace('_',' ')}</strong>
+       <div style={{fontSize:24}}>{count}</div>
+      </div>
+     ))}
+    </div>
+
+    <p style={{marginTop:12}}>
+     SLA snapshot:
+     {' '}
+     {asOf===null
+      ?'Not loaded'
+      :new Date(asOf).toLocaleString()}
+    </p>
+
+    <label>
+     Filter by SLA status
+     <select
+      value={slaFilter}
+      onChange={e=>
+       setSlaFilter(e.target.value as SlaState|'ALL')
+      }
+     >
+      <option value="ALL">All</option>
+      <option value="OVERDUE">Overdue</option>
+      <option value="DUE_SOON">Due Soon</option>
+      <option value="ON_TRACK">On Track</option>
+      <option value="RESOLVED">Resolved</option>
+     </select>
+    </label>
+   </div>
    <form onSubmit={save} className="stack">
     <label>
      Branch
@@ -301,12 +445,15 @@ export default function HqEscalationAssignments({
         <th>Owner</th>
         <th>Priority</th>
         <th>Status</th>
+        <th>Age</th>
+        <th>SLA</th>
+        <th>Deadline</th>
         <th>Updated</th>
         <th>Action</th>
        </tr>
       </thead>
       <tbody>
-       {rows.map(row=>{
+       {visibleRows.map(({row,sla})=>{
         const branch=branches.find(
          b=>b.locationId===row.locationId
         );
@@ -320,6 +467,17 @@ export default function HqEscalationAssignments({
           </td>
           <td>{row.priority}</td>
           <td>{row.status}</td>
+          <td>
+           {asOf===null?'—':formatAge(row.createdAt,asOf)}
+          </td>
+          <td>
+           <strong>{sla.state.replace('_',' ')}</strong>
+          </td>
+          <td>
+           {sla.deadline
+            ?new Date(sla.deadline).toLocaleString()
+            :'Unknown'}
+          </td>
           <td>
            {new Date(row.updatedAt).toLocaleString()}
           </td>
@@ -337,9 +495,9 @@ export default function HqEscalationAssignments({
          </tr>
         );
        })}
-       {rows.length===0&&(
+       {visibleRows.length===0&&(
         <tr>
-         <td colSpan={7}>No saved escalations.</td>
+         <td colSpan={10}>No escalations match the selected filter.</td>
         </tr>
        )}
       </tbody>
