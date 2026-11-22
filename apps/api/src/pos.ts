@@ -3527,6 +3527,162 @@ async saleReturnHistory(saleId:string,u:Principal){
 
  // R10_3D4_HISTORICAL_CHECK
  // R10_3D5_DRIFT_QUEUE
+ // R10_3D6_INCIDENTS
+ async closingIncidents(locationId:string,u:Principal){
+  this.branchAccess(u,locationId);
+
+  return this.db.branchClosingDriftIncident.findMany({
+   where:{locationId},
+   orderBy:{lastDetectedAt:'desc'},
+   take:100
+  });
+ }
+
+ async captureClosingDrift(locationId:string,u:Principal){
+  this.branchAccess(u,locationId);
+
+  const scan=await this.closingDriftQueue(locationId,u);
+  let created=0;
+  let updated=0;
+
+  for(const row of scan.rows){
+   if(row.integrityStatus!=='CHANGES_DETECTED')continue;
+
+   const existing=await this.db.branchClosingDriftIncident.findUnique({
+    where:{reviewId:row.reviewId}
+   });
+
+   const data={
+    changedSections:row.changedSections,
+    currentIssues:row.currentIssues,
+    lastDetectedAt:new Date()
+   };
+
+   if(existing){
+    await this.db.branchClosingDriftIncident.update({
+     where:{id:existing.id},
+     data
+    });
+    updated++;
+   }else{
+    try{
+     await this.db.branchClosingDriftIncident.create({
+      data:{
+       reviewId:row.reviewId,
+       locationId,
+       closingDate:new Date(row.date+'T00:00:00.000Z'),
+       ...data
+      }
+     });
+     created++;
+    }catch(e){
+     if(
+      e instanceof Prisma.PrismaClientKnownRequestError&&
+      e.code==='P2002'
+     ){
+      await this.db.branchClosingDriftIncident.update({
+       where:{reviewId:row.reviewId},
+       data
+      });
+      updated++;
+     }else{
+      throw e;
+     }
+    }
+   }
+  }
+
+  return {
+   scanned:scan.scanned,
+   changed:scan.changed,
+   failed:scan.failed,
+   created,
+   updated,
+   incidents:await this.closingIncidents(locationId,u)
+  };
+ }
+
+ async transitionClosingIncident(
+  id:string,
+  body:{status:string;note:string},
+  u:Principal
+ ){
+  if(!u.roles.some(r=>
+   r==='SUPER_ADMIN'||r==='BRANCH_MANAGER'
+  )){
+   throw new ForbiddenException('Manager role required');
+  }
+
+  const status=body?.status;
+  const note=body?.note?.trim();
+
+  if(
+   !['INVESTIGATING','RESOLVED','REOPENED'].includes(status)||
+   !note||note.length>2000
+  ){
+   throw new BadRequestException(
+    'Valid status and note (1-2000 characters) required'
+   );
+  }
+
+  const incident=await this.db.branchClosingDriftIncident.findUnique({
+   where:{id}
+  });
+
+  if(!incident){
+   throw new NotFoundException('Closing incident not found');
+  }
+
+  this.branchAccess(u,incident.locationId);
+
+  if(
+   (status==='INVESTIGATING'&&incident.status!=='OPEN'&&incident.status!=='REOPENED')||
+   (status==='RESOLVED'&&incident.status!=='INVESTIGATING')||
+   (status==='REOPENED'&&incident.status!=='RESOLVED')
+  ){
+   throw new ConflictException('Invalid incident transition');
+  }
+
+  const nextStatus=status==='REOPENED'?'OPEN':status;
+
+  return this.db.$transaction(async tx=>{
+   const changed=await tx.branchClosingDriftIncident.updateMany({
+    where:{id,status:incident.status},
+    data:{
+     status:nextStatus,
+     ownerId:status==='INVESTIGATING'?u.id:incident.ownerId,
+     resolutionNote:note,
+     resolvedAt:status==='RESOLVED'?new Date():null,
+     resolvedById:status==='RESOLVED'?u.id:null
+    }
+   });
+
+   if(changed.count!==1){
+    throw new ConflictException('Incident changed concurrently');
+   }
+
+   const result=await tx.branchClosingDriftIncident.findUniqueOrThrow({
+    where:{id}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'BRANCH_CLOSING_DRIFT_'+status,
+     entityType:'BranchClosingDriftIncident',
+     entityId:id,
+     before:{status:incident.status},
+     after:{
+      status:nextStatus,
+      note,
+      actorId:u.id
+     }
+    }
+   });
+
+   return result;
+  });
+ }
  async closingDriftQueue(
   locationId:string,
   u:Principal
@@ -4013,6 +4169,33 @@ async saleReturnHistory(saleId:string,u:Principal){
 export class PosController {
  constructor(private pos:PosService){}
 
+ @Get('finance/closing-incidents')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ closingIncidentsRoute(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.closingIncidents(locationId,u);
+ }
+
+ @Post('finance/closing-incidents/scan')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ captureClosingDriftRoute(
+  @Body() body:{locationId:string},
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.captureClosingDrift(body.locationId,u);
+ }
+
+ @Post('finance/closing-incidents/:id/transition')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ transitionClosingIncidentRoute(
+  @Param('id') id:string,
+  @Body() body:{status:string;note:string},
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.transitionClosingIncident(id,body,u);
+ }
  @Get('finance/closing-reviews/drift-queue')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  closingDriftQueueRoute(

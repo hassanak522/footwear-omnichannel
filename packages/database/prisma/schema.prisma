@@ -1354,3 +1354,22 @@ model BranchClosingReview {
   @@unique([locationId, closingDate])
   @@index([locationId, signedAt])
 }
+
+model BranchClosingDriftIncident {
+  id             String   @id @default(uuid()) @db.Uuid
+  reviewId       String   @unique @db.Uuid
+  locationId     String   @db.Uuid
+  closingDate    DateTime @db.Date
+  status         String   @default("OPEN")
+  changedSections Json
+  currentIssues  Json
+  ownerId        String?  @db.Uuid
+  resolutionNote String?  @db.VarChar(2000)
+  detectedAt     DateTime @default(now())
+  lastDetectedAt DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  resolvedAt     DateTime?
+  resolvedById   String?  @db.Uuid
+
+  @@index([locationId, status, lastDetectedAt])
+}

@@ -4,6 +4,7 @@ import {useEffect,useState} from 'react';
 import BranchPaymentCasework from './BranchPaymentCasework';
 import BranchClosingRegister from './BranchClosingRegister';
 import BranchClosingDriftQueue from './BranchClosingDriftQueue';
+import BranchClosingIncidents from './BranchClosingIncidents';
 
 type Branch={
  id:string;
@@ -367,6 +368,8 @@ export default function BranchFinanceReconciliation(){
    </div>
 
    <BranchClosingDriftQueue locationId={current.location.id}/>
+
+   <BranchClosingIncidents locationId={current.location.id}/>
 
    <BranchPaymentCasework locationId={current.location.id}/>
 
