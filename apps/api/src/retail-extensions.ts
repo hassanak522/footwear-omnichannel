@@ -322,6 +322,101 @@ export class ReplenishmentController {
  constructor(private db:Db){}
  @Get('sources') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') async sources(@CurrentUser() u:Principal){return this.db.location.findMany({where:{active:true,type:{in:['WAREHOUSE','BRANCH']},...(u.roles.includes('SUPER_ADMIN')?{}:{id:{notIn:u.locations}})},select:{id:true,name:true,type:true}});}
  @Get('requests') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') list(@CurrentUser() u:Principal){return this.db.replenishmentRequest.findMany({where:u.roles.includes('SUPER_ADMIN')?{}:{OR:[{destinationId:{in:u.locations}},{sourceId:{in:u.locations}}]},orderBy:{createdAt:'desc'},take:200});}
+ // R9_4_OPERATIONS_SUMMARY
+ @Get('operations-summary')
+ @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER')
+ async operationsSummary(@CurrentUser() u:Principal){
+  const requests=await this.db.replenishmentRequest.findMany({
+   where:u.roles.includes('SUPER_ADMIN')
+    ?{}
+    :{
+      OR:[
+       {sourceId:{in:u.locations}},
+       {destinationId:{in:u.locations}}
+      ]
+     },
+   orderBy:{createdAt:'desc'},
+   take:500
+  });
+
+  const transferIds=requests
+   .map(r=>r.transferId)
+   .filter((id):id is string=>Boolean(id));
+
+  const transfers=await this.db.stockTransfer.findMany({
+   where:{id:{in:transferIds}},
+   include:{items:true}
+  });
+
+  const byId=new Map(transfers.map(t=>[t.id,t]));
+
+  const rows=requests.map(r=>{
+   const transfer=r.transferId
+    ?byId.get(r.transferId)
+    :undefined;
+
+   const item=transfer?.items.find(
+    line=>line.variantId===r.variantId
+   );
+
+   const receivedQty=item?.receivedQty??0;
+   const damagedQty=item?.damagedQty??0;
+   const shortageQty=item?.shortageQty??0;
+
+   const outstandingQty=Math.max(
+    0,(item?.dispatchedQty??0)-
+    receivedQty-damagedQty-shortageQty
+   );
+
+   const fulfilled=
+    r.status==='FULFILLED'||
+    (transfer?.status==='RECEIVED'&&
+     receivedQty>=r.quantity&&
+     damagedQty===0&&
+     shortageQty===0);
+
+   const requiresAction=Boolean(
+    transfer&&
+    ['RECEIVED','SHORTAGE_CLOSED','CANCELLED']
+     .includes(transfer.status)&&
+    !fulfilled
+   );
+
+   return {
+    requestId:r.id,
+    sourceId:r.sourceId,
+    destinationId:r.destinationId,
+    variantId:r.variantId,
+    requestedQty:r.quantity,
+    status:r.status,
+    transferId:r.transferId,
+    transferStatus:transfer?.status??null,
+    receivedQty,
+    damagedQty,
+    shortageQty,
+    outstandingQty,
+    fulfilled,
+    requiresAction,
+    createdAt:r.createdAt
+   };
+  });
+
+  return {
+   generatedAt:new Date().toISOString(),
+   scope:'AUTHORIZED_LOCATIONS',
+   truncated:requests.length===500,
+   totals:{
+    requests:rows.length,
+    fulfilled:rows.filter(r=>r.fulfilled).length,
+    requiringAction:rows.filter(r=>r.requiresAction).length,
+    awaitingFulfillment:rows.filter(
+     r=>!r.fulfilled&&!r.requiresAction
+    ).length
+   },
+   rows,
+   note:'Operational status only. Results are limited to 500 recent requests.'
+  };
+ }
  @Post('requests') @Roles('SUPER_ADMIN','BRANCH_MANAGER') async create(@Body() d:RequestDto,@CurrentUser() u:Principal){
   assertLocation(u,d.destinationId);if(d.sourceId===d.destinationId)throw new BadRequestException('Choose another source');
   const [src,dst]=await Promise.all([this.db.location.findUniqueOrThrow({where:{id:d.sourceId}}),this.db.location.findUniqueOrThrow({where:{id:d.destinationId}})]);

@@ -35,6 +35,79 @@ function canonicalJson(value: unknown): string {
 @Injectable()
 export class TransfersService {
  constructor(private db: Db) {}
+ // R9_4_AUTO_FULFILLMENT
+ private async reconcileReplenishment(
+  tx:Prisma.TransactionClient,
+  transferId:string,
+  u:Principal
+ ){
+  const transfer=await tx.stockTransfer.findUniqueOrThrow({
+   where:{id:transferId},
+   include:{items:true}
+  });
+
+  const requests=await tx.replenishmentRequest.findMany({
+   where:{
+    transferId,
+    status:'APPROVED'
+   }
+  });
+
+  for(const request of requests){
+   if(request.sourceId!==transfer.sourceId||
+      request.destinationId!==transfer.destinationId)
+    throw new ConflictException(
+     'Replenishment and transfer locations do not match'
+    );
+
+   const line=transfer.items.find(
+    item=>item.variantId===request.variantId
+   );
+
+   if(!line)
+    throw new ConflictException(
+     'Replenishment variant missing from transfer'
+    );
+
+   const fulfilled=
+    transfer.status==='RECEIVED'&&
+    line.receivedQty>=request.quantity&&
+    line.damagedQty===0&&
+    line.shortageQty===0;
+
+   if(!fulfilled)
+    continue;
+
+   const changed=await tx.replenishmentRequest.updateMany({
+    where:{
+     id:request.id,
+     status:'APPROVED',
+     transferId
+    },
+    data:{status:'FULFILLED'}
+   });
+
+   if(changed.count!==1)
+    throw new ConflictException(
+     'Replenishment changed concurrently'
+    );
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'REPLENISHMENT_AUTO_FULFILLED',
+     entityType:'ReplenishmentRequest',
+     entityId:request.id,
+     before:{status:'APPROVED'},
+     after:{
+      status:'FULFILLED',
+      transferId,
+      receivedQty:line.receivedQty
+     }
+    }
+   });
+  }
+ }
  private async retrySerializable<T>(operation:()=>Promise<T>):Promise<T>{
   for(let attempt=0;attempt<3;attempt++){
    try{return await operation();}
@@ -151,6 +224,7 @@ export class TransfersService {
    const complete=updatedItems.every(i=>i.receivedQty+i.damagedQty+i.shortageQty===i.dispatchedQty);
    const status:TransferStatus=complete?'RECEIVED':'PARTIALLY_RECEIVED';
    const result=await tx.stockTransfer.update({where:{id},data:{status,receivedAt:complete?new Date():null},include:{items:true}});
+   await this.reconcileReplenishment(tx,id,u);
    await this.event(tx,dto.idempotencyKey,'RECEIVE',id,dto.items);
    await this.audit(tx,u,'TRANSFER_RECEIVE',id,{status:t.status},{status,receivedThisTime});
    return result;
@@ -199,6 +273,7 @@ export class TransfersService {
     include:{items:true}
    });
 
+   await this.reconcileReplenishment(tx,id,u);
    await this.event(tx,dto.idempotencyKey,'CANCEL',id,payload);
 
    await this.audit(
@@ -234,6 +309,7 @@ export class TransfersService {
    }
    if(outstanding===0)throw new ConflictException('No outstanding quantity');
    const result=await tx.stockTransfer.update({where:{id},data:{status:'SHORTAGE_CLOSED'},include:{items:true}});
+   await this.reconcileReplenishment(tx,id,u);
    await this.event(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason});
    await this.audit(tx,u,'TRANSFER_SHORTAGE_CLOSE',id,{status:t.status},{status:'SHORTAGE_CLOSED',outstanding,reason});
    return result;
