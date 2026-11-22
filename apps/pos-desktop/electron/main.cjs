@@ -10,8 +10,147 @@ if (process.env.POS_QA_MODE === '1') {
   app.setPath('userData', qaUserData);
 }
 let db;let SQL;const allowed=['config','catalog','sales','outbox'];
-async function init(){const mod=await import('sql.js');SQL=await mod.default({locateFile:f=>require.resolve('sql.js/dist/'+f)});const file=path.join(app.getPath('userData'),'pos.sqlite');db=fs.existsSync(file)?new SQL.Database(fs.readFileSync(file)):new SQL.Database();db.run(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE IF NOT EXISTS catalog (id TEXT PRIMARY KEY,barcode TEXT,sku TEXT,title TEXT,size TEXT,color TEXT,price REAL NOT NULL);CREATE TABLE IF NOT EXISTS sales (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,error TEXT);CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY,sale_id TEXT NOT NULL UNIQUE,attempts INTEGER NOT NULL DEFAULT 0,last_error TEXT);CREATE TABLE IF NOT EXISTS clearance_attempts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,server_response TEXT,error TEXT);CREATE TABLE IF NOT EXISTS discount_attempts (id TEXT PRIMARY KEY,payload TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,server_response TEXT,error TEXT);`);persist();}
-function persist(){const file=path.join(app.getPath('userData'),'pos.sqlite');const temp=file+'.tmp';fs.writeFileSync(temp,Buffer.from(db.export()));fs.renameSync(temp,file);}
+/* R10_1B_DURABLE_POS_STORAGE */
+function databaseFile(){
+ return path.join(app.getPath('userData'),'pos.sqlite');
+}
+
+function verifyDatabase(database){
+ const result=database.exec('PRAGMA integrity_check');
+ const value=result?.[0]?.values?.[0]?.[0];
+
+ if(value!=='ok')
+  throw Error('POS database integrity verification failed');
+}
+
+async function init(){
+ const mod=await import('sql.js');
+
+ SQL=await mod.default({
+  locateFile:f=>require.resolve('sql.js/dist/'+f)
+ });
+
+ const file=databaseFile();
+
+ db=fs.existsSync(file)
+  ?new SQL.Database(fs.readFileSync(file))
+  :new SQL.Database();
+
+ verifyDatabase(db);
+
+ db.run(`
+  CREATE TABLE IF NOT EXISTS config (
+   key TEXT PRIMARY KEY,
+   value TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS catalog (
+   id TEXT PRIMARY KEY,
+   barcode TEXT,
+   sku TEXT,
+   title TEXT,
+   size TEXT,
+   color TEXT,
+   price REAL NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS sales (
+   id TEXT PRIMARY KEY,
+   payload TEXT NOT NULL,
+   status TEXT NOT NULL,
+   created_at TEXT NOT NULL,
+   error TEXT
+  );
+  CREATE TABLE IF NOT EXISTS outbox (
+   id TEXT PRIMARY KEY,
+   sale_id TEXT NOT NULL UNIQUE,
+   attempts INTEGER NOT NULL DEFAULT 0,
+   last_error TEXT
+  );
+  CREATE TABLE IF NOT EXISTS clearance_attempts (
+   id TEXT PRIMARY KEY,
+   payload TEXT NOT NULL,
+   status TEXT NOT NULL,
+   created_at TEXT NOT NULL,
+   server_response TEXT,
+   error TEXT
+  );
+  CREATE TABLE IF NOT EXISTS discount_attempts (
+   id TEXT PRIMARY KEY,
+   payload TEXT NOT NULL,
+   status TEXT NOT NULL,
+   created_at TEXT NOT NULL,
+   server_response TEXT,
+   error TEXT
+  );
+ `);
+
+ // Restore queue entries for locally pending sales.
+ // Accepted and conflicted sales are never requeued.
+ db.run(`
+  INSERT INTO outbox(id,sale_id,attempts,last_error)
+  SELECT lower(hex(randomblob(16))),s.id,0,NULL
+  FROM sales s
+  WHERE s.status='PENDING'
+   AND NOT EXISTS (
+    SELECT 1 FROM outbox o WHERE o.sale_id=s.id
+   )
+ `);
+
+ // Remove stale queue entries for finalized sales.
+ db.run(`
+  DELETE FROM outbox
+  WHERE NOT EXISTS (
+   SELECT 1 FROM sales s
+   WHERE s.id=outbox.sale_id
+    AND s.status='PENDING'
+  )
+ `);
+
+ verifyDatabase(db);
+ persist();
+}
+
+function persist(){
+ const file=databaseFile();
+ const temp=file+'.tmp';
+ const backup=file+'.bak';
+ const bytes=Buffer.from(db.export());
+
+ // Verify exported database before replacing the active file.
+ const candidate=new SQL.Database(bytes);
+
+ try{
+  verifyDatabase(candidate);
+ }finally{
+  candidate.close();
+ }
+
+ // Keep the previous committed database as a recovery copy.
+ // Never overwrite it with a known-corrupt database.
+ if(fs.existsSync(file)){
+  const existing=new SQL.Database(fs.readFileSync(file));
+
+  try{
+   verifyDatabase(existing);
+  }finally{
+   existing.close();
+  }
+
+  fs.copyFileSync(file,backup);
+ }
+
+ // Flush temporary database bytes before atomic rename.
+ let fd;
+
+ try{
+  fd=fs.openSync(temp,'w');
+  fs.writeFileSync(fd,bytes);
+  fs.fsyncSync(fd);
+ }finally{
+  if(fd!==undefined)fs.closeSync(fd);
+ }
+
+ fs.renameSync(temp,file);
+}
 function rows(sql,params=[]){const st=db.prepare(sql);st.bind(params);const result=[];while(st.step())result.push(st.getAsObject());st.free();return result;}
 function saveConfig(key,value){db.run('INSERT INTO config(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,JSON.stringify(value)]);persist();}
 function readConfig(key){const r=rows('SELECT value FROM config WHERE key=?',[key])[0];return r?JSON.parse(r.value):null;}
