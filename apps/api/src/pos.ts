@@ -3792,6 +3792,209 @@ async saleReturnHistory(saleId:string,u:Principal){
    take:100
   });
  }
+ // R10_3D18_INTELLIGENCE_SERVICE
+ async hqNotificationIntelligence(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const now=new Date();
+  const since=new Date(now.getTime()-90*86400000);
+
+  const breaches=await this.db.hqClosingSlaBreach.findMany({
+   where:{detectedAt:{gte:since,lte:now}},
+   select:{
+    id:true,
+    escalationId:true,
+    locationId:true,
+    priority:true,
+    status:true,
+    detectedAt:true
+   },
+   orderBy:{detectedAt:'desc'}
+  });
+
+  const ids=breaches.map(b=>b.id);
+
+  const audits=ids.length
+   ?await this.db.auditLog.findMany({
+     where:{
+      entityType:'HqClosingSlaBreach',
+      entityId:{in:ids},
+      action:'HQ_SLA_NOTIFICATION_ACKNOWLEDGED'
+     },
+     select:{entityId:true,createdAt:true},
+     orderBy:{createdAt:'asc'}
+    })
+   :[];
+
+  const ackMap=new Map<string,Date>();
+
+  for(const audit of audits){
+   if(!ackMap.has(audit.entityId)){
+    ackMap.set(audit.entityId,audit.createdAt);
+   }
+  }
+
+  const locationIds=[...new Set(
+   breaches.map(b=>b.locationId)
+  )];
+
+  const locations=locationIds.length
+   ?await this.db.location.findMany({
+     where:{id:{in:locationIds}},
+     select:{id:true,code:true,name:true}
+    })
+   :[];
+
+  const locationMap=new Map(
+   locations.map(l=>[l.id,l])
+  );
+
+  const escalationIds=[...new Set(
+   breaches.map(b=>b.escalationId)
+  )];
+
+  const escalations=escalationIds.length
+   ?await this.db.hqClosingEscalation.findMany({
+     where:{id:{in:escalationIds}},
+     select:{id:true,status:true}
+    })
+   :[];
+
+  const escalationMap=new Map(
+   escalations.map(e=>[e.id,e.status])
+  );
+
+  const weights:Record<string,number>={
+   CRITICAL:5,
+   HIGH:3,
+   MEDIUM:1
+  };
+
+  const groups=new Map<string,{
+   locationId:string;
+   code:string;
+   name:string;
+   total:number;
+   critical:number;
+   high:number;
+   medium:number;
+   pending:number;
+   overdueUnacknowledged:number;
+   lateAcknowledgements:number;
+   unresolvedEscalations:number;
+   riskScore:number;
+   latestBreachAt:string|null;
+  }>();
+
+  for(const breach of breaches){
+   const location=locationMap.get(breach.locationId);
+
+   let group=groups.get(breach.locationId);
+
+   if(!group){
+    group={
+     locationId:breach.locationId,
+     code:location?.code||'UNKNOWN',
+     name:location?.name||'Unknown branch',
+     total:0,
+     critical:0,
+     high:0,
+     medium:0,
+     pending:0,
+     overdueUnacknowledged:0,
+     lateAcknowledgements:0,
+     unresolvedEscalations:0,
+     riskScore:0,
+     latestBreachAt:null
+    };
+
+    groups.set(breach.locationId,group);
+   }
+
+   group.total++;
+
+   if(breach.priority==='CRITICAL')group.critical++;
+   if(breach.priority==='HIGH')group.high++;
+   if(breach.priority==='MEDIUM')group.medium++;
+
+   if(breach.status==='PENDING')group.pending++;
+
+   const ack=ackMap.get(breach.id);
+
+   const elapsedHours=ack
+    ?(ack.getTime()-breach.detectedAt.getTime())/3600000
+    :(now.getTime()-breach.detectedAt.getTime())/3600000;
+
+   const overdue=!ack&&elapsedHours>4;
+   const late=!!ack&&elapsedHours>4;
+
+   if(overdue)group.overdueUnacknowledged++;
+   if(late)group.lateAcknowledgements++;
+
+   if(escalationMap.get(breach.escalationId)!=='RESOLVED'){
+    group.unresolvedEscalations++;
+   }
+
+   group.riskScore+=
+    (weights[breach.priority]||1)+
+    (overdue?3:0)+
+    (late?1:0);
+
+   const detected=breach.detectedAt.toISOString();
+
+   if(!group.latestBreachAt||
+      detected>group.latestBreachAt){
+    group.latestBreachAt=detected;
+   }
+  }
+
+  const branches=[...groups.values()].map(g=>({
+   ...g,
+   recurring:g.total>=3,
+   attentionLevel:
+    g.riskScore>=30?'CRITICAL':
+    g.riskScore>=15?'HIGH':
+    g.riskScore>=5?'MEDIUM':'LOW'
+  })).sort(
+   (a,b)=>b.riskScore-a.riskScore||
+    b.overdueUnacknowledged-a.overdueUnacknowledged||
+    a.code.localeCompare(b.code)
+  );
+
+  return {
+   generatedAt:now.toISOString(),
+   periodStart:since.toISOString(),
+   periodEnd:now.toISOString(),
+   scoringPolicy:{
+    critical:5,
+    high:3,
+    medium:1,
+    overdueUnacknowledgedBonus:3,
+    lateAcknowledgementBonus:1,
+    acknowledgementTargetHours:4,
+    recurringThreshold:3
+   },
+   summary:{
+    branchesWithBreaches:branches.length,
+    totalBreaches:breaches.length,
+    totalRiskScore:branches.reduce(
+     (sum,b)=>sum+b.riskScore,0
+    ),
+    recurringBranches:branches.filter(
+     b=>b.recurring
+    ).length,
+    criticalAttentionBranches:branches.filter(
+     b=>b.attentionLevel==='CRITICAL'
+    ).length,
+    overdueUnacknowledged:branches.reduce(
+     (sum,b)=>sum+b.overdueUnacknowledged,0
+    )
+   },
+   branches
+  };
+ }
  // R10_3D17_ANALYTICS_SERVICE
  async hqSlaNotificationAnalytics(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -5212,6 +5415,14 @@ export class PosController {
   @CurrentUser() u:Principal
  ){
   return this.pos.hqEscalationHistory(id,u);
+ }
+ // R10_3D18_INTELLIGENCE_ROUTE
+ @Get('finance/hq-notification-intelligence')
+ @Roles('SUPER_ADMIN')
+ hqNotificationIntelligenceRoute(
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.hqNotificationIntelligence(u);
  }
  // R10_3D17_ANALYTICS_ROUTE
  @Get('finance/hq-sla-notification-analytics')
