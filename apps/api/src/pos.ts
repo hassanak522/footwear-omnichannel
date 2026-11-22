@@ -3525,6 +3525,130 @@ async saleReturnHistory(saleId:string,u:Principal){
   });
  }
 
+ // R10_3D4_HISTORICAL_CHECK
+ async closingReviewIntegrity(
+  locationId:string,
+  date:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid locationId required');
+  }
+
+  if(!u.roles.some(r=>
+   r==='SUPER_ADMIN'||r==='BRANCH_MANAGER'
+  )){
+   throw new ForbiddenException('Manager role required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date||'')){
+   throw new BadRequestException('Date must use YYYY-MM-DD');
+  }
+
+  const closingDate=new Date(date+'T00:00:00.000Z');
+
+  if(
+   Number.isNaN(closingDate.getTime())||
+   closingDate.toISOString().slice(0,10)!==date
+  ){
+   throw new BadRequestException('Invalid date');
+  }
+
+  const existing=await this.db.branchClosingReview.findUnique({
+   where:{
+    locationId_closingDate:{locationId,closingDate}
+   }
+  });
+
+  if(!existing){
+   throw new NotFoundException(
+    'No closing acknowledgement exists for this branch date'
+   );
+  }
+
+  const current=await this.branchReconciliation(
+   locationId,date,date,u
+  );
+
+  const stored=existing.snapshot as Record<string,any>;
+
+  // Compare only financial data and exception indicators.
+  // Generation timestamps are intentionally excluded.
+  const projection=(report:any)=>({
+   status:report.status,
+   issues:[...(report.issues||[])].sort(),
+   sales:report.sales,
+   shifts:report.shifts,
+   drawer:report.drawer,
+   refunds:report.refunds
+  });
+
+  const before=projection(stored);
+  const after=projection(current);
+
+  const changedSections:string[]=[];
+
+  for(const key of [
+   'status','issues','sales','shifts','drawer','refunds'
+  ]){
+   if(
+    JSON.stringify((before as any)[key])!==
+    JSON.stringify((after as any)[key])
+   ){
+    changedSections.push(key);
+   }
+  }
+
+  const pendingPaymentCases=
+   await this.db.paymentException.count({
+    where:{
+     locationId,
+     status:{in:['OPEN','UNDER_REVIEW']}
+    }
+   });
+
+  const storedPendingCases=
+   Number(stored.pendingPaymentCases??0);
+
+  if(pendingPaymentCases!==storedPendingCases){
+   changedSections.push('paymentCases');
+  }
+
+  const currentIssues=[
+   ...current.issues,
+   ...(pendingPaymentCases>0
+    ?['UNRESOLVED_PAYMENT_CASES']
+    :[])
+  ];
+
+  const changed=changedSections.length>0;
+
+  return {
+   reviewId:existing.id,
+   locationId,
+   date,
+   acknowledgedAt:existing.signedAt,
+   checkedAt:new Date().toISOString(),
+   changed,
+   status:changed
+    ?'CHANGES_DETECTED'
+    :'NO_CHANGES_DETECTED',
+   changedSections,
+   currentIssues,
+   pendingPaymentCases,
+   storedPendingCases,
+   originalStatus:stored.status||null,
+   currentStatus:current.status,
+   note:
+    'Comparison reflects records visible at check time. '+
+    'It is not a transactionally locked financial close.'
+  };
+ }
  async acknowledgeClosing(
   body:{locationId:string;date:string;note:string},
   u:Principal
@@ -3793,6 +3917,17 @@ async saleReturnHistory(saleId:string,u:Principal){
 export class PosController {
  constructor(private pos:PosService){}
 
+ @Get('finance/closing-reviews/integrity')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ closingReviewIntegrityRoute(
+  @Query('locationId') locationId:string,
+  @Query('date') date:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.closingReviewIntegrity(
+   locationId,date,u
+  );
+ }
  @Get('finance/closing-reviews')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  closingReviewsRoute(

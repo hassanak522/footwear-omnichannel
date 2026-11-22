@@ -13,6 +13,17 @@ type ClosingReview={
  snapshot:unknown;
 };
 
+type IntegrityResult={
+ reviewId:string;
+ date:string;
+ changed:boolean;
+ status:string;
+ changedSections:string[];
+ currentIssues:string[];
+ pendingPaymentCases:number;
+ checkedAt:string;
+ note:string;
+};
 type Props={
  locationId:string;
  from:string;
@@ -67,6 +78,8 @@ export default function BranchClosingRegister({
  const [error,setError]=useState('');
  const [message,setMessage]=useState('');
  const [selected,setSelected]=useState<ClosingReview|null>(null);
+ const [integrity,setIntegrity]=useState<IntegrityResult|null>(null);
+ const [checking,setChecking]=useState(false);
 
  const today=new Date().toISOString().slice(0,10);
 
@@ -110,6 +123,30 @@ export default function BranchClosingRegister({
   utcDate(r.closingDate)===date
  );
 
+ async function checkIntegrity(row:ClosingReview){
+  setChecking(true);
+  setError('');
+  setIntegrity(null);
+  setSelected(row);
+
+  try{
+   const query=new URLSearchParams({
+    locationId,
+    date:utcDate(row.closingDate)
+   });
+
+   const result=await request<IntegrityResult>(
+    '/pos/finance/closing-reviews/integrity?'+
+    query.toString()
+   );
+
+   setIntegrity(result);
+  }catch(e){
+   setError(String(e));
+  }finally{
+   setChecking(false);
+  }
+ }
  async function acknowledge(){
   if(!eligiblePreview||alreadyReviewed||!note.trim()||saving){
    return;
@@ -259,10 +296,18 @@ export default function BranchClosingRegister({
        <td>
         <button
          className="secondary"
-         onClick={()=>setSelected(
-          selected?.id===row.id?null:row
-         )}>
+         onClick={()=>{
+          setIntegrity(null);
+          setSelected(selected?.id===row.id?null:row);
+         }}>
          {selected?.id===row.id?'Hide':'View'}
+        </button>
+        {' '}
+        <button
+         className="secondary"
+         disabled={checking}
+         onClick={()=>void checkIntegrity(row)}>
+         Check for changes
         </button>
        </td>
       </tr>
@@ -283,6 +328,41 @@ export default function BranchClosingRegister({
    </p>
   }
 
+  {integrity&&selected?.id===integrity.reviewId&&
+   <div className="card stack">
+    <h4>Historical integrity check</h4>
+
+    <p>
+     <strong>Result:</strong>
+     {' '}{integrity.status.replace(/_/g,' ')}
+    </p>
+
+    <p>
+     <strong>Checked:</strong>
+     {' '}{timestamp(integrity.checkedAt)}
+    </p>
+
+    {integrity.changedSections.length>0&&<>
+     <strong>Changed sections</strong>
+     <ul>
+      {integrity.changedSections.map(section=>
+       <li key={section}>{section}</li>
+      )}
+     </ul>
+    </>}
+
+    {integrity.currentIssues.length>0&&<>
+     <strong>Current exceptions</strong>
+     <ul>
+      {integrity.currentIssues.map(issue=>
+       <li key={issue}>{issue.replace(/_/g,' ')}</li>
+      )}
+     </ul>
+    </>}
+
+    <p className="muted">{integrity.note}</p>
+   </div>
+  }
   {selected&&
    <div className="card stack">
     <h4>Recorded review details</h4>
