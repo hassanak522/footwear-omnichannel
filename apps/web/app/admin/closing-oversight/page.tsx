@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useState} from 'react';
+import HqEscalationAssignments from './HqEscalationAssignments';
 
 type Branch={
  locationId:string;
@@ -333,6 +334,11 @@ export default function ClosingOversight(){
       ))}
      </div>
 
+     {/* R10.3D10B HQ ownership interface */}
+     <HqEscalationAssignments
+      branches={report.branches}
+      dates={report.dates}
+     />
      <section className="card" style={{marginBottom:20}}>
       <h2>HQ Priority Exception Queue</h2>
 

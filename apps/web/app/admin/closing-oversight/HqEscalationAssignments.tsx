@@ -1,0 +1,274 @@
+'use client';
+
+import {useCallback,useEffect,useState} from 'react';
+
+type Branch={
+ locationId:string;
+ code:string;
+ name:string;
+};
+
+type Escalation={
+ id:string;
+ locationId:string;
+ closingDate:string;
+ ownerId:string;
+ priority:string;
+ status:string;
+ note:string;
+ updatedAt:string;
+ resolvedAt:string|null;
+};
+
+type Props={
+ branches:Branch[];
+ dates:string[];
+};
+
+const endpoint='/api/v1/pos/finance/hq-closing-escalations';
+
+async function request<T>(
+ method:'GET'|'POST',
+ body?:unknown
+):Promise<T>{
+ const response=await fetch(endpoint,{
+  method,
+  credentials:'same-origin',
+  cache:'no-store',
+  headers:{'Content-Type':'application/json'},
+  ...(body===undefined?{}:{body:JSON.stringify(body)})
+ });
+
+ const data=await response.json().catch(()=>({}));
+
+ if(!response.ok){
+  throw new Error(
+   Array.isArray(data.message)
+    ?data.message.join('; ')
+    :data.message||`HTTP ${response.status}`
+  );
+ }
+
+ return data as T;
+}
+
+export default function HqEscalationAssignments({
+ branches,dates
+}:Props){
+ const [rows,setRows]=useState<Escalation[]>([]);
+ const [locationId,setLocationId]=useState('');
+ const [date,setDate]=useState('');
+ const [ownerId,setOwnerId]=useState('');
+ const [priority,setPriority]=useState('HIGH');
+ const [status,setStatus]=useState('OPEN');
+ const [note,setNote]=useState('');
+ const [busy,setBusy]=useState(false);
+ const [error,setError]=useState('');
+ const [message,setMessage]=useState('');
+
+ const load=useCallback(async()=>{
+  setError('');
+  try{
+   setRows(await request<Escalation[]>('GET'));
+  }catch(e){
+   setError(e instanceof Error?e.message:'Unable to load records');
+  }
+ },[]);
+
+ useEffect(()=>{
+  void load();
+ },[load]);
+
+ function edit(row:Escalation){
+  setLocationId(row.locationId);
+  setDate(row.closingDate.slice(0,10));
+  setOwnerId(row.ownerId);
+  setPriority(row.priority);
+  setStatus(row.status);
+  setNote(row.note);
+  setMessage('');
+ }
+
+ async function save(event:React.FormEvent){
+  event.preventDefault();
+  setBusy(true);
+  setError('');
+  setMessage('');
+
+  try{
+   await request('POST',{
+    locationId,
+    date,
+    ownerId:ownerId.trim(),
+    priority,
+    status,
+    note:note.trim()
+   });
+
+   await load();
+   setMessage('Escalation record saved.');
+  }catch(e){
+   setError(e instanceof Error?e.message:'Unable to save');
+  }finally{
+   setBusy(false);
+  }
+ }
+
+ return (
+  <section className="card" style={{marginBottom:20}}>
+   <h2>HQ Escalation Assignments</h2>
+
+   <p>
+    Assign an active HQ administrator or branch manager
+    using their user UUID. Ownership changes are saved
+    against a specific branch and closing date.
+   </p>
+
+   <form onSubmit={save} className="stack">
+    <label>
+     Branch
+     <select
+      required
+      value={locationId}
+      onChange={e=>setLocationId(e.target.value)}
+     >
+      <option value="">Select branch</option>
+      {branches.map(branch=>(
+       <option key={branch.locationId}
+        value={branch.locationId}>
+        {branch.name} ({branch.code})
+       </option>
+      ))}
+     </select>
+    </label>
+
+    <label>
+     Closing date (UTC)
+     <input
+      type="date"
+      required
+      value={date}
+      onChange={e=>setDate(e.target.value)}
+     />
+    </label>
+
+    <label>
+     Assigned owner user UUID
+     <input
+      required
+      value={ownerId}
+      onChange={e=>setOwnerId(e.target.value)}
+      placeholder="Existing active staff user UUID"
+      pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+     />
+    </label>
+
+    <label>
+     Priority
+     <select value={priority}
+      onChange={e=>setPriority(e.target.value)}>
+      <option value="CRITICAL">Critical</option>
+      <option value="HIGH">High</option>
+      <option value="MEDIUM">Medium</option>
+     </select>
+    </label>
+
+    <label>
+     Status
+     <select value={status}
+      onChange={e=>setStatus(e.target.value)}>
+      <option value="OPEN">Open</option>
+      <option value="IN_PROGRESS">In progress</option>
+      <option value="RESOLVED">Resolved</option>
+     </select>
+    </label>
+
+    <label>
+     Management note
+     <textarea
+      required
+      minLength={10}
+      maxLength={2000}
+      rows={4}
+      value={note}
+      onChange={e=>setNote(e.target.value)}
+     />
+    </label>
+
+    <button disabled={busy}>
+     {busy?'Saving...':'Save escalation'}
+    </button>
+   </form>
+
+   {error&&<p role="alert" className="error">{error}</p>}
+   {message&&<p role="status">{message}</p>}
+
+   <div style={{marginTop:24}}>
+    <div className="row">
+     <h3>Saved escalations</h3>
+     <button type="button"
+      onClick={()=>void load()}
+      disabled={busy}>
+      Refresh records
+     </button>
+    </div>
+
+    <div style={{overflowX:'auto'}}>
+     <table style={{width:'100%'}}>
+      <thead>
+       <tr>
+        <th>Branch</th>
+        <th>Date</th>
+        <th>Owner</th>
+        <th>Priority</th>
+        <th>Status</th>
+        <th>Updated</th>
+        <th>Action</th>
+       </tr>
+      </thead>
+      <tbody>
+       {rows.map(row=>{
+        const branch=branches.find(
+         b=>b.locationId===row.locationId
+        );
+
+        return (
+         <tr key={row.id}>
+          <td>{branch?.name||row.locationId}</td>
+          <td>{row.closingDate.slice(0,10)}</td>
+          <td title={row.ownerId}>
+           {row.ownerId.slice(0,8)}...
+          </td>
+          <td>{row.priority}</td>
+          <td>{row.status}</td>
+          <td>
+           {new Date(row.updatedAt).toLocaleString()}
+          </td>
+          <td>
+           <button type="button"
+            onClick={()=>edit(row)}>
+            Edit
+           </button>
+          </td>
+         </tr>
+        );
+       })}
+       {rows.length===0&&(
+        <tr>
+         <td colSpan={7}>No saved escalations.</td>
+        </tr>
+       )}
+      </tbody>
+     </table>
+    </div>
+   </div>
+
+   <p>
+    Resolving an HQ escalation does not resolve its
+    underlying drift incident. Updates overwrite the
+    current escalation record; immutable history is not
+    yet available.
+   </p>
+  </section>
+ );
+}
