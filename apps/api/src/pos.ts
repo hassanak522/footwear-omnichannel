@@ -167,18 +167,91 @@ export class PosService {
   if(!location||location.type!=='BRANCH'||!location.active)throw new BadRequestException('Active branch required');
   return this.db.posDevice.create({data:{code:dto.code,locationId:dto.locationId}});
  }
+ // R10_2_SHIFT_INTEGRITY
  async openShift(dto:OpenShiftDto,u:Principal){
-  const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
-  this.branchAccess(u,device.locationId);
-  if(!device.active)throw new ForbiddenException('Device disabled');
-  return this.db.$transaction(async tx=>{
-   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-shift:${dto.deviceId}`}))`;
-   const active=await tx.posShift.findFirst({where:{deviceId:dto.deviceId,status:'OPEN'}});
-   if(active)throw new ConflictException('Device already has an open shift');
-   return tx.posShift.create({data:{deviceId:dto.deviceId,locationId:device.locationId,cashierId:u.id,openingCash:money(dto.openingCash)}});
-  });
- }
+  const openingCents=Math.round(dto.openingCash*100);
 
+  if(
+   !Number.isSafeInteger(openingCents)||
+   openingCents<0||
+   openingCents>100000000000
+  ){
+   throw new BadRequestException('Invalid opening cash amount');
+  }
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+    // Serialize shift opening for this device.
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift:${dto.deviceId}`})
+     )
+    `;
+
+    const device=await tx.posDevice.findUnique({
+     where:{id:dto.deviceId}
+    });
+
+    if(!device||!device.active){
+     throw new ConflictException('Active POS device required');
+    }
+
+    this.branchAccess(u,device.locationId);
+
+    const location=await tx.location.findUnique({
+     where:{id:device.locationId}
+    });
+
+    if(!location?.active||location.type!=='BRANCH'){
+     throw new ConflictException('Active branch required');
+    }
+
+    const active=await tx.posShift.findFirst({
+     where:{
+      deviceId:dto.deviceId,
+      status:'OPEN'
+     }
+    });
+
+    if(active){
+     throw new ConflictException(
+      'Device already has an open shift'
+     );
+    }
+
+    const shift=await tx.posShift.create({
+     data:{
+      deviceId:dto.deviceId,
+      locationId:device.locationId,
+      cashierId:u.id,
+      openingCash:new Prisma.Decimal(
+       (openingCents/100).toFixed(2)
+      )
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_SHIFT_OPENED',
+      entityType:'PosShift',
+      entityId:shift.id,
+      after:{
+       deviceId:shift.deviceId,
+       locationId:shift.locationId,
+       openingCash:shift.openingCash.toString(),
+       cashierId:u.id
+      }
+     }
+    });
+
+    return shift;
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
 async closeShift(id:string,dto:CloseShiftDto,u:Principal){
  return this.db.$transaction(async tx=>{
   await tx.$executeRaw`
@@ -315,6 +388,18 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     );
    }
   }
+  // R10_2_UNRESOLVED_SALES_GUARD
+  const unresolvedSales=sales.filter(
+   sale=>sale.status!=='ACCEPTED'&&
+         sale.status!=='STOCK_CONFLICT'
+  );
+
+  if(unresolvedSales.length){
+   throw new ConflictException(
+    'Shift closing blocked: unresolved POS sales require review'
+   );
+  }
+
   const movements=await tx.drawerMovement.findMany({
    where:{shiftId:id,status:'APPROVED'}
   });
