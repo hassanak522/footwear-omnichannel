@@ -20,6 +20,14 @@ type Escalation={
  resolvedAt:string|null;
 };
 
+// R10_3D10C_STAFF_SELECTOR
+type EligibleOwner={
+ id:string;
+ name:string;
+ email:string;
+ roles:string[];
+ locationIds:string[];
+};
 type Props={
  branches:Branch[];
  dates:string[];
@@ -59,6 +67,8 @@ export default function HqEscalationAssignments({
  const [locationId,setLocationId]=useState('');
  const [date,setDate]=useState('');
  const [ownerId,setOwnerId]=useState('');
+ const [owners,setOwners]=useState<EligibleOwner[]>([]);
+ const [ownersError,setOwnersError]=useState('');
  const [priority,setPriority]=useState('HIGH');
  const [status,setStatus]=useState('OPEN');
  const [note,setNote]=useState('');
@@ -66,6 +76,26 @@ export default function HqEscalationAssignments({
  const [error,setError]=useState('');
  const [message,setMessage]=useState('');
 
+ const loadOwners=useCallback(async()=>{
+  try{
+   const response=await fetch(
+    '/api/v1/pos/finance/hq-closing-escalation-owners',
+    {credentials:'same-origin',cache:'no-store'}
+   );
+
+   if(!response.ok){
+    throw new Error('Unable to load eligible staff');
+   }
+
+   const data=await response.json();
+   setOwners(data as EligibleOwner[]);
+   setOwnersError('');
+  }catch(e){
+   setOwnersError(
+    e instanceof Error?e.message:'Staff directory unavailable'
+   );
+  }
+ },[]);
  const load=useCallback(async()=>{
   setError('');
   try{
@@ -77,7 +107,8 @@ export default function HqEscalationAssignments({
 
  useEffect(()=>{
   void load();
- },[load]);
+  void loadOwners();
+ },[load,loadOwners]);
 
  function edit(row:Escalation){
   setLocationId(row.locationId);
@@ -153,15 +184,30 @@ export default function HqEscalationAssignments({
     </label>
 
     <label>
-     Assigned owner user UUID
-     <input
+     Assigned owner
+     <select
       required
       value={ownerId}
       onChange={e=>setOwnerId(e.target.value)}
-      placeholder="Existing active staff user UUID"
-      pattern="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-     />
+     >
+      <option value="">Select eligible staff member</option>
+      {owners
+       .filter(owner=>
+        owner.roles.includes('SUPER_ADMIN')||
+        (owner.roles.includes('BRANCH_MANAGER')&&
+         owner.locationIds.includes(locationId))
+       )
+       .map(owner=>(
+        <option key={owner.id} value={owner.id}>
+         {owner.name} ({owner.email})
+        </option>
+       ))}
+     </select>
     </label>
+
+    {ownersError&&(
+     <p role="alert">{ownersError}</p>
+    )}
 
     <label>
      Priority

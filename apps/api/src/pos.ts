@@ -3504,6 +3504,48 @@ async saleReturnHistory(saleId:string,u:Principal){
  }
 
 
+ // R10_3D10C_OWNER_DIRECTORY
+ async hqEscalationOwners(u:Principal){
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('HQ access required');
+  }
+
+  const users=await this.db.user.findMany({
+   where:{
+    status:'ACTIVE',
+    roles:{
+     some:{
+      role:{
+       code:{in:['SUPER_ADMIN','BRANCH_MANAGER']}
+      }
+     }
+    }
+   },
+   select:{
+    id:true,
+    name:true,
+    email:true,
+    roles:{
+     select:{
+      role:{select:{code:true}}
+     }
+    },
+    locations:{
+     select:{locationId:true}
+    }
+   },
+   orderBy:{name:'asc'},
+   take:500
+  });
+
+  return users.map(user=>({
+   id:user.id,
+   name:user.name,
+   email:user.email,
+   roles:user.roles.map(r=>r.role.code),
+   locationIds:user.locations.map(l=>l.locationId)
+  }));
+ }
  // R10_3D10_ESCALATION
  async hqEscalations(u:Principal){
   if(!u.roles.includes('SUPER_ADMIN')){
@@ -4425,6 +4467,12 @@ export class PosController {
  constructor(private pos:PosService){}
 
  // R10_3D7_HQ_OVERSIGHT_ROUTE
+ // R10_3D10C_OWNER_DIRECTORY_ROUTE
+ @Get('finance/hq-closing-escalation-owners')
+ @Roles('SUPER_ADMIN')
+ hqEscalationOwnersRoute(@CurrentUser() u:Principal){
+  return this.pos.hqEscalationOwners(u);
+ }
  // R10_3D10_ESCALATION_ROUTES
  @Get('finance/hq-closing-escalations')
  @Roles('SUPER_ADMIN')
