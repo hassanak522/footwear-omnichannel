@@ -3,6 +3,7 @@
 import {useEffect,useState} from 'react';
 import BranchPaymentCasework from './BranchPaymentCasework';
 import BranchClosingRegister from './BranchClosingRegister';
+import BranchClosingDriftQueue from './BranchClosingDriftQueue';
 
 type Branch={
  id:string;
@@ -364,6 +365,8 @@ export default function BranchFinanceReconciliation(){
     {!current.refunds.rows.length&&
      <p className="muted">No returns in this period.</p>}
    </div>
+
+   <BranchClosingDriftQueue locationId={current.location.id}/>
 
    <BranchPaymentCasework locationId={current.location.id}/>
 

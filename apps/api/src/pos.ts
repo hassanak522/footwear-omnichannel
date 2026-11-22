@@ -3526,6 +3526,102 @@ async saleReturnHistory(saleId:string,u:Principal){
  }
 
  // R10_3D4_HISTORICAL_CHECK
+ // R10_3D5_DRIFT_QUEUE
+ async closingDriftQueue(
+  locationId:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid locationId required');
+  }
+
+  if(!u.roles.some(r=>
+   r==='SUPER_ADMIN'||r==='BRANCH_MANAGER'
+  )){
+   throw new ForbiddenException('Manager role required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const reviews=await this.db.branchClosingReview.findMany({
+   where:{locationId},
+   orderBy:{closingDate:'desc'},
+   take:20,
+   select:{
+    id:true,
+    closingDate:true,
+    signedAt:true,
+    signedById:true,
+    status:true
+   }
+  });
+
+  const rows=[];
+
+  // Sequential execution avoids launching a large
+  // number of reconciliation queries concurrently.
+  for(const review of reviews){
+   const date=review.closingDate.toISOString().slice(0,10);
+
+   try{
+    const integrity=await this.closingReviewIntegrity(
+     locationId,date,u
+    );
+
+    rows.push({
+     reviewId:review.id,
+     date,
+     signedAt:review.signedAt,
+     signedById:review.signedById,
+     acknowledgementStatus:review.status,
+     integrityStatus:integrity.status,
+     changed:integrity.changed,
+     changedSections:integrity.changedSections,
+     currentIssues:integrity.currentIssues,
+     pendingPaymentCases:integrity.pendingPaymentCases,
+     error:null as string|null
+    });
+   }catch(e){
+    rows.push({
+     reviewId:review.id,
+     date,
+     signedAt:review.signedAt,
+     signedById:review.signedById,
+     acknowledgementStatus:review.status,
+     integrityStatus:'CHECK_FAILED',
+     changed:false,
+     changedSections:[] as string[],
+     currentIssues:[] as string[],
+     pendingPaymentCases:0,
+     error:'Integrity check could not be completed'
+    });
+   }
+  }
+
+  return {
+   locationId,
+   generatedAt:new Date().toISOString(),
+   scanned:rows.length,
+   limit:20,
+   truncated:reviews.length===20,
+   changed:rows.filter(
+    r=>r.integrityStatus==='CHANGES_DETECTED'
+   ).length,
+   unchanged:rows.filter(
+    r=>r.integrityStatus==='NO_CHANGES_DETECTED'
+   ).length,
+   failed:rows.filter(
+    r=>r.integrityStatus==='CHECK_FAILED'
+   ).length,
+   rows,
+   note:
+    'Read-only point-in-time drift scan. '+
+    'Historical acknowledgements remain unchanged.'
+  };
+ }
  async closingReviewIntegrity(
   locationId:string,
   date:string,
@@ -3917,6 +4013,14 @@ async saleReturnHistory(saleId:string,u:Principal){
 export class PosController {
  constructor(private pos:PosService){}
 
+ @Get('finance/closing-reviews/drift-queue')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ closingDriftQueueRoute(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.closingDriftQueue(locationId,u);
+ }
  @Get('finance/closing-reviews/integrity')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  closingReviewIntegrityRoute(
