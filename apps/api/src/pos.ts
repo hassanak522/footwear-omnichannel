@@ -3064,10 +3064,164 @@ async saleReturnHistory(saleId:string,u:Principal){
   };
  }
 
+
+ // R10_2B_FINANCE_REVIEW
+ async shiftVarianceReview(locationId:string,u:Principal){
+  if(!locationId){
+   throw new BadRequestException('Location required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const snapshots=await this.db.posShiftClosingSnapshot.findMany({
+   where:{locationId},
+   orderBy:{closedAt:'desc'},
+   take:200
+  });
+
+  const cents=(value:Prisma.Decimal)=>
+   Math.round(value.toNumber()*100);
+
+  const rows=snapshots.map(s=>{
+   const varianceCents=cents(s.variance);
+
+   return {
+    shiftId:s.shiftId,
+    deviceId:s.deviceId,
+    cashierId:s.cashierId,
+    closedAt:s.closedAt,
+    openingCash:s.openingCash,
+    cashSales:s.cashSales,
+    cardSales:s.cardSales,
+    otherSales:s.otherSales,
+    drawerAdjustment:s.drawerAdjustment,
+    expectedCash:s.expectedCash,
+    countedCash:s.countedCash,
+    variance:s.variance,
+    varianceType:varianceCents===0
+     ?'BALANCED'
+     :varianceCents>0?'OVERAGE':'SHORTAGE',
+    requiresReview:varianceCents!==0,
+    acceptedSales:s.acceptedSales,
+    conflictedSales:s.conflictedSales,
+    approvedMovements:s.approvedMovements
+   };
+  });
+
+  return {
+   locationId,
+   generatedAt:new Date().toISOString(),
+   truncated:snapshots.length===200,
+   totals:{
+    closedShifts:rows.length,
+    balanced:rows.filter(
+     r=>r.varianceType==='BALANCED'
+    ).length,
+    overages:rows.filter(
+     r=>r.varianceType==='OVERAGE'
+    ).length,
+    shortages:rows.filter(
+     r=>r.varianceType==='SHORTAGE'
+    ).length,
+    requiringReview:rows.filter(
+     r=>r.requiresReview
+    ).length
+   },
+   rows
+  };
+ }
+
+ async refundSettlementReview(locationId:string,u:Principal){
+  if(!locationId){
+   throw new BadRequestException('Location required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const returns=await this.db.posReturn.findMany({
+   where:{locationId},
+   include:{
+    lines:true,
+    settlements:true
+   },
+   orderBy:{createdAt:'desc'},
+   take:200
+  });
+
+  const cents=(value:Prisma.Decimal)=>
+   Math.round(value.toNumber()*100);
+
+  const rows=returns.map(ret=>{
+   const dueCents=ret.lines.reduce(
+    (sum,line)=>sum+cents(line.refundAmount),0
+   );
+
+   const settledCents=ret.settlements.reduce(
+    (sum,item)=>sum+cents(item.amount),0
+   );
+
+   const outstandingCents=Math.max(
+    0,dueCents-settledCents
+   );
+
+   return {
+    returnId:ret.id,
+    saleId:ret.saleId,
+    status:ret.status,
+    createdAt:ret.createdAt,
+    refundDue:(dueCents/100).toFixed(2),
+    settled:(settledCents/100).toFixed(2),
+    outstanding:(outstandingCents/100).toFixed(2),
+    requiresReview:outstandingCents>0,
+    settlements:ret.settlements.map(s=>({
+     id:s.id,
+     method:s.method,
+     amount:s.amount,
+     reference:s.reference,
+     payoutShiftId:s.payoutShiftId
+    }))
+   };
+  });
+
+  return {
+   locationId,
+   generatedAt:new Date().toISOString(),
+   truncated:returns.length===200,
+   totals:{
+    returns:rows.length,
+    requiringReview:rows.filter(
+     r=>r.requiresReview
+    ).length,
+    fullySettled:rows.filter(
+     r=>!r.requiresReview
+    ).length
+   },
+   rows,
+   note:'Outstanding values are based on POS refund settlements only. Legacy refund records require separate reconciliation.'
+  };
+ }
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
 export class PosController {
  constructor(private pos:PosService){}
+
+ @Get('finance/shift-variance-review')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ shiftVarianceReview(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.shiftVarianceReview(locationId,u);
+ }
+
+ @Get('finance/refund-settlement-review')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ refundSettlementReview(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.refundSettlementReview(locationId,u);
+ }
  @Get('devices/:id/status') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') deviceStatus(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.deviceStatus(id,u);}
  @Post('devices') @Roles('SUPER_ADMIN','BRANCH_MANAGER') register(@Body() dto:RegisterDeviceDto,@CurrentUser() u:Principal){return this.pos.registerDevice(dto,u);}
  @Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
