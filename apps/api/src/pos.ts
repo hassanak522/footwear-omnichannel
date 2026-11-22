@@ -3200,10 +3200,325 @@ async saleReturnHistory(saleId:string,u:Principal){
    note:'Outstanding values are based on POS refund settlements only. Legacy refund records require separate reconciliation.'
   };
  }
+
+ // R10_3A_BRANCH_RECONCILIATION
+ async branchReconciliation(
+  locationId:string,
+  from:string,
+  to:string,
+  u:Principal
+ ){
+  const uuid=
+   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid locationId required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const parse=(value:string,name:string)=>{
+   if(!/^\d{4}-\d{2}-\d{2}$/.test(value||'')){
+    throw new BadRequestException(name+' must use YYYY-MM-DD');
+   }
+
+   const date=new Date(value+'T00:00:00.000Z');
+
+   if(
+    Number.isNaN(date.getTime())||
+    date.toISOString().slice(0,10)!==value
+   ){
+    throw new BadRequestException('Invalid '+name);
+   }
+
+   return date;
+  };
+
+  const start=parse(from,'from');
+  const last=parse(to,'to');
+  const end=new Date(last.getTime()+86400000);
+
+  if(
+   end<=start||
+   end.getTime()-start.getTime()>31*86400000
+  ){
+   throw new BadRequestException(
+    'Date range must cover 1 to 31 UTC days'
+   );
+  }
+
+  const dateRange={gte:start,lt:end};
+
+  const [
+   location,
+   sales,
+   snapshots,
+   shifts,
+   movements,
+   returns
+  ]=await Promise.all([
+   this.db.location.findUnique({
+    where:{id:locationId},
+    select:{id:true,code:true,name:true,type:true}
+   }),
+   this.db.posSale.findMany({
+    where:{locationId,soldAt:dateRange},
+    select:{
+     id:true,
+     shiftId:true,
+     status:true,
+     total:true,
+     syncedAt:true,
+     tenders:{
+      select:{type:true,amount:true}
+     }
+    }
+   }),
+   this.db.posShiftClosingSnapshot.findMany({
+    where:{locationId,closedAt:dateRange},
+    orderBy:{closedAt:'desc'}
+   }),
+   this.db.posShift.findMany({
+    where:{
+     locationId,
+     OR:[
+      {openedAt:dateRange},
+      {status:'OPEN'}
+     ]
+    },
+    select:{
+     id:true,
+     deviceId:true,
+     cashierId:true,
+     status:true,
+     openedAt:true,
+     closedAt:true
+    }
+   }),
+   this.db.drawerMovement.findMany({
+    where:{locationId,createdAt:dateRange},
+    select:{
+     id:true,
+     shiftId:true,
+     type:true,
+     status:true,
+     amount:true
+    }
+   }),
+   this.db.posReturn.findMany({
+    where:{locationId,createdAt:dateRange},
+    include:{
+     lines:true,
+     settlements:true
+    }
+   })
+  ]);
+
+  if(!location||location.type!=='BRANCH'){
+   throw new BadRequestException('Branch location required');
+  }
+
+  const cents=(value:Prisma.Decimal)=>
+   value.mul(100)
+    .toDecimalPlaces(0,Prisma.Decimal.ROUND_HALF_UP)
+    .toNumber();
+
+  const amount=(value:number)=>
+   (value/100).toFixed(2);
+
+  const accepted=sales.filter(s=>s.status==='ACCEPTED');
+  const conflicted=sales.filter(
+   s=>s.status==='STOCK_CONFLICT'
+  );
+
+  const unresolved=sales.filter(
+   s=>s.status!=='ACCEPTED'&&
+      s.status!=='STOCK_CONFLICT'
+  );
+
+  const tenderTotals={
+   CASH:0,
+   CARD:0,
+   OTHER:0
+  };
+
+  for(const sale of accepted){
+   for(const tender of sale.tenders){
+    const value=cents(tender.amount);
+
+    if(tender.type==='CASH')tenderTotals.CASH+=value;
+    else if(tender.type==='CARD')tenderTotals.CARD+=value;
+    else tenderTotals.OTHER+=value;
+   }
+  }
+
+  const acceptedSalesCents=accepted.reduce(
+   (sum,sale)=>sum+cents(sale.total),0
+  );
+
+  const tenderCents=
+   tenderTotals.CASH+
+   tenderTotals.CARD+
+   tenderTotals.OTHER;
+
+  const shiftRows=snapshots.map(s=>({
+   shiftId:s.shiftId,
+   deviceId:s.deviceId,
+   cashierId:s.cashierId,
+   closedAt:s.closedAt,
+   expectedCash:amount(cents(s.expectedCash)),
+   countedCash:amount(cents(s.countedCash)),
+   variance:amount(cents(s.variance)),
+   acceptedSales:s.acceptedSales,
+   conflictedSales:s.conflictedSales
+  }));
+
+  const varianceCents=snapshots.reduce(
+   (sum,s)=>sum+cents(s.variance),0
+  );
+
+  const pendingMovements=movements.filter(
+   m=>m.status==='PENDING'
+  );
+
+  const openShifts=shifts.filter(
+   s=>s.status==='OPEN'
+  );
+
+  const refundRows=returns.map(ret=>{
+   const due=ret.lines.reduce(
+    (sum,line)=>sum+cents(line.refundAmount),0
+   );
+
+   const settled=ret.settlements.reduce(
+    (sum,item)=>sum+cents(item.amount),0
+   );
+
+   return {
+    returnId:ret.id,
+    saleId:ret.saleId,
+    status:ret.status,
+    refundDue:amount(due),
+    settled:amount(settled),
+    outstanding:amount(Math.max(0,due-settled)),
+    outstandingCents:Math.max(0,due-settled)
+   };
+  });
+
+  const outstandingRefunds=refundRows.filter(
+   r=>r.outstandingCents>0
+  );
+
+  const lateSyncedSales=accepted.filter(
+   sale=>{
+    const snapshot=snapshots.find(
+     s=>s.shiftId===sale.shiftId
+    );
+
+    return !!snapshot&&sale.syncedAt>snapshot.closedAt;
+   }
+  );
+
+  const issues:string[]=[];
+
+  if(openShifts.length)
+   issues.push('OPEN_SHIFTS');
+
+  if(pendingMovements.length)
+   issues.push('PENDING_DRAWER_MOVEMENTS');
+
+  if(unresolved.length)
+   issues.push('UNRESOLVED_SALES');
+
+  if(conflicted.length)
+   issues.push('STOCK_CONFLICTS');
+
+  if(varianceCents!==0)
+   issues.push('CASH_VARIANCE');
+
+  if(outstandingRefunds.length)
+   issues.push('OUTSTANDING_REFUNDS');
+
+  if(acceptedSalesCents!==tenderCents)
+   issues.push('TENDER_MISMATCH');
+
+  if(lateSyncedSales.length)
+   issues.push('LATE_SYNCED_SALES');
+
+  const result={
+   location,
+   period:{from,to,timezone:'UTC'},
+   generatedAt:new Date().toISOString(),
+   status:issues.length
+    ?'REVIEW_REQUIRED'
+    :'NO_DETECTED_EXCEPTIONS',
+   issues,
+   sales:{
+    accepted:accepted.length,
+    conflicted:conflicted.length,
+    unresolved:unresolved.length,
+    acceptedTotal:amount(acceptedSalesCents),
+    tenderTotal:amount(tenderCents),
+    tenderDifference:amount(
+     acceptedSalesCents-tenderCents
+    ),
+    tenders:{
+     cash:amount(tenderTotals.CASH),
+     card:amount(tenderTotals.CARD),
+     other:amount(tenderTotals.OTHER)
+    },
+    lateSynced:lateSyncedSales.length
+   },
+   shifts:{
+    open:openShifts.length,
+    closedInPeriod:snapshots.length,
+    totalVariance:amount(varianceCents),
+    rows:shiftRows
+   },
+   drawer:{
+    pendingMovements:pendingMovements.length,
+    movementsInPeriod:movements.length
+   },
+   refunds:{
+    returnsInPeriod:refundRows.length,
+    outstandingCount:outstandingRefunds.length,
+    outstandingAmount:amount(
+     outstandingRefunds.reduce(
+      (sum,r)=>sum+r.outstandingCents,0
+     )
+    ),
+    rows:refundRows.map(
+     ({outstandingCents,...row})=>row
+    )
+   },
+   limitations:[
+    'Sales are selected by soldAt; closing snapshots by closedAt.',
+    'Refunds are selected by return creation date, not settlement date.',
+    'Open shifts may include shifts opened before the reporting period.',
+    'Legacy refunds and external bank settlements are not reconciled.',
+    'NO_DETECTED_EXCEPTIONS is not a financial clearance certificate.'
+   ]
+  };
+
+  return result;
+ }
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
 export class PosController {
  constructor(private pos:PosService){}
+
+ @Get('finance/branch-reconciliation')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ branchReconciliationRoute(
+  @Query('locationId') locationId:string,
+  @Query('from') from:string,
+  @Query('to') to:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.branchReconciliation(
+   locationId,from,to,u
+  );
+ }
 
  @Get('finance/shift-variance-review')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
