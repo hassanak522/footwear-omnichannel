@@ -73,6 +73,19 @@ async function init(){
    server_response TEXT,
    error TEXT
   );
+   CREATE TABLE IF NOT EXISTS exchange_resolutions (
+    attempt_id TEXT PRIMARY KEY,
+    response TEXT NOT NULL,
+    resolved_at TEXT NOT NULL
+   );
+CREATE TABLE IF NOT EXISTS exchange_attempts (
+    id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('PREPARED','UNKNOWN','ACCEPTED')),
+    created_at TEXT NOT NULL,
+    server_response TEXT,
+    error TEXT
+   );
   CREATE TABLE IF NOT EXISTS discount_attempts (
    id TEXT PRIMARY KEY,
    payload TEXT NOT NULL,
@@ -445,6 +458,497 @@ ipcMain.handle('clearance:update',(_,id,status,response,error)=>{
 
  return true;
 });
+// R10_3D23B_DURABLE_EXCHANGE
+
+function persistExchangeMutation(action){
+ const before=db.export();
+
+ try{
+  action();
+  persist();
+ }catch(error){
+  db.close();
+  db=new SQL.Database(before);
+  throw error;
+ }
+}
+
+ipcMain.handle('exchange:prepare',(_,payload)=>{
+
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+ if(!payload||typeof payload!=='object'){
+  throw Error('Invalid exchange payload');
+ }
+
+ if(payload.idempotencyKey){
+  throw Error('Exchange identity must be generated locally');
+ }
+
+ for(const field of [
+  'deviceId','locationId','shiftId','originalSaleId'
+ ]){
+  if(!uuid.test(payload[field]||'')){
+   throw Error('Invalid exchange identity: '+field);
+  }
+ }
+
+ if(
+  readConfig('deviceId')!==payload.deviceId||
+  readConfig('locationId')!==payload.locationId||
+  readConfig('shiftId')!==payload.shiftId
+ ){
+  throw Error('Exchange does not match terminal configuration');
+ }
+
+ if(rows(
+  "SELECT id FROM exchange_attempts WHERE status!='ACCEPTED' AND id NOT IN (SELECT attempt_id FROM exchange_resolutions)"
+ ).length){
+  throw Error('Reconcile existing exchange before continuing');
+ }
+
+ for(const field of ['returnLines','replacementLines']){
+
+  const lines=payload[field];
+
+  if(!Array.isArray(lines)||!lines.length||lines.length>100){
+   throw Error('Invalid merchandise lines');
+  }
+
+  const variants=new Set();
+
+  for(const line of lines){
+
+   if(
+    !line||
+    !uuid.test(line.variantId||'')||
+    !Number.isSafeInteger(line.quantity)||
+    line.quantity<1||
+    line.quantity>1000||
+    variants.has(line.variantId)
+   ){
+    throw Error('Invalid or duplicate merchandise variant');
+   }
+
+   variants.add(line.variantId);
+  }
+ }
+
+ if(
+  typeof payload.reason!=='string'||
+  payload.reason.trim().length<3||
+  payload.reason.length>500
+ ){
+  throw Error('Invalid exchange reason');
+ }
+
+ const cents=value=>{
+
+  const n=Math.round(value*100);
+
+  if(
+   typeof value!=='number'||
+   !Number.isSafeInteger(n)||
+   n<0||
+   n>999999999999||
+   Math.abs(value*100-n)>0.000001
+  ){
+   throw Error('Invalid monetary amount');
+  }
+
+  return n;
+ };
+
+ const returned=cents(payload.expectedReturnValue);
+ const replacement=cents(payload.expectedReplacementValue);
+
+ if(replacement<=0){
+  throw Error('Replacement value must be positive');
+ }
+
+ if(
+  !Array.isArray(payload.additionalTenders)||
+  payload.additionalTenders.length>10
+ ){
+  throw Error('Invalid additional payment');
+ }
+
+ let payment=0;
+
+ for(const tender of payload.additionalTenders){
+
+  if(!tender||!['CASH','CARD','OTHER'].includes(tender.type)){
+   throw Error('Invalid physical payment method');
+  }
+
+  const amount=cents(tender.amount);
+
+  if(amount<=0){
+   throw Error('Payment must be positive');
+  }
+
+  if(
+   tender.type!=='CASH'&&
+   (
+    typeof tender.reference!=='string'||
+    !tender.reference.trim()||
+    tender.reference.length>100
+   )
+  ){
+   throw Error('External payment reference required');
+  }
+
+  payment+=amount;
+ }
+
+ if(payment!==Math.max(0,replacement-returned)){
+  throw Error('Additional payment does not match exchange');
+ }
+
+ const id=crypto.randomUUID();
+ const saved={...payload,idempotencyKey:id};
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'INSERT INTO exchange_attempts VALUES (?,?,?,?,?,?)',
+   [
+    id,
+    JSON.stringify(saved),
+    'PREPARED',
+    new Date().toISOString(),
+    null,
+    null
+   ]
+  );
+ });
+
+ return {id,payload:saved};
+});
+
+// R10_3D23B_LOCAL_RESOLUTION
+ipcMain.handle('exchange:list',()=>rows(
+ "SELECT a.id,a.payload,"+
+ "CASE WHEN r.attempt_id IS NOT NULL "+
+ "THEN 'RESOLVED_NO_EXCHANGE' ELSE a.status END AS status,"+
+ "a.created_at,COALESCE(r.response,a.server_response) AS server_response,"+
+ "CASE WHEN r.attempt_id IS NOT NULL THEN NULL ELSE a.error END AS error "+
+ "FROM exchange_attempts a "+
+ "LEFT JOIN exchange_resolutions r ON r.attempt_id=a.id "+
+ "ORDER BY CASE WHEN a.status='ACCEPTED' OR "+
+ "r.attempt_id IS NOT NULL THEN 1 ELSE 0 END,a.created_at DESC"
+));
+
+ipcMain.handle('exchange:resolve',(_,id,response)=>{
+
+ const attempt=rows(
+  'SELECT * FROM exchange_attempts WHERE id=?',[id]
+ )[0];
+
+ if(!attempt||attempt.status==='ACCEPTED'){
+  throw Error('Exchange cannot be locally resolved');
+ }
+
+ const payload=JSON.parse(attempt.payload);
+
+ if(
+  !response||
+  response.status!=='RESOLVED_NO_EXCHANGE'||
+  response.idempotencyKey!==id||
+  response.locationId!==payload.locationId||
+  !response.resolvedById||
+  !response.resolvedAt||
+  !response.resolutionReason||
+  !['NOT_COLLECTED','REVERSED','NO_PAYMENT_REQUIRED'].includes(
+   response.paymentState
+  )
+ ){
+  throw Error('Verified central resolution required');
+ }
+
+ const existing=rows(
+  'SELECT * FROM exchange_resolutions WHERE attempt_id=?',[id]
+ )[0];
+
+ if(existing)return true;
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'INSERT INTO exchange_resolutions VALUES (?,?,?)',
+   [id,JSON.stringify(response),response.resolvedAt]
+  );
+ });
+
+ return true;
+});
+
+// R10_3D23B_THERMAL_RECEIPT
+
+ipcMain.handle('exchange:receipt',async(_,id)=>{
+
+ const attempt=rows(
+  'SELECT * FROM exchange_attempts WHERE id=?',
+  [id]
+ )[0];
+
+ if(
+  !attempt||
+  attempt.status!=='ACCEPTED'||
+  !attempt.server_response
+ ){
+  throw Error('Verified exchange receipt unavailable');
+ }
+
+ const r=JSON.parse(attempt.server_response);
+ const payload=JSON.parse(attempt.payload);
+
+ if(
+  r.status!=='ACCEPTED'||
+  r.integrityVerified!==true||
+  r.idempotencyKey!==id||
+  r.originalSaleId!==payload.originalSaleId||
+  r.locationId!==payload.locationId||
+  r.deviceId!==payload.deviceId||
+  r.shiftId!==payload.shiftId
+ ){
+  throw Error('Refresh verified central exchange status before printing');
+ }
+
+ const esc=value=>String(value??'').replace(
+  /[&<>"']/g,
+  char=>({
+   '&':'&amp;',
+   '<':'&lt;',
+   '>':'&gt;',
+   '"':'&quot;',
+   "'":'&#39;'
+  }[char])
+ );
+
+ const money=value=>{
+  const amount=Number(value);
+  if(!Number.isFinite(amount)||amount<0){
+   throw Error('Invalid receipt monetary amount');
+  }
+  return amount.toFixed(2);
+ };
+
+ const fields=[
+  ['Returned merchandise',r.returnValue],
+  ['Replacement merchandise',r.replacementValue],
+  ['Exchange credit',r.exchangeCredit],
+  ['Additional payment',r.additionalPayment],
+  ['Residual refund due',r.residualRefund],
+  ['Refund recorded',r.residualRefundPaid],
+  ['Refund outstanding',r.residualRefundOutstanding]
+ ];
+
+ const amounts=fields.map(([label,value])=>
+  `<tr><td>${esc(label)}</td><td>${esc(money(value))}</td></tr>`
+ ).join('');
+
+ const catalog=new Map(
+  rows('SELECT * FROM catalog').map(item=>[item.id,item])
+ );
+
+ const items=(lines)=>lines.map(line=>{
+
+  const item=catalog.get(line.variantId)||{};
+
+  return `<tr>
+   <td>
+    ${esc(item.title||line.variantId)}<br>
+    ${esc(item.sku||'')} ${esc(item.size||'')}
+   </td>
+   <td>${esc(line.quantity)}</td>
+  </tr>`;
+
+ }).join('');
+
+ const html=`<!doctype html>
+ <html>
+ <head>
+ <meta charset="utf-8">
+ <style>
+ @page { size:80mm auto; margin:3mm; }
+ body {
+  width:72mm;
+  margin:0;
+  color:#000;
+  font:11px monospace;
+  overflow-wrap:anywhere;
+ }
+ h2,h3,.center { text-align:center; }
+ table { width:100%; border-collapse:collapse; }
+ td { padding:4px 0; border-bottom:1px dashed #bbb; }
+ td:last-child { text-align:right; }
+ hr { border:0; border-top:1px dashed #000; }
+ .small { font-size:9px; }
+ </style>
+ </head>
+ <body>
+
+ <h2>ROYAL STEP</h2>
+ <h3>MERCHANDISE EXCHANGE</h3>
+
+ <p class="small">
+ Exchange: ${esc(r.id)}<br>
+ Transaction: ${esc(id)}<br>
+ Original sale: ${esc(r.originalSaleId)}<br>
+ Return: ${esc(r.returnId)}<br>
+ Replacement sale: ${esc(r.replacementSaleId)}<br>
+ Branch: ${esc(r.locationId)}<br>
+ Recorded: ${esc(r.createdAt)}<br>
+ Verified: ${esc(r.verifiedAt)}<br>
+ Status: ACCEPTED
+ </p>
+
+ <hr>
+
+ <h3>Returned items</h3>
+ <table>${items(payload.returnLines)}</table>
+
+ <h3>Replacement items</h3>
+ <table>${items(payload.replacementLines)}</table>
+
+ <hr>
+
+ <table>${amounts}</table>
+
+ <p>All amounts in PKR.</p>
+
+ <p class="small">
+ Refund information is as of the verification timestamp.
+ This receipt does not authorize an additional refund.
+ </p>
+
+ <hr>
+
+ <p class="center">
+ Thank you for shopping at Royal Step.
+ </p>
+
+ </body>
+ </html>`;
+
+ const win=new BrowserWindow({
+  show:false,
+  webPreferences:{
+   sandbox:true,
+   nodeIntegration:false,
+   contextIsolation:true
+  }
+ });
+
+ try{
+
+  await win.loadURL(
+   'data:text/html;charset=utf-8,'+
+   encodeURIComponent(html)
+  );
+
+  return await new Promise(resolve=>{
+
+   win.webContents.print(
+    {
+     silent:false,
+     printBackground:false
+    },
+    (success,reason)=>resolve({success,reason})
+   );
+
+  });
+
+ }finally{
+
+  if(!win.isDestroyed())win.close();
+
+ }
+});
+ipcMain.handle('exchange:update',(_,id,status,response,error)=>{
+
+ if(!['UNKNOWN','ACCEPTED'].includes(status)){
+  throw Error('Invalid exchange status');
+ }
+
+ const existing=rows(
+  'SELECT * FROM exchange_attempts WHERE id=?',[id]
+ )[0];
+
+ if(!existing){
+  throw Error('Unknown exchange attempt');
+ }
+
+ // R10_3D23B_RECEIPT_REFRESH
+ if(existing.status==='ACCEPTED'&&status!=='ACCEPTED'){
+  throw Error('Accepted exchange cannot be downgraded');
+ }
+
+ if(existing.status==='ACCEPTED'&&status==='ACCEPTED'){
+
+  const previous=JSON.parse(existing.server_response||'null');
+
+  if(
+   !previous||
+   !response||
+   previous.id!==response.id||
+   previous.returnId!==response.returnId||
+   previous.replacementSaleId!==response.replacementSaleId
+  ){
+   throw Error('Accepted exchange identity cannot be changed');
+  }
+ }
+
+ if(rows(
+  'SELECT attempt_id FROM exchange_resolutions WHERE attempt_id=?',
+  [id]
+ ).length){
+  throw Error('Resolved exchange cannot be modified');
+ }
+
+const payload=JSON.parse(existing.payload);
+
+ if(status==='ACCEPTED'){
+
+  if(
+   !response||
+   response.status!=='ACCEPTED'||
+   response.idempotencyKey!==id||
+   response.originalSaleId!==payload.originalSaleId||
+   response.locationId!==payload.locationId||
+   !response.returnId||
+   !response.replacementSaleId||
+   Number(response.returnValue)!==payload.expectedReturnValue||
+   Number(response.replacementValue)!==payload.expectedReplacementValue||
+   Number(response.exchangeCredit)!==Math.min(
+    payload.expectedReturnValue,
+    payload.expectedReplacementValue
+   )||
+   Math.round(Number(response.additionalPayment)*100)!==
+    Math.max(
+     0,
+     Math.round(payload.expectedReplacementValue*100)-
+     Math.round(payload.expectedReturnValue*100)
+    )
+  ){
+   throw Error('Verified central exchange required');
+  }
+ }
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'UPDATE exchange_attempts SET status=?,server_response=?,error=? WHERE id=?',
+   [
+    status,
+    response?JSON.stringify(response):null,
+    error?String(error).slice(0,2000):null,
+    id
+   ]
+  );
+ });
+
+ return true;
+});
+
 ipcMain.handle('discounted:prepare',(_,payload)=>{
  if(!payload||!payload.deviceId||!payload.shiftId||!payload.locationId||!payload.promotionCode||
  !Array.isArray(payload.lines)||!payload.lines.length||!Array.isArray(payload.tenders)||!payload.tenders.length)throw Error('Invalid discounted checkout');

@@ -1,3 +1,5 @@
+import ExchangeRecovery from './exchange-recovery';
+import ExchangePanel from './exchange-panel';
 import { useEffect, useState } from 'react';
 
 type RequestFn = (
@@ -74,14 +76,18 @@ export default function ReturnsPanel({
   request,
   location,
   token,
-  shiftId
+  shiftId,
+  deviceId
 }: {
   request: RequestFn;
   location: string;
   token: string;
   shiftId: string;
+  deviceId: string;
 }) {
+  // R10_3D23B_DESKTOP_CONTRACT
   // R10_3D23_RETURN_SEARCH
+  const [exchangeMode,setExchangeMode]=useState(false);
   const [receiptSearch,setReceiptSearch]=useState('');
   const [catalogLabels,setCatalogLabels]=useState<
    Record<string,string>
@@ -408,6 +414,7 @@ export default function ReturnsPanel({
   }
 
   async function submitReturn() {
+    if(exchangeMode)return;
         if (busy) return;
 
     if (!summary || summaryLoading || summaryError) {
@@ -584,6 +591,26 @@ export default function ReturnsPanel({
   return (
     <section className="panel">
       <h2>Sales returns and refund review</h2>
+
+      {/* R10_3D23B_EXCHANGE_PANEL */}
+      <div style={{display:'flex',gap:8,margin:'12px 0'}}>
+       <button
+        className={exchangeMode?'secondary':''}
+        disabled={busy||!!key||payoutBusy||!!payoutKey}
+        onClick={()=>setExchangeMode(false)}
+       >
+        Merchandise return
+       </button>
+
+       <button
+        className={exchangeMode?'':'secondary'}
+        disabled={busy||!!key||payoutBusy||!!payoutKey}
+        onClick={()=>setExchangeMode(true)}
+       >
+        Merchandise exchange
+       </button>
+      </div>
+
 
       <div style={{
        display:'flex',
@@ -1037,7 +1064,7 @@ export default function ReturnsPanel({
 
           <button
             disabled={busy || !summary || summaryLoading || !!summaryError}
-            onClick={() => void submitReturn()}
+            onClick={()=>{if(!exchangeMode)void submitReturn();}}
           >
             {busy ? 'Submitting...' : 'Record return'}
           </button>
@@ -1089,6 +1116,36 @@ export default function ReturnsPanel({
       )}
 
       {message && <p role="status">{message}</p>}
-    </section>
+          {exchangeMode&&selected&&summary&&
+       !summaryLoading&&!summaryError&&!result&&
+       !key&&!payoutKey&&!payoutBusy&&(
+        <ExchangePanel
+         key={location+':'+deviceId+':'+shiftId+':'+selectedId}
+         request={request}
+         location={location}
+         deviceId={deviceId}
+         shiftId={shiftId}
+         token={token}
+         originalSaleId={selected.id}
+         returnLines={lines}
+         reason={reason}
+         onCompleted={()=>{
+          setHistoryRevision(value=>value+1);
+          setLines(current=>current.map(line=>({
+           ...line,quantity:0
+          })));
+          setReason('');
+         }}
+        />
+      )}
+
+      {/* R10_3D23B_RECOVERY_PANEL */}
+      <ExchangeRecovery
+       request={request}
+       token={token}
+       location={location}
+      />
+
+</section>
   );
 }

@@ -907,6 +907,24 @@ async function closeShift(){
 
   // R8_01G_4B6_SHIFT_GUARD
   // Read the durable ledger, not the React history cache.
+  // R10_3D23B_SHIFT_EXCHANGE_GUARD
+  const exchangeRecords=await window.pos.listExchanges();
+
+  const unresolvedExchanges=exchangeRecords.filter(
+   attempt=>!['ACCEPTED','RESOLVED_NO_EXCHANGE'].includes(attempt.status)
+  );
+
+  if(unresolvedExchanges.length){
+   setStatus(
+    'SHIFT CLOSING BLOCKED: '+
+    unresolvedExchanges.length+
+    ' unresolved exchange transaction(s). '+
+    'Open Returns and reconcile exchange history first.'
+   );
+
+   return;
+  }
+
   const clearanceRecords=await window.pos.listClearance();
 
   const unresolvedClearance=clearanceRecords.filter(a=>{
@@ -1377,7 +1395,7 @@ UNKNOWN and PREPARED attempts must be reconciled.
 </table>
 </div>
 </section>}
-{tab==='history'&&<ReturnsPanel request={request} location={location} token={token} shiftId={shift}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
+{tab==='history'&&<ReturnsPanel request={request} location={location} token={token} shiftId={shift} deviceId={device}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
   <div className="hint">
     Total recorded: <strong>{history.length}</strong>
   </div>

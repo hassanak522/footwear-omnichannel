@@ -312,6 +312,7 @@ enum PosTenderType {
   CASH
   CARD
   OTHER
+  EXCHANGE_CREDIT
 }
 
 model PosDevice {
@@ -1116,6 +1117,7 @@ model PosShiftClosingSnapshot {
   cashSales         Decimal  @db.Decimal(12, 2)
   cardSales         Decimal  @db.Decimal(12, 2)
   otherSales        Decimal  @db.Decimal(12, 2)
+  exchangeCredit    Decimal  @default(0) @db.Decimal(12, 2)
   expectedCash      Decimal  @db.Decimal(12, 2)
   countedCash       Decimal  @db.Decimal(12, 2)
   variance          Decimal  @db.Decimal(12, 2)
@@ -1431,4 +1433,27 @@ model HqCorrectiveAction {
   @@index([ownerId, status])
   @@index([dueAt, status])
   @@index([escalationId])
+}
+
+
+model PosExchangeAttempt {
+  id               String   @id @db.Uuid
+  originalSaleId   String   @db.Uuid
+  deviceId         String   @db.Uuid
+  shiftId          String   @db.Uuid
+  locationId       String   @db.Uuid
+  registeredById   String   @db.Uuid
+  payloadHash      String
+  payload          Json
+  status           String   @default("REGISTERED")
+  paymentState     String   @default("UNCONFIRMED")
+  resolutionReason String?
+  resolvedById     String?  @db.Uuid
+  resolvedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([shiftId, status])
+  @@index([locationId, status])
+  @@index([deviceId, status])
 }

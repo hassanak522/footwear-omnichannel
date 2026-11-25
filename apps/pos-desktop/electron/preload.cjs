@@ -1,5 +1,11 @@
 const {contextBridge,ipcRenderer}=require('electron');
 contextBridge.exposeInMainWorld('pos',{
+ printExchange:id=>ipcRenderer.invoke('exchange:receipt',id),
+ resolveExchange:(id,response)=>ipcRenderer.invoke('exchange:resolve',id,response),
+ prepareExchange:payload=>ipcRenderer.invoke('exchange:prepare',payload),
+ listExchanges:()=>ipcRenderer.invoke('exchange:list'),
+ updateExchange:(id,status,response,error)=>ipcRenderer.invoke('exchange:update',id,status,response,error),
+
  isQaOffline:()=>ipcRenderer.invoke('qa:is-offline'),
  prepareClearance:payload=>ipcRenderer.invoke('clearance:prepare',payload),
  printClearance:id=>ipcRenderer.invoke('clearance:receipt',id),

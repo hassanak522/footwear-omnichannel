@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { BadRequestException, Body, ConflictException, Controller, Query, ForbiddenException, NotFoundException, Get, Injectable, Param, Post, UseGuards } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { PosTenderType, Prisma } from '@prisma/client';
 import { Db } from './db';
 import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
@@ -58,7 +58,9 @@ class SaleLineDto {
  @IsNumber({maxDecimalPlaces:2}) @Min(0) unitPrice!: number;
 }
 class SaleTenderDto {
- @IsEnum(PosTenderType) type!: PosTenderType;
+  // R10_3D23B_TENDER_SECURITY
+ @IsIn(['CASH','CARD','OTHER'])
+ type!: PosTenderType;
  @IsNumber({maxDecimalPlaces:2}) @Min(0) amount!: number;
  @IsOptional() @IsString() @MaxLength(100) reference?: string;
 }
@@ -77,13 +79,105 @@ class RecordPosRefundSettlementDto {
  @IsUUID() returnId!:string;
  @IsString() @MinLength(8) @MaxLength(100)
  idempotencyKey!:string;
- @IsEnum(PosTenderType) method!:PosTenderType;
+  @IsIn(['CASH','CARD','OTHER'])
+ method!:PosTenderType;
  @IsNumber({maxDecimalPlaces:2}) @Min(0.01)
  amount!:number;
  @IsOptional() @IsUUID() payoutShiftId?:string;
  @IsOptional() @IsString() @MaxLength(200)
  reference?:string;
 }
+// R10_3D23B_EXCHANGE_CONTRACT
+class ExchangeReplacementLineDto {
+ @IsUUID()
+ variantId!:string;
+
+ @IsInt()
+ @Min(1)
+ quantity!:number;
+}
+
+class ExchangeQuoteRollback extends Error {
+ constructor(public readonly quote:{
+  returnValue:string;
+  replacementValue:string;
+  exchangeCredit:string;
+  additionalPayment:string;
+  residualRefund:string;
+  replacementLines:{
+   variantId:string;
+   quantity:number;
+   unitPrice:string;
+  }[];
+ }){
+  super('Exchange quotation rollback');
+  this.name='ExchangeQuoteRollback';
+ }
+}
+
+class ResolvePosExchangeDto {
+
+ @IsIn(['NOT_COLLECTED','REVERSED','NO_PAYMENT_REQUIRED'])
+ paymentState!:string;
+
+ @IsString()
+ @MinLength(10)
+ @MaxLength(500)
+ reason!:string;
+
+ @IsOptional()
+ @IsString()
+ @MaxLength(200)
+ evidenceReference?:string;
+}
+
+class CreatePosExchangeDto {
+ @IsUUID()
+ originalSaleId!:string;
+
+ @IsUUID()
+ locationId!:string;
+
+ @IsUUID()
+ deviceId!:string;
+
+ @IsUUID()
+ shiftId!:string;
+
+ @IsUUID()
+ idempotencyKey!:string;
+
+ @IsString()
+ @MinLength(3)
+ @MaxLength(500)
+ reason!:string;
+
+ @IsArray()
+ @ArrayMinSize(1)
+ @ValidateNested({each:true})
+ @Type(()=>ReturnLineDto)
+ returnLines!:ReturnLineDto[];
+
+ @IsArray()
+ @ArrayMinSize(1)
+ @ValidateNested({each:true})
+ @Type(()=>ExchangeReplacementLineDto)
+ replacementLines!:ExchangeReplacementLineDto[];
+
+ @IsArray()
+ @ValidateNested({each:true})
+ @Type(()=>SaleTenderDto)
+ additionalTenders!:SaleTenderDto[];
+
+ @IsNumber({maxDecimalPlaces:2})
+ @Min(0)
+ expectedReturnValue!:number;
+
+ @IsNumber({maxDecimalPlaces:2})
+ @Min(0)
+ expectedReplacementValue!:number;
+}
+
 class PreflightDto {
  @IsUUID() locationId!:string;
  @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>SaleLineDto) lines!:SaleLineDto[];
@@ -160,6 +254,19 @@ const pointsPer100=()=>{const raw=process.env.LOYALTY_POINTS_PER_100_PKR??'0';re
 @Injectable()
 export class PosService {
  constructor(private db:Db){}
+
+ // R10_3D23B_SERVICE_TENDER_GUARD
+ private assertPhysicalTender(type:PosTenderType){
+  if(
+   type!=='CASH'&&
+   type!=='CARD'&&
+   type!=='OTHER'
+  ){
+   throw new BadRequestException(
+    'Exchange credit is restricted to authorized merchandise exchanges'
+   );
+  }
+ }
  private branchAccess(u:Principal,id:string){assertLocation(u,id);}
  async registerDevice(dto:RegisterDeviceDto,u:Principal){
   this.branchAccess(u,dto.locationId);
@@ -284,7 +391,26 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    include:{tenders:true}
   });
 
-  // R8_01G_4B8_CENTRAL_SHIFT_BLOCK
+  // R10_3D23B_CENTRAL_SHIFT_GUARD
+  const unresolvedExchangeAttempts=
+   await tx.posExchangeAttempt.count({
+    where:{
+     shiftId:id,
+     status:{
+      notIn:['ACCEPTED','RESOLVED_NO_EXCHANGE']
+     }
+    }
+   });
+
+  if(unresolvedExchangeAttempts>0){
+   throw new ConflictException(
+    'Shift closing blocked: '+
+    unresolvedExchangeAttempts+
+    ' registered exchange attempt(s) require reconciliation'
+   );
+  }
+
+// R8_01G_4B8_CENTRAL_SHIFT_BLOCK
   const unresolvedCentralAttempts=
    await tx.posClearanceAttempt.count({
     where:{
@@ -422,6 +548,9 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   const card=tenderTotal('CARD');
   const other=tenderTotal('OTHER');
 
+  // R10_3D23B_SHIFT_SNAPSHOT
+  const exchangeCredit=tenderTotal('EXCHANGE_CREDIT');
+
   const drawerAdjustment=movements.reduce(
    (sum,m)=>sum+
     (m.type==='CASH_IN'?1:-1)*cents(m.amount),
@@ -453,6 +582,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     cashSales:decimal(cash),
     cardSales:decimal(card),
     otherSales:decimal(other),
+    exchangeCredit:decimal(exchangeCredit),
     drawerAdjustment:decimal(drawerAdjustment),
     approvedMovements:movements.length,
     expectedCash:decimal(expected),
@@ -938,6 +1068,9 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    promotion:{eligible:true,reason:'Preview eligible; not authorized for settlement',code:promo.code,title:promo.title}};
  }
  async clearanceSale(dto:ClearanceSaleDto,u:Principal){
+  for(const tender of dto.tenders){
+   this.assertPhysicalTender(tender.type);
+  }
   // Disabled by default until clearance rollout is approved.
   if(process.env.POS_CLEARANCE_CHECKOUT_ENABLED!=='true'){
    throw new ForbiddenException(
@@ -1426,6 +1559,9 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   ));
  }
  async onlineDiscountSale(dto:OnlineDiscountSaleDto,u:Principal){
+  for(const tender of dto.tenders){
+   this.assertPhysicalTender(tender.type);
+  }
   if(!dto.promotionCode?.trim())throw new BadRequestException('Promotion code required');
   if(new Set(dto.lines.map(l=>l.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variant lines');
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
@@ -1489,6 +1625,9 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
  async syncSale(dto:SyncSaleDto,u:Principal){
+  for(const tender of dto.tenders){
+   this.assertPhysicalTender(tender.type);
+  }
   if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate variant lines: aggregate quantities before sync');
   const device=await this.db.posDevice.findUniqueOrThrow({where:{id:dto.deviceId}});
   this.branchAccess(u,device.locationId);
@@ -1558,9 +1697,158 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    return {id:sale.id,localSaleId:sale.localSaleId,status:sale.status,conflictReason:sale.conflictReason,duplicate:false};
   },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000}));
  }
- async returnSale(dto:ReturnDto,u:Principal){
-  if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length)throw new BadRequestException('Duplicate return variants');
-  return this.db.$transaction(async tx=>{
+ // R10_3D23B_TRANSACTIONAL_RETURN
+async returnSale(dto:ReturnDto,u:Principal){
+  // R10_3D23B_RESERVED_IDENTITY
+  if(dto.idempotencyKey.startsWith('exchange:')){
+   throw new BadRequestException(
+    'Reserved exchange transaction identity'
+   );
+  }
+
+  return this.db.$transaction(
+   tx=>this.returnSaleInTransaction(dto,u,tx),
+   {
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  );
+ }
+
+ private async returnSaleInTransaction(
+  dto:ReturnDto,
+  u:Principal,
+  tx:Prisma.TransactionClient
+ ){
+  // R10_3D23B_CHAINED_EXCHANGE_GUARD
+  const replacementExchange=await tx.posExchange.findUnique({
+   where:{replacementSaleId:dto.saleId},
+   select:{id:true}
+  });
+
+  // R10_3D23B_CHAINED_EXCHANGE_INTEGRITY
+  if(replacementExchange){
+
+   if(
+    !u.roles.includes('SUPER_ADMIN')&&
+    !u.roles.includes('BRANCH_MANAGER')
+   ){
+    throw new ForbiddenException('Manager access required');
+   }
+
+   const previous=await tx.posExchange.findUnique({
+    where:{id:replacementExchange.id},
+    include:{
+     return:{
+      include:{
+       lines:true,
+       settlements:true
+      }
+     },
+     replacementSale:{
+      include:{tenders:true}
+     }
+    }
+   });
+
+   if(!previous){
+    throw new ConflictException('Exchange lineage missing');
+   }
+
+   this.branchAccess(u,previous.replacementSale.locationId);
+
+   const replacement=previous.replacementSale;
+
+   const cents=(value:Prisma.Decimal)=>
+    Math.round(value.toNumber()*100);
+
+   const grossReturn=previous.return.lines.reduce(
+    (sum,line)=>sum+cents(line.refundAmount),0
+   );
+
+   const creditTenders=replacement.tenders.filter(
+    tender=>tender.type==='EXCHANGE_CREDIT'
+   );
+
+   const credit=creditTenders.reduce(
+    (sum,tender)=>sum+cents(tender.amount),0
+   );
+
+   const total=cents(replacement.total);
+
+   const physical=replacement.tenders.filter(
+    tender=>tender.type!=='EXCHANGE_CREDIT'
+   ).reduce(
+    (sum,tender)=>sum+cents(tender.amount),0
+   );
+
+   const settled=previous.return.settlements.reduce(
+    (sum,settlement)=>sum+cents(settlement.amount),0
+   );
+
+   if(
+    replacement.status!=='ACCEPTED'||
+    previous.return.status!=='APPROVED'||
+    previous.return.locationId!==replacement.locationId||
+    previous.return.saleId===replacement.id||
+    ![grossReturn,credit,total,physical,settled].every(
+     value=>Number.isSafeInteger(value)&&value>=0
+    )||
+    credit!==Math.min(grossReturn,total)||
+    physical+credit!==total||
+    settled>grossReturn-credit||
+    creditTenders.length!==(credit>0?1:0)||
+    creditTenders.some(
+     tender=>tender.reference!==previous.returnId
+    )||
+    replacement.tenders.some(
+     tender=>cents(tender.amount)<=0
+    )
+   ){
+    throw new ConflictException(
+     'Previous exchange accounting requires HQ reconciliation'
+    );
+   }
+
+   const centralAttempt=await tx.posExchangeAttempt.findUnique({
+    where:{id:previous.idempotencyKey}
+   });
+
+   if(
+    !centralAttempt||
+    centralAttempt.status!=='ACCEPTED'||
+    centralAttempt.locationId!==replacement.locationId||
+    centralAttempt.originalSaleId!==previous.return.saleId||
+    centralAttempt.shiftId!==replacement.shiftId||
+    centralAttempt.deviceId!==replacement.deviceId
+   ){
+    throw new ConflictException(
+     'Previous exchange acceptance cannot be verified'
+    );
+   }
+  }
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  if(
+   !Array.isArray(dto.lines)||
+   !dto.lines.length||
+   dto.lines.some(line=>
+    !Number.isSafeInteger(line.quantity)||
+    line.quantity<=0
+   )
+  ){
+   throw new BadRequestException('Invalid return quantities');
+  }
+
+  if(new Set(dto.lines.map(x=>x.variantId)).size!==dto.lines.length){
+   throw new BadRequestException('Duplicate return variants');
+  }
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`pos-return:${dto.saleId}`}))`;
    const existing = await tx.posReturn.findUnique({
     where: { idempotencyKey: dto.idempotencyKey },
@@ -1769,26 +2057,108 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:sale.locationId,variantId:line.variantId}},create:{locationId:sale.locationId,variantId:line.variantId,onHand:line.quantity,quarantined:line.quarantined?line.quantity:0},update:{onHand:{increment:line.quantity},...(line.quarantined?{quarantined:{increment:line.quantity}}:{}),version:{increment:1}}});
     await tx.stockMovement.create({data:{locationId:sale.locationId,variantId:line.variantId,type:'SALE_RETURN',quantityDelta:line.quantity,referenceType:'POS_RETURN',referenceId:ret.id,idempotencyKey:`pos-return:${ret.id}:${line.variantId}`,actorId:u.id}});
    }
-   // Revoke previously earned points proportionally. Cumulative rounding ensures a full
-   // return reverses the entire original award, even across multiple partial returns.
-   const linked=await tx.saleCustomerLink.findUnique({where:{saleId:sale.id}});
+   // R10_3D23B_PRECISE_LOYALTY_REVERSAL
+   const linked=await tx.saleCustomerLink.findUnique({
+    where:{saleId:sale.id}
+   });
+
    if(linked){
-    const earned=await tx.loyaltyLedgerEntry.findFirst({where:{saleId:sale.id,reason:'SALE_EARN'}});
-    if(earned && earned.points>0){
-     const returnedBefore=sale.returns.flatMap(r=>r.lines).reduce((n,l)=>n+l.refundAmount.toNumber(),0);
-     const returnedNow=records.reduce((n,l)=>n+l.refundAmount.toNumber(),0);
-     const total=sale.total.toNumber();
-     if(total>0){
-      const before=Math.min(earned.points,Math.floor(earned.points*returnedBefore/total));
-      const after=Math.min(earned.points,Math.floor(earned.points*(returnedBefore+returnedNow)/total));
-      const reverse=after-before;
-      if(reverse>0)await tx.loyaltyLedgerEntry.create({data:{customerId:linked.customerId,returnId:ret.id,points:-reverse,reason:'RETURN_REVERSAL'}});
+
+    const awards=await tx.loyaltyLedgerEntry.findMany({
+     where:{
+      saleId:sale.id,
+      reason:'SALE_EARN'
+     }
+    });
+
+    if(awards.length>1){
+     throw new ConflictException(
+      'Duplicate loyalty awards require reconciliation'
+     );
+    }
+
+    const earned=awards[0];
+
+    if(earned){
+
+     if(
+      earned.customerId!==linked.customerId||
+      !Number.isSafeInteger(earned.points)||
+      earned.points<=0
+     ){
+      throw new ConflictException(
+       'Original loyalty award integrity failure'
+      );
+     }
+
+     const cents=(value:Prisma.Decimal)=>
+      Math.round(value.toNumber()*100);
+
+     const returnedBefore=sale.returns
+      .flatMap(r=>r.lines)
+      .reduce(
+       (sum,line)=>sum+cents(line.refundAmount),0
+      );
+
+     const returnedNow=records.reduce(
+      (sum,line)=>sum+cents(line.refundAmount),0
+     );
+
+     const total=cents(sale.total);
+
+     if(
+      ![returnedBefore,returnedNow,total].every(
+       value=>Number.isSafeInteger(value)&&value>=0
+      )||
+      total<=0||
+      returnedBefore+returnedNow>total
+     ){
+      throw new ConflictException(
+       'Invalid cumulative loyalty return value'
+      );
+     }
+
+     const proportional=(amount:number)=>
+      new Prisma.Decimal(earned.points)
+       .mul(amount)
+       .div(total)
+       .floor()
+       .toNumber();
+
+     const before=proportional(returnedBefore);
+
+     const after=proportional(
+      returnedBefore+returnedNow
+     );
+
+     const reverse=after-before;
+
+     if(
+      !Number.isSafeInteger(reverse)||
+      reverse<0||
+      after>earned.points
+     ){
+      throw new ConflictException(
+       'Invalid loyalty reversal allocation'
+      );
+     }
+
+     if(reverse>0){
+
+      await tx.loyaltyLedgerEntry.create({
+       data:{
+        customerId:linked.customerId,
+        returnId:ret.id,
+        points:-reverse,
+        reason:'RETURN_REVERSAL'
+       }
+      });
      }
     }
    }
-   await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entityType:'PosReturn',entityId:ret.id,after:{saleId:sale.id,reason:dto.reason,lines:records.map(x=>({variantId:x.variantId,quantity:x.quantity,quarantined:x.quarantined,refundAmount:x.refundAmount.toString()}))}}});
+
+await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entityType:'PosReturn',entityId:ret.id,after:{saleId:sale.id,reason:dto.reason,lines:records.map(x=>({variantId:x.variantId,quantity:x.quantity,quarantined:x.quarantined,refundAmount:x.refundAmount.toString()}))}}});
    return ret;
-  },{isolationLevel:Prisma.TransactionIsolationLevel.Serializable,timeout:15000});
  }
  async clearanceSaleStatus(
   deviceId:string,
@@ -2037,10 +2407,13 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
         openingCash:snapshot.openingCash,closingCash:snapshot.countedCash,
         acceptedSales:snapshot.acceptedSales,conflictedSales:snapshot.conflictedSales,
         cashSales:snapshot.cashSales,cardSales:snapshot.cardSales,otherSales:snapshot.otherSales,
+        exchangeCredit:snapshot.exchangeCredit,
         drawerAdjustment:snapshot.drawerAdjustment,approvedMovements:snapshot.approvedMovements,
         expectedCash:snapshot.expectedCash,variance:snapshot.variance,
         lateSync:{acceptedSales:lateSales.length,cashSales:(lateTender('CASH')/100).toFixed(2),
-          cardSales:(lateTender('CARD')/100).toFixed(2),otherSales:(lateTender('OTHER')/100).toFixed(2),
+          cardSales:(lateTender('CARD')/100).toFixed(2),
+          otherSales:(lateTender('OTHER')/100).toFixed(2),
+          exchangeCredit:(lateTender('EXCHANGE_CREDIT')/100).toFixed(2),
           note:'Late-sync sales are excluded from immutable closing totals.'}
       };
     }
@@ -2054,7 +2427,10 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     return {shiftId:id,status:shift.status,snapshotVerified:false,openingCash:shift.openingCash,
       closingCash:shift.closingCash,acceptedSales:accepted.length,conflictedSales:sales.length-accepted.length,
       cashSales:(total('CASH')/100).toFixed(2),cardSales:(total('CARD')/100).toFixed(2),
-      otherSales:(total('OTHER')/100).toFixed(2),drawerAdjustment:(adjustment/100).toFixed(2),
+      // R10_3D23B_SHIFT_ACCOUNTING
+      otherSales:(total('OTHER')/100).toFixed(2),
+      exchangeCredit:(total('EXCHANGE_CREDIT')/100).toFixed(2),
+      drawerAdjustment:(adjustment/100).toFixed(2),
       expectedCash:(expected/100).toFixed(2),variance:null};
   }
  async deviceStatus(deviceId:string,u:Principal){
@@ -2100,6 +2476,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   dto:RecordPosRefundSettlementDto,
   u:Principal
  ){
+  this.assertPhysicalTender(dto.method);
   const manager=
    u.roles.includes('SUPER_ADMIN')||
    u.roles.includes('BRANCH_MANAGER');
@@ -2200,10 +2577,30 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
      throw new ConflictException('Approved return required');
     }
 
+    // R10_3D23B_RESIDUAL_REFUND
+    let exchangeCreditCents=0;
+
     if(ret.exchange){
-     throw new ConflictException(
-      'Exchange-linked return requires separate settlement review'
-     );
+     const replacement=await tx.posSale.findUniqueOrThrow({
+      where:{id:ret.exchange.replacementSaleId},
+      include:{tenders:true}
+     });
+
+     if(
+      replacement.status!=='ACCEPTED'||
+      replacement.locationId!==ret.locationId
+     ){
+      throw new ConflictException(
+       'Exchange replacement requires reconciliation'
+      );
+     }
+
+     exchangeCreditCents=replacement.tenders
+      .filter(t=>t.type==='EXCHANGE_CREDIT')
+      .reduce(
+       (sum,t)=>sum+Math.round(t.amount.toNumber()*100),
+       0
+      );
     }
 
     // Legacy refund records have an independent payment workflow.
@@ -2219,11 +2616,22 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
      );
     }
 
-    const dueCents=ret.lines.reduce(
+    const originalReturnCents=ret.lines.reduce(
      (sum,line)=>
       sum+Math.round(line.refundAmount.toNumber()*100),
      0
     );
+
+    if(
+     exchangeCreditCents<0||
+     exchangeCreditCents>originalReturnCents
+    ){
+     throw new ConflictException(
+      'Exchange credit requires financial reconciliation'
+     );
+    }
+
+    const dueCents=originalReturnCents-exchangeCreditCents;
 
     const settledCents=ret.settlements.reduce(
      (sum,item)=>
@@ -2361,7 +2769,9 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     return {
      ...settlement,
      duplicate:false,
-     refundDue:(dueCents/100).toFixed(2),
+     grossReturnValue:(originalReturnCents/100).toFixed(2),
+    exchangeCredit:(exchangeCreditCents/100).toFixed(2),
+    refundDue:(dueCents/100).toFixed(2),
      refundSettledAfter:
       ((settledCents+amountCents)/100).toFixed(2),
      refundOutstandingAfter:
@@ -2377,6 +2787,1507 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   ));
  }
  // R10_3D23_RECEIPT_LOOKUP
+  async quoteExchange(
+  dto:CreatePosExchangeDto,
+  u:Principal
+ ){
+  try{
+   await this.createExchange({
+    ...dto,
+    expectedReturnValue:0,
+    expectedReplacementValue:0,
+    additionalTenders:[]
+   },u,true);
+
+   throw new ConflictException(
+    'Exchange quotation did not complete safely'
+   );
+
+  }catch(error){
+   if(error instanceof ExchangeQuoteRollback){
+    return {
+     status:'QUOTED',
+     ...error.quote,
+     quotedAt:new Date().toISOString(),
+     stockReserved:false
+    };
+   }
+
+   throw error;
+  }
+ }
+
+ // R10_3D23B_CANONICAL_PAYLOAD
+ private exchangePayloadHash(
+  dto:CreatePosExchangeDto,
+  expectedReturn:number,
+  expectedReplacement:number
+ ){
+// R10_3D23B_STABLE_JSON_HASH
+  const canonicalize=(value:unknown):unknown=>{
+
+   if(Array.isArray(value)){
+    return value.map(item=>canonicalize(item));
+   }
+
+   if(value!==null&&typeof value==='object'){
+
+    const source=value as Record<string,unknown>;
+
+    const result:Record<string,unknown>={};
+
+    for(const key of Object.keys(source).sort()){
+
+     if(source[key]!==undefined){
+      result[key]=canonicalize(source[key]);
+     }
+
+    }
+
+    return result;
+   }
+
+   return value;
+  };
+
+  const stableHash=(value:unknown)=>
+   hash(canonicalize(value));
+
+return stableHash({
+   originalSaleId:dto.originalSaleId,
+   locationId:dto.locationId,
+   deviceId:dto.deviceId,
+   shiftId:dto.shiftId,
+   idempotencyKey:dto.idempotencyKey,
+   reason:dto.reason.trim(),
+   returnLines:[...dto.returnLines].sort(
+    (a,b)=>a.variantId.localeCompare(b.variantId)
+   ),
+   replacementLines:[...dto.replacementLines].sort(
+    (a,b)=>a.variantId.localeCompare(b.variantId)
+   ),
+   additionalTenders:dto.additionalTenders,
+   expectedReturn,
+   expectedReplacement
+  });
+ }
+
+ // R10_3D23B_CENTRAL_REGISTRATION
+ async registerExchange(
+  dto:CreatePosExchangeDto,
+  u:Principal
+ ){
+
+  if(process.env.POS_EXCHANGE_ENABLED!=='true'){
+   throw new ForbiddenException('Exchange checkout is disabled');
+  }
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  this.branchAccess(u,dto.locationId);
+
+  const cents=(value:number)=>{
+   const result=Math.round(value*100);
+
+   if(
+    !Number.isSafeInteger(result)||
+    result<0||
+    result>999999999999||
+    Math.abs(value*100-result)>0.00001
+   ){
+    throw new BadRequestException('Invalid monetary amount');
+   }
+
+   return result;
+  };
+
+  const returned=cents(dto.expectedReturnValue);
+  const replacement=cents(dto.expectedReplacementValue);
+
+  if(replacement<=0){
+   throw new BadRequestException('Invalid replacement value');
+  }
+
+  const payloadHash=this.exchangePayloadHash(
+   dto,returned,replacement
+  );
+
+  if(
+   !dto.returnLines.length||
+   !dto.replacementLines.length||
+   dto.returnLines.length>100||
+   dto.replacementLines.length>100||
+   dto.additionalTenders.length>10
+  ){
+   throw new BadRequestException('Invalid exchange payload');
+  }
+
+  for(const lines of [
+   dto.returnLines,dto.replacementLines
+  ]){
+   if(
+    new Set(lines.map(line=>line.variantId)).size!==lines.length||
+    lines.some(line=>
+     !Number.isSafeInteger(line.quantity)||
+     line.quantity<1||
+     line.quantity>1000
+    )
+   ){
+    throw new BadRequestException('Invalid merchandise quantities');
+   }
+  }
+
+  let payment=0;
+
+  for(const tender of dto.additionalTenders){
+
+   this.assertPhysicalTender(tender.type);
+
+   const amount=cents(tender.amount);
+
+   if(
+    amount<=0||
+    (tender.type!=='CASH'&&!tender.reference?.trim())
+   ){
+    throw new BadRequestException('Invalid payment details');
+   }
+
+   payment+=amount;
+  }
+
+  if(payment!==Math.max(0,replacement-returned)){
+   throw new BadRequestException('Incorrect exchange payment');
+  }
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${dto.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${dto.idempotencyKey}`})
+     )
+    `;
+
+    const existing=await tx.posExchangeAttempt.findUnique({
+     where:{id:dto.idempotencyKey}
+    });
+
+    if(existing){
+
+     this.branchAccess(u,existing.locationId);
+
+     if(existing.payloadHash!==payloadHash){
+      throw new ConflictException(
+       'Exchange identity reused with different details'
+      );
+     }
+
+     return {
+      id:existing.id,
+      status:existing.status,
+      paymentState:existing.paymentState,
+      duplicate:true
+     };
+    }
+
+    const completed=await tx.posExchange.findUnique({
+     where:{idempotencyKey:dto.idempotencyKey}
+    });
+
+    if(completed){
+     throw new ConflictException('Exchange already completed');
+    }
+
+    const original=await tx.posSale.findUnique({
+     where:{id:dto.originalSaleId}
+    });
+
+    const device=await tx.posDevice.findUnique({
+     where:{id:dto.deviceId}
+    });
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:dto.shiftId}
+    });
+
+    if(
+     !original||
+     original.status!=='ACCEPTED'||
+     original.locationId!==dto.locationId||
+     !device||
+     !device.active||
+     device.locationId!==dto.locationId||
+     !shift||
+     shift.status!=='OPEN'||
+     shift.deviceId!==dto.deviceId||
+     shift.locationId!==dto.locationId
+    ){
+     throw new ConflictException(
+      'Invalid original sale, terminal or shift'
+     );
+    }
+
+    const unresolved=await tx.posExchangeAttempt.count({
+     where:{
+      deviceId:dto.deviceId,
+      status:{
+       notIn:['ACCEPTED','RESOLVED_NO_EXCHANGE']
+      }
+     }
+    });
+
+    if(unresolved){
+     throw new ConflictException(
+      'Terminal already has an unresolved exchange'
+     );
+    }
+
+    const attempt=await tx.posExchangeAttempt.create({
+     data:{
+      id:dto.idempotencyKey,
+      originalSaleId:dto.originalSaleId,
+      deviceId:dto.deviceId,
+      shiftId:dto.shiftId,
+      locationId:dto.locationId,
+      registeredById:u.id,
+      payloadHash,
+      payload:JSON.parse(JSON.stringify(dto)),
+      status:'REGISTERED',
+      paymentState:payment===0
+       ?'NO_PAYMENT_REQUIRED'
+       :'UNCONFIRMED'
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_EXCHANGE_REGISTERED',
+      entityType:'PosExchangeAttempt',
+      entityId:attempt.id,
+      after:{
+       locationId:attempt.locationId,
+       shiftId:attempt.shiftId,
+       originalSaleId:attempt.originalSaleId,
+       paymentState:attempt.paymentState
+      }
+     }
+    });
+
+    return {
+     id:attempt.id,
+     status:attempt.status,
+     paymentState:attempt.paymentState,
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
+
+ // R10_3D23B_PAYMENT_CONFIRMATION
+ async confirmExchangePayment(key:string,u:Principal){
+
+  if(process.env.POS_EXCHANGE_ENABLED!=='true'){
+   throw new ForbiddenException('Exchange checkout disabled');
+  }
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException('Invalid exchange identity');
+  }
+
+  const initial=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException('Exchange attempt not registered');
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${key}`})
+     )
+    `;
+
+    const attempt=await tx.posExchangeAttempt.findUnique({
+     where:{id:key}
+    });
+
+    if(!attempt){
+     throw new NotFoundException('Exchange attempt missing');
+    }
+
+    this.branchAccess(u,attempt.locationId);
+
+    if(attempt.status==='RESOLVED_NO_EXCHANGE'){
+     throw new ConflictException('Exchange already resolved');
+    }
+
+    if(
+     attempt.status==='ACCEPTED'||
+     attempt.paymentState==='CONFIRMED'||
+     attempt.paymentState==='NO_PAYMENT_REQUIRED'
+    ){
+     return {
+      id:attempt.id,
+      status:attempt.status,
+      paymentState:attempt.paymentState,
+      duplicate:true
+     };
+    }
+
+    if(
+     !['REGISTERED','UNKNOWN'].includes(attempt.status)||
+     attempt.paymentState!=='UNCONFIRMED'
+    ){
+     throw new ConflictException('Invalid exchange payment state');
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:attempt.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.locationId!==attempt.locationId||
+     shift.deviceId!==attempt.deviceId
+    ){
+     throw new ConflictException('Exchange shift unavailable');
+    }
+
+    const updated=await tx.posExchangeAttempt.update({
+     where:{id:key},
+     data:{
+      status:'UNKNOWN',
+      paymentState:'CONFIRMED'
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_EXCHANGE_PAYMENT_CONFIRMED',
+      entityType:'PosExchangeAttempt',
+      entityId:key,
+      after:{
+       paymentState:updated.paymentState,
+       shiftId:attempt.shiftId,
+       locationId:attempt.locationId,
+       confirmationType:'MANAGER_ATTESTATION'
+      }
+     }
+    });
+
+    return {
+     id:updated.id,
+     status:updated.status,
+     paymentState:updated.paymentState,
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
+
+ // R10_3D23B_MANAGER_RESOLUTION
+ async resolveExchange(
+  key:string,
+  dto:ResolvePosExchangeDto,
+  u:Principal
+ ){
+
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException(
+    'HQ authorization required for exchange cancellation'
+   );
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException('Invalid exchange identity');
+  }
+
+  const reason=dto.reason.trim();
+
+  if(reason.length<10||reason.length>500){
+   throw new BadRequestException(
+    'Detailed resolution reason required'
+   );
+  }
+
+  const initial=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException('Exchange attempt not registered');
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${key}`})
+     )
+    `;
+
+    const attempt=await tx.posExchangeAttempt.findUnique({
+     where:{id:key}
+    });
+
+    if(!attempt){
+     throw new NotFoundException('Exchange attempt missing');
+    }
+
+    this.branchAccess(u,attempt.locationId);
+
+    const exchange=await tx.posExchange.findUnique({
+     where:{idempotencyKey:key}
+    });
+
+    if(exchange||attempt.status==='ACCEPTED'){
+     throw new ConflictException(
+      'Accepted exchange cannot be cancelled'
+     );
+    }
+
+    if(attempt.status==='RESOLVED_NO_EXCHANGE'){
+
+     if(
+      attempt.paymentState!==dto.paymentState||
+      attempt.resolutionReason!==reason
+     ){
+      throw new ConflictException(
+       'Existing resolution cannot be changed'
+      );
+     }
+
+     return {
+      status:attempt.status,
+      idempotencyKey:key,
+      locationId:attempt.locationId,
+      paymentState:attempt.paymentState,
+      resolutionReason:attempt.resolutionReason,
+      resolvedById:attempt.resolvedById,
+      resolvedAt:attempt.resolvedAt,
+      duplicate:true
+     };
+    }
+
+    if(!['REGISTERED','UNKNOWN'].includes(attempt.status)){
+     throw new ConflictException('Invalid attempt status');
+    }
+
+    if(
+     attempt.paymentState==='CONFIRMED'&&
+     dto.paymentState!=='REVERSED'
+    ){
+     throw new ConflictException(
+      'Confirmed payment requires documented reversal'
+     );
+    }
+
+    if(
+     attempt.paymentState==='NO_PAYMENT_REQUIRED'&&
+     dto.paymentState!=='NO_PAYMENT_REQUIRED'
+    ){
+     throw new ConflictException('Payment state mismatch');
+    }
+
+    if(
+     attempt.paymentState==='UNCONFIRMED'&&
+     !['NOT_COLLECTED','REVERSED'].includes(dto.paymentState)
+    ){
+     throw new ConflictException(
+      'Physical payment outcome must be reconciled'
+     );
+    }
+
+    if(
+     dto.paymentState==='REVERSED'&&
+     (!dto.evidenceReference||
+      dto.evidenceReference.trim().length<5)
+    ){
+     throw new BadRequestException(
+      'Payment reversal evidence reference required'
+     );
+    }
+
+    const updated=await tx.posExchangeAttempt.update({
+     where:{id:key},
+     data:{
+      status:'RESOLVED_NO_EXCHANGE',
+      paymentState:dto.paymentState,
+      resolutionReason:reason,
+      resolvedById:u.id,
+      resolvedAt:new Date()
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_EXCHANGE_RESOLVED_WITHOUT_SALE',
+      entityType:'PosExchangeAttempt',
+      entityId:key,
+      before:{
+       status:attempt.status,
+       paymentState:attempt.paymentState
+      },
+      after:{
+       status:updated.status,
+       paymentState:updated.paymentState,
+       reason,
+       evidenceReference:dto.evidenceReference?.trim()||null,
+       locationId:attempt.locationId,
+       shiftId:attempt.shiftId
+      }
+     }
+    });
+
+    return {
+     status:updated.status,
+     idempotencyKey:key,
+     locationId:updated.locationId,
+     paymentState:updated.paymentState,
+     resolutionReason:updated.resolutionReason,
+     resolvedById:updated.resolvedById,
+     resolvedAt:updated.resolvedAt,
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
+
+ async resumeExchange(key:string,u:Principal){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException('Invalid exchange identity');
+  }
+
+  const attempt=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!attempt){
+   throw new NotFoundException('Exchange attempt not registered');
+  }
+
+  this.branchAccess(u,attempt.locationId);
+
+  if(attempt.status==='ACCEPTED'){
+   return this.exchangeStatus(key,u);
+  }
+
+  if(!['REGISTERED','UNKNOWN'].includes(attempt.status)){
+   throw new ConflictException('Exchange cannot be resumed');
+  }
+
+  if(!['CONFIRMED','NO_PAYMENT_REQUIRED'].includes(
+   attempt.paymentState
+  )){
+   throw new ConflictException(
+    'Reconcile existing payment before resuming'
+   );
+  }
+
+  const payload=attempt.payload as unknown as CreatePosExchangeDto;
+
+  if(payload.idempotencyKey!==key){
+   throw new ConflictException('Stored exchange identity mismatch');
+  }
+
+  await this.createExchange(payload,u);
+
+  return this.exchangeStatus(key,u);
+ }
+
+ // R10_3D23B_ATOMIC_EXCHANGE
+ async createExchange(
+  dto:CreatePosExchangeDto,
+  u:Principal,
+  quoteOnly=false
+ ){
+
+  if(process.env.POS_EXCHANGE_ENABLED!=='true'){
+   throw new ForbiddenException('Exchange checkout is not enabled');
+  }
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  this.branchAccess(u,dto.locationId);
+
+  const cents=(value:number)=>{
+   const result=Math.round(value*100);
+
+   if(
+    !Number.isFinite(value)||
+    !Number.isSafeInteger(result)||
+    result<0||
+    result>999999999999||
+    Math.abs(value*100-result)>0.00001
+   ){
+    throw new BadRequestException('Invalid monetary amount');
+   }
+
+   return result;
+  };
+
+  const decimal=(value:number)=>
+   new Prisma.Decimal(value).div(100);
+
+  const fmt=(value:number)=>
+   (value/100).toFixed(2);
+
+  if(
+   !dto.returnLines.length||
+   !dto.replacementLines.length||
+   dto.returnLines.length>100||
+   dto.replacementLines.length>100
+  ){
+   throw new BadRequestException('Invalid exchange merchandise');
+  }
+
+  if(
+   new Set(dto.replacementLines.map(l=>l.variantId)).size
+   !==dto.replacementLines.length
+  ){
+   throw new BadRequestException('Duplicate replacement variants');
+  }
+
+  for(const line of [
+   ...dto.returnLines,
+   ...dto.replacementLines
+  ]){
+   if(
+    !Number.isSafeInteger(line.quantity)||
+    line.quantity<=0||
+    line.quantity>1000
+   ){
+    throw new BadRequestException('Invalid merchandise quantity');
+   }
+  }
+
+  for(const tender of dto.additionalTenders){
+   this.assertPhysicalTender(tender.type);
+
+   if(cents(tender.amount)<=0){
+    throw new BadRequestException('Positive tender required');
+   }
+
+   if(
+    tender.type!=='CASH'&&
+    !tender.reference?.trim()
+   ){
+    throw new BadRequestException('Payment reference required');
+   }
+  }
+
+  const expectedReturn=cents(dto.expectedReturnValue);
+  const expectedReplacement=cents(dto.expectedReplacementValue);
+
+  const payloadHash=this.exchangePayloadHash(dto,expectedReturn,expectedReplacement);
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${dto.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${dto.idempotencyKey}`})
+     )
+    `;
+
+    const existing=await tx.posExchange.findUnique({
+     where:{idempotencyKey:dto.idempotencyKey},
+     include:{
+      return:{include:{lines:true}},
+      replacementSale:{include:{lines:true,tenders:true}}
+     }
+    });
+
+    if(existing){
+     if(quoteOnly){
+      throw new ConflictException(
+       'Quotation identity already used'
+      );
+     }
+     this.branchAccess(u,existing.return.locationId);
+
+     if(existing.replacementSale.payloadHash!==payloadHash){
+      throw new ConflictException(
+       'Exchange identity reused with different details'
+      );
+     }
+
+     return {...existing,duplicate:true};
+    }
+
+    // R10_3D23B_REQUIRED_REGISTRATION
+    if(!quoteOnly){
+
+     const attempt=await tx.posExchangeAttempt.findUnique({
+      where:{id:dto.idempotencyKey}
+     });
+
+     if(!attempt){
+      throw new ConflictException(
+       'Central exchange registration required'
+      );
+     }
+
+     this.branchAccess(u,attempt.locationId);
+
+     if(
+      attempt.payloadHash!==payloadHash||
+      attempt.locationId!==dto.locationId||
+      attempt.shiftId!==dto.shiftId||
+      attempt.deviceId!==dto.deviceId||
+      attempt.originalSaleId!==dto.originalSaleId
+     ){
+      throw new ConflictException(
+       'Exchange differs from registered transaction'
+      );
+     }
+
+     if(!['REGISTERED','UNKNOWN'].includes(attempt.status)){
+      throw new ConflictException(
+       'Exchange attempt is not eligible for submission'
+      );
+     }
+
+     const requiredPayment=Math.max(
+      0,expectedReplacement-expectedReturn
+     );
+
+     if(
+      requiredPayment>0&&
+      attempt.paymentState!=='CONFIRMED'
+     ){
+      throw new ConflictException(
+       'Additional payment confirmation required'
+      );
+     }
+
+     if(
+      requiredPayment===0&&
+      attempt.paymentState!=='NO_PAYMENT_REQUIRED'
+     ){
+      throw new ConflictException(
+       'Exchange payment state mismatch'
+      );
+     }
+    }
+
+const original=await tx.posSale.findUnique({
+     where:{id:dto.originalSaleId}
+    });
+
+    if(
+     !original||
+     original.status!=='ACCEPTED'||
+     original.locationId!==dto.locationId
+    ){
+     throw new ConflictException(
+      'Accepted original sale at this branch required'
+     );
+    }
+
+    const device=await tx.posDevice.findUnique({
+     where:{id:dto.deviceId}
+    });
+
+    if(
+     !device||
+     !device.active||
+     device.locationId!==dto.locationId
+    ){
+     throw new ConflictException('Invalid exchange device');
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:dto.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.deviceId!==device.id||
+     shift.locationId!==dto.locationId
+    ){
+     throw new ConflictException('Open branch shift required');
+    }
+
+    const returnKey=`exchange:${dto.idempotencyKey}`;
+
+    const priorReturn=await tx.posReturn.findUnique({
+     where:{idempotencyKey:returnKey}
+    });
+
+    if(priorReturn){
+     throw new ConflictException(
+      'Exchange return identity already exists'
+     );
+    }
+
+    const ret=await this.returnSaleInTransaction({
+     saleId:original.id,
+     idempotencyKey:returnKey,
+     reason:dto.reason.trim(),
+     lines:dto.returnLines
+    },u,tx);
+
+    const returnLines=await tx.posReturnLine.findMany({
+     where:{returnId:ret.id}
+    });
+
+    const returnValue=returnLines.reduce(
+     (sum,line)=>sum+cents(line.refundAmount.toNumber()),
+     0
+    );
+
+    if(!quoteOnly&&returnValue!==expectedReturn){
+     throw new ConflictException(
+      'Original return value changed. Refresh exchange.'
+     );
+    }
+
+    const replacements=[] as {
+     variantId:string;
+     quantity:number;
+     priceCents:number;
+     balanceId:string;
+    }[];
+
+    for(const line of [...dto.replacementLines].sort(
+     (a,b)=>a.variantId.localeCompare(b.variantId)
+    )){
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${dto.locationId+':'+line.variantId})
+      )
+     `;
+
+      // R10_3D23B_REPLACEMENT_PRODUCT_GUARD
+     const variant=await tx.productVariant.findUnique({
+      where:{id:line.variantId},
+      include:{product:true}
+     });
+
+     if(!variant?.active||!variant.product.active){
+      throw new ConflictException('Replacement variant inactive');
+     }
+
+     const balance=await tx.stockBalance.findUnique({
+      where:{
+       locationId_variantId:{
+        locationId:dto.locationId,
+        variantId:line.variantId
+       }
+      }
+     });
+
+     if(!balance){
+      throw new ConflictException('Replacement stock unavailable');
+     }
+
+     const available=
+      balance.onHand-
+      balance.reservedOnline-
+      balance.reservedReplenish-
+      balance.quarantined-
+      balance.safetyBuffer;
+
+     if(available<line.quantity){
+      throw new ConflictException(
+       'Insufficient replacement stock'
+      );
+     }
+
+     replacements.push({
+      variantId:line.variantId,
+      quantity:line.quantity,
+      priceCents:cents(variant.price.toNumber()),
+      balanceId:balance.id
+     });
+    }
+
+    const replacementValue=replacements.reduce(
+     (sum,line)=>sum+line.quantity*line.priceCents,
+     0
+    );
+
+    if(
+     !Number.isSafeInteger(replacementValue)||
+     replacementValue<=0||
+     replacementValue>999999999999||
+     (!quoteOnly&&replacementValue!==expectedReplacement)
+    ){
+     throw new ConflictException(
+      'Replacement price changed. Refresh exchange.'
+     );
+    }
+
+    const credit=Math.min(returnValue,replacementValue);
+
+    const additionalPayment=Math.max(
+     0,replacementValue-returnValue
+    );
+
+    const residualRefund=Math.max(
+     0,returnValue-replacementValue
+    );
+
+    // R10_3D23B_EXCHANGE_QUOTE
+    if(quoteOnly){
+     throw new ExchangeQuoteRollback({
+      returnValue:fmt(returnValue),
+      replacementValue:fmt(replacementValue),
+      exchangeCredit:fmt(credit),
+      additionalPayment:fmt(additionalPayment),
+      residualRefund:fmt(residualRefund),
+      replacementLines:replacements.map(line=>({
+       variantId:line.variantId,
+       quantity:line.quantity,
+       unitPrice:fmt(line.priceCents)
+      }))
+     });
+    }
+
+    const suppliedPayment=dto.additionalTenders.reduce(
+     (sum,tender)=>sum+cents(tender.amount),0
+    );
+
+    if(suppliedPayment!==additionalPayment){
+     throw new BadRequestException(
+      'Additional payment must equal exchange difference'
+     );
+    }
+
+    const tenders:{
+     type:PosTenderType;
+     amount:Prisma.Decimal;
+     reference?:string;
+    }[]=dto.additionalTenders.map(tender=>({
+     type:tender.type,
+     amount:decimal(cents(tender.amount)),
+     reference:tender.reference?.trim()
+    }));
+
+    if(credit>0){
+     tenders.push({
+      type:'EXCHANGE_CREDIT',
+      amount:decimal(credit),
+      reference:ret.id
+     });
+    }
+
+    const sale=await tx.posSale.create({
+     data:{
+      deviceId:device.id,
+      localSaleId:dto.idempotencyKey,
+      payloadHash,
+      locationId:dto.locationId,
+      shiftId:shift.id,
+      cashierId:shift.cashierId,
+      status:'ACCEPTED',
+      soldAt:new Date(),
+      total:decimal(replacementValue),
+      lines:{
+       create:replacements.map(line=>({
+        variantId:line.variantId,
+        quantity:line.quantity,
+        unitPrice:decimal(line.priceCents)
+       }))
+      },
+      tenders:{create:tenders}
+     }
+    });
+
+    for(const line of replacements){
+     await tx.stockBalance.update({
+      where:{id:line.balanceId},
+      data:{
+       onHand:{decrement:line.quantity},
+       version:{increment:1}
+      }
+     });
+
+     await tx.stockMovement.create({
+      data:{
+       locationId:dto.locationId,
+       variantId:line.variantId,
+       type:'SALE',
+       quantityDelta:-line.quantity,
+       referenceType:'POS_SALE',
+       referenceId:sale.id,
+       idempotencyKey:`pos:${sale.id}:${line.variantId}`,
+       actorId:u.id
+      }
+     });
+    }
+
+    const exchange=await tx.posExchange.create({
+     data:{
+      returnId:ret.id,
+      replacementSaleId:sale.id,
+      idempotencyKey:dto.idempotencyKey,
+      approvedById:u.id
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_EXCHANGE_COMPLETED',
+      entityType:'PosExchange',
+      entityId:exchange.id,
+      after:{
+       originalSaleId:original.id,
+       returnId:ret.id,
+       replacementSaleId:sale.id,
+       locationId:dto.locationId,
+       shiftId:shift.id,
+       returnValue:fmt(returnValue),
+       replacementValue:fmt(replacementValue),
+       exchangeCredit:fmt(credit),
+       additionalPayment:fmt(additionalPayment),
+       residualRefund:fmt(residualRefund)
+      }
+     }
+    });
+
+    // R10_3D23B_EXCHANGE_LOYALTY
+    const originalCustomer=await tx.saleCustomerLink.findUnique({
+     where:{saleId:original.id}
+    });
+
+    if(originalCustomer){
+
+     await tx.saleCustomerLink.create({
+      data:{
+       saleId:sale.id,
+       customerId:originalCustomer.customerId,
+       linkedById:u.id
+      }
+     });
+
+     const rate=pointsPer100();
+
+     const earnedPoints=
+      Math.floor(replacementValue/10000)*rate;
+
+     if(
+      !Number.isSafeInteger(earnedPoints)||
+      earnedPoints<0||
+      earnedPoints>2147483647
+     ){
+      throw new ConflictException(
+       'Invalid replacement loyalty award'
+      );
+     }
+
+     if(earnedPoints>0){
+
+      await tx.loyaltyLedgerEntry.create({
+       data:{
+        customerId:originalCustomer.customerId,
+        saleId:sale.id,
+        points:earnedPoints,
+        reason:'SALE_EARN'
+       }
+      });
+     }
+
+     await tx.auditLog.create({
+      data:{
+       actorId:u.id,
+       action:'POS_EXCHANGE_CUSTOMER_LOYALTY',
+       entityType:'PosSale',
+       entityId:sale.id,
+       after:{
+        originalSaleId:original.id,
+        customerId:originalCustomer.customerId,
+        replacementValue:fmt(replacementValue),
+        exchangeCredit:fmt(credit),
+        awardedPoints:earnedPoints
+       }
+      }
+     });
+    }
+
+// R10_3D23B_ATOMIC_ATTEMPT_FINALIZATION
+    const finalized=await tx.posExchangeAttempt.updateMany({
+     where:{
+      id:dto.idempotencyKey,
+      payloadHash,
+      status:{in:['REGISTERED','UNKNOWN']},
+      paymentState:{
+       in:['CONFIRMED','NO_PAYMENT_REQUIRED']
+      }
+     },
+     data:{
+      status:'ACCEPTED',
+      resolvedById:u.id,
+      resolvedAt:new Date(),
+      resolutionReason:'Exchange committed atomically'
+     }
+    });
+
+    if(finalized.count!==1){
+     throw new ConflictException(
+      'Central exchange finalization failed'
+     );
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_EXCHANGE_ATTEMPT_FINALIZED',
+      entityType:'PosExchangeAttempt',
+      entityId:dto.idempotencyKey,
+      after:{
+       status:'ACCEPTED',
+       exchangeId:exchange.id,
+       returnId:ret.id,
+       replacementSaleId:sale.id
+      }
+     }
+    });
+
+return {
+     ...exchange,
+     duplicate:false,
+     originalSaleId:original.id,
+     returnValue:fmt(returnValue),
+     replacementValue:fmt(replacementValue),
+     exchangeCredit:fmt(credit),
+     additionalPayment:fmt(additionalPayment),
+     residualRefund:fmt(residualRefund)
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:30000
+   }
+  ));
+ }
+
+ // R10_3D23B_EXCHANGE_RECOVERY
+ // R10_3D23B_EXCHANGE_ACCOUNTING
+ private async exchangeCreditsByReturn(
+  returnIds:string[]
+ ):Promise<Map<string,number>>{
+
+  const result=new Map<string,number>();
+
+  const ids=[...new Set(returnIds)];
+
+  if(!ids.length)return result;
+
+  const exchanges=await this.db.posExchange.findMany({
+   where:{
+    returnId:{in:ids}
+   },
+   select:{
+    returnId:true,
+    replacementSale:{
+     select:{
+      status:true,
+      tenders:{
+       where:{type:'EXCHANGE_CREDIT'},
+       select:{amount:true}
+      }
+     }
+    }
+   }
+  });
+
+  for(const exchange of exchanges){
+
+   if(exchange.replacementSale.status!=='ACCEPTED'){
+    throw new ConflictException(
+     'Exchange replacement sale requires reconciliation'
+    );
+   }
+
+   const credit=exchange.replacementSale.tenders.reduce(
+    (sum,tender)=>
+     sum+Math.round(tender.amount.toNumber()*100),
+    0
+   );
+
+   result.set(exchange.returnId,credit);
+  }
+
+  return result;
+ }
+
+ private netRefundDue(
+  grossCents:number,
+  creditCents:number
+ ):number{
+
+  if(
+   !Number.isSafeInteger(grossCents)||
+   !Number.isSafeInteger(creditCents)||
+   grossCents<0||
+   creditCents<0||
+   creditCents>grossCents
+  ){
+   throw new ConflictException(
+    'Invalid exchange refund allocation'
+   );
+  }
+
+  return grossCents-creditCents;
+ }
+
+ async exchangeStatus(key:string,u:Principal){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  if(!/^[0-9a-f-]{36}$/i.test(key)){
+   throw new BadRequestException('Invalid exchange identity');
+  }
+
+  const exchange=await this.db.posExchange.findUnique({
+   where:{idempotencyKey:key},
+   include:{
+    return:{
+     include:{
+      lines:true,
+      settlements:true
+     }
+    },
+    replacementSale:{
+     include:{
+      lines:true,
+      tenders:true
+     }
+    }
+   }
+  });
+
+  // R10_3D23B_PENDING_STATUS
+  if(!exchange){
+
+   const attempt=await this.db.posExchangeAttempt.findUnique({
+    where:{id:key}
+   });
+
+   if(!attempt){
+    return {
+     status:'NOT_FOUND',
+     idempotencyKey:key
+    };
+   }
+
+   this.branchAccess(u,attempt.locationId);
+
+   if(attempt.status==='ACCEPTED'){
+    throw new ConflictException(
+     'Accepted attempt has no exchange record'
+    );
+   }
+
+   return {
+    status:attempt.status,
+    idempotencyKey:key,
+    paymentState:attempt.paymentState,
+    locationId:attempt.locationId,
+    deviceId:attempt.deviceId,
+    shiftId:attempt.shiftId,
+    originalSaleId:attempt.originalSaleId,
+    registeredAt:attempt.createdAt,
+    resolvedAt:attempt.resolvedAt,
+    resolutionReason:attempt.resolutionReason,
+    resolvedById:attempt.resolvedById
+   };
+  }
+
+  this.branchAccess(u,exchange.return.locationId);
+
+  // R10_3D23B_AUTHORITATIVE_STATUS
+
+  const acceptedAttempt=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(
+   !acceptedAttempt||
+   acceptedAttempt.status!=='ACCEPTED'||
+   !['CONFIRMED','NO_PAYMENT_REQUIRED'].includes(
+    acceptedAttempt.paymentState
+   )||
+   acceptedAttempt.originalSaleId!==exchange.return.saleId||
+   acceptedAttempt.locationId!==exchange.return.locationId||
+   acceptedAttempt.deviceId!==exchange.replacementSale.deviceId||
+   acceptedAttempt.shiftId!==exchange.replacementSale.shiftId||
+   exchange.replacementSale.locationId!==exchange.return.locationId||
+   exchange.replacementSale.status!=='ACCEPTED'||
+   exchange.return.status!=='APPROVED'
+  ){
+   throw new ConflictException(
+    'Exchange acceptance integrity requires HQ reconciliation'
+   );
+  }
+
+
+  const cents=(value:Prisma.Decimal)=>
+   Math.round(value.toNumber()*100);
+
+  const fmt=(value:number)=>
+   (value/100).toFixed(2);
+
+  const returnValue=exchange.return.lines.reduce(
+   (sum,line)=>sum+cents(line.refundAmount),0
+  );
+
+  const replacementValue=cents(
+   exchange.replacementSale.total
+  );
+
+  const credit=exchange.replacementSale.tenders
+   .filter(t=>t.type==='EXCHANGE_CREDIT')
+   .reduce((sum,t)=>sum+cents(t.amount),0);
+
+  const additionalPayment=exchange.replacementSale.tenders
+   .filter(t=>t.type!=='EXCHANGE_CREDIT')
+   .reduce((sum,t)=>sum+cents(t.amount),0);
+
+  const paid=exchange.return.settlements.reduce(
+   (sum,t)=>sum+cents(t.amount),0
+  );
+
+    const creditTenders=exchange.replacementSale.tenders.filter(
+   tender=>tender.type==='EXCHANGE_CREDIT'
+  );
+
+  if(
+   ![
+    returnValue,
+    replacementValue,
+    credit,
+    additionalPayment,
+    paid
+   ].every(
+    value=>Number.isSafeInteger(value)&&value>=0
+   )||
+   replacementValue<=0||
+   credit!==Math.min(returnValue,replacementValue)||
+   credit+additionalPayment!==replacementValue||
+   paid>returnValue-credit||
+   creditTenders.length!==(credit>0?1:0)||
+   creditTenders.some(
+    tender=>tender.reference!==exchange.returnId
+   )||
+   exchange.replacementSale.tenders.some(
+    tender=>cents(tender.amount)<=0
+   )
+  ){
+   throw new ConflictException(
+    'Exchange financial allocation requires reconciliation'
+   );
+  }
+
+return {
+   status:'ACCEPTED',
+   integrityVerified:true,
+   paymentState:acceptedAttempt.paymentState,
+   deviceId:acceptedAttempt.deviceId,
+   shiftId:acceptedAttempt.shiftId,
+   verifiedAt:new Date().toISOString(),
+   id:exchange.id,
+   idempotencyKey:key,
+   originalSaleId:exchange.return.saleId,
+   returnId:exchange.returnId,
+   replacementSaleId:exchange.replacementSaleId,
+   locationId:exchange.return.locationId,
+   returnValue:fmt(returnValue),
+   replacementValue:fmt(replacementValue),
+   exchangeCredit:fmt(credit),
+   additionalPayment:fmt(additionalPayment),
+   residualRefund:fmt(Math.max(0,returnValue-credit)),
+   residualRefundPaid:fmt(paid),
+   residualRefundOutstanding:fmt(
+    Math.max(0,returnValue-credit-paid)
+   ),
+   createdAt:exchange.createdAt
+  };
+ }
+
  async lookupReturnSales(
   locationId:string,
   receipt:string,
@@ -2500,9 +4411,21 @@ async saleReturnHistory(saleId:string,u:Principal){
   const formatMoney=(value:number)=>
    (value/100).toFixed(2);
 
+  // R10_3D23B_HISTORY_ACCOUNTING
+  const exchangeCredits=await this.exchangeCreditsByReturn(
+   sale.returns.map(ret=>ret.id)
+  );
+
   const returns=sale.returns.map(ret=>{
-   const due=ret.lines.reduce(
+   const grossReturn=ret.lines.reduce(
     (sum,line)=>sum+toCents(line.refundAmount),0
+   );
+
+   const exchangeCredit=exchangeCredits.get(ret.id)??0;
+
+   const due=this.netRefundDue(
+    grossReturn,
+    exchangeCredit
    );
 
    const settled=ret.settlements.reduce(
@@ -2521,6 +4444,8 @@ async saleReturnHistory(saleId:string,u:Principal){
     quarantined:line.quarantined,
     refundAmount:line.refundAmount.toString()
    })),
+   grossReturnValue:formatMoney(grossReturn),
+   exchangeCredit:formatMoney(exchangeCredit),
    refundDue:formatMoney(due),
    refundSettled:formatMoney(settled),
    refundOutstanding:formatMoney(outstanding),
@@ -2671,9 +4596,21 @@ async saleReturnHistory(saleId:string,u:Principal){
    snapshotVerified:true
   }));
 
+  // R10_3D23B_BRANCH_ACCOUNTING
+  const exchangeCredits=await this.exchangeCreditsByReturn(
+   returns.slice(0,limit).map(r=>r.id)
+  );
+
   const returnRows=returns.slice(0,limit).map(r=>{
-   const due=r.lines.reduce(
+   const grossReturn=r.lines.reduce(
     (n,l)=>n+cents(l.refundAmount),0
+   );
+
+   const exchangeCredit=exchangeCredits.get(r.id)??0;
+
+   const due=this.netRefundDue(
+    grossReturn,
+    exchangeCredit
    );
 
    const paid=r.settlements.reduce(
@@ -2688,6 +4625,8 @@ async saleReturnHistory(saleId:string,u:Principal){
     approvedById:r.approvedById,
     createdAt:r.createdAt,
     status:r.status,
+    grossReturnValue:fmt(grossReturn),
+    exchangeCredit:fmt(exchangeCredit),
     refundDue:fmt(due),
     refundSettled:fmt(paid),
     refundOutstanding:fmt(outstanding),
@@ -2956,6 +4895,70 @@ async saleReturnHistory(saleId:string,u:Principal){
    outstanding:Prisma.Decimal;
   };
 
+  // R10_3D23B_HQ_INTEGRITY_GATE
+  const exchangeIntegrityExceptions=
+   await this.db.$queryRaw<
+    {exchangeId:string;locationId:string}[]
+   >`
+   WITH allocations AS (
+    SELECT
+     e.id AS "exchangeId",
+     r."locationId",
+     r.status::text AS return_status,
+     s.status::text AS sale_status,
+     s."locationId" AS sale_location,
+     s.total AS replacement_total,
+     COALESCE((
+      SELECT SUM(l."refundAmount")
+      FROM "PosReturnLine" l
+      WHERE l."returnId"=r.id
+     ),0) AS gross_return,
+     COALESCE((
+      SELECT SUM(t.amount)
+      FROM "PosSaleTender" t
+      WHERE t."saleId"=s.id
+       AND t.type::text='EXCHANGE_CREDIT'
+     ),0) AS credit,
+     COALESCE((
+      SELECT SUM(t.amount)
+      FROM "PosSaleTender" t
+      WHERE t."saleId"=s.id
+     ),0) AS tender_total,
+     COALESCE((
+      SELECT SUM(p.amount)
+      FROM "PosRefundSettlement" p
+      WHERE p."returnId"=r.id
+     ),0) AS paid
+    FROM "PosExchange" e
+    JOIN "PosReturn" r ON r.id=e."returnId"
+    JOIN "PosSale" s ON s.id=e."replacementSaleId"
+    WHERE r."locationId" IN (
+     ${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}
+    )
+   )
+   SELECT "exchangeId","locationId"
+   FROM allocations
+   WHERE return_status<>'APPROVED'
+    OR sale_status<>'ACCEPTED'
+    OR sale_location<>"locationId"
+    OR gross_return<0
+    OR replacement_total<=0
+    OR credit<>LEAST(gross_return,replacement_total)
+    OR tender_total<>replacement_total
+    OR paid<0
+    OR paid>gross_return-credit
+   LIMIT 100
+  `;
+
+  if(exchangeIntegrityExceptions.length){
+   throw new ConflictException({
+    message:'HQ refund reporting requires exchange reconciliation',
+    code:'EXCHANGE_FINANCIAL_INTEGRITY',
+    exceptions:exchangeIntegrityExceptions
+   });
+  }
+
+// R10_3D23B_HQ_ACCOUNTING
   const liabilities=await this.db.$queryRaw<LiabilityRow[]>`
    WITH return_due AS (
     SELECT
@@ -2978,16 +4981,41 @@ async saleReturnHistory(saleId:string,u:Principal){
     WHERE r."locationId" IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})
     GROUP BY s."returnId"
    )
+   , exchange_credit AS (
+    SELECT
+     e."returnId",
+     COALESCE(SUM(t."amount"),0)::numeric AS credit
+    FROM "PosExchange" e
+    INNER JOIN return_due d
+     ON d."id"=e."returnId"
+    INNER JOIN "PosSale" s
+     ON s."id"=e."replacementSaleId"
+    INNER JOIN "PosSaleTender" t
+     ON t."saleId"=s."id"
+    WHERE s."status"='ACCEPTED'
+     AND s."locationId"=d."locationId"
+     AND t."type"='EXCHANGE_CREDIT'
+    GROUP BY e."returnId"
+   )
    SELECT
     d."locationId",
-    COALESCE(SUM(d.due),0)::numeric AS due,
+    COALESCE(
+     SUM(GREATEST(d.due-COALESCE(c.credit,0),0)),
+     0
+    )::numeric AS due,
     COALESCE(SUM(COALESCE(p.paid,0)),0)::numeric AS settled,
     COALESCE(
-     SUM(GREATEST(d.due-COALESCE(p.paid,0),0)),
+     SUM(
+      GREATEST(
+       d.due-COALESCE(c.credit,0)-COALESCE(p.paid,0),
+       0
+      )
+     ),
      0
     )::numeric AS outstanding
    FROM return_due d
    LEFT JOIN return_paid p ON p."returnId"=d."id"
+   LEFT JOIN exchange_credit c ON c."returnId"=d."id"
    GROUP BY d."locationId"
   `;
 
@@ -3226,9 +5254,21 @@ async saleReturnHistory(saleId:string,u:Principal){
   const cents=(value:Prisma.Decimal)=>
    Math.round(value.toNumber()*100);
 
+  // R10_3D23B_EXCEPTION_ACCOUNTING
+  const exchangeCredits=await this.exchangeCreditsByReturn(
+   returns.map(ret=>ret.id)
+  );
+
   const rows=returns.map(ret=>{
-   const dueCents=ret.lines.reduce(
+   const grossReturnCents=ret.lines.reduce(
     (sum,line)=>sum+cents(line.refundAmount),0
+   );
+
+   const exchangeCreditCents=exchangeCredits.get(ret.id)??0;
+
+   const dueCents=this.netRefundDue(
+    grossReturnCents,
+    exchangeCreditCents
    );
 
    const settledCents=ret.settlements.reduce(
@@ -3244,6 +5284,8 @@ async saleReturnHistory(saleId:string,u:Principal){
     saleId:ret.saleId,
     status:ret.status,
     createdAt:ret.createdAt,
+    grossReturnValue:(grossReturnCents/100).toFixed(2),
+    exchangeCredit:(exchangeCreditCents/100).toFixed(2),
     refundDue:(dueCents/100).toFixed(2),
     settled:(settledCents/100).toFixed(2),
     outstanding:(outstandingCents/100).toFixed(2),
@@ -3411,15 +5453,20 @@ async saleReturnHistory(saleId:string,u:Principal){
       s.status!=='STOCK_CONFLICT'
   );
 
+  // R10_3D23B_DAILY_TENDERS
   const tenderTotals={
    CASH:0,
    CARD:0,
-   OTHER:0
+   OTHER:0,
+   EXCHANGE_CREDIT:0
   };
 
   for(const sale of accepted){
    for(const tender of sale.tenders){
     const value=cents(tender.amount);
+
+    if(tender.type==='EXCHANGE_CREDIT')
+     tenderTotals.EXCHANGE_CREDIT+=value;
 
     if(tender.type==='CASH')tenderTotals.CASH+=value;
     else if(tender.type==='CARD')tenderTotals.CARD+=value;
@@ -3431,16 +5478,25 @@ async saleReturnHistory(saleId:string,u:Principal){
    (sum,sale)=>sum+cents(sale.total),0
   );
 
-  const tenderCents=
+  const paymentCollectionCents=
    tenderTotals.CASH+
    tenderTotals.CARD+
    tenderTotals.OTHER;
+
+  const tenderCents=
+   paymentCollectionCents+
+   tenderTotals.EXCHANGE_CREDIT;
 
   const shiftRows=snapshots.map(s=>({
    shiftId:s.shiftId,
    deviceId:s.deviceId,
    cashierId:s.cashierId,
    closedAt:s.closedAt,
+   // R10_3D23B_CLOSING_SHIFT_DETAILS
+   cashSales:amount(cents(s.cashSales)),
+   cardSales:amount(cents(s.cardSales)),
+   otherSales:amount(cents(s.otherSales)),
+   exchangeCredit:amount(cents(s.exchangeCredit)),
    expectedCash:amount(cents(s.expectedCash)),
    countedCash:amount(cents(s.countedCash)),
    variance:amount(cents(s.variance)),
@@ -3460,9 +5516,23 @@ async saleReturnHistory(saleId:string,u:Principal){
    s=>s.status==='OPEN'
   );
 
+  // R10_3D23B_DAILY_CLOSING
+  const closingExchangeCredits=
+   await this.exchangeCreditsByReturn(
+    returns.map(ret=>ret.id)
+   );
+
   const refundRows=returns.map(ret=>{
-   const due=ret.lines.reduce(
+   const grossReturn=ret.lines.reduce(
     (sum,line)=>sum+cents(line.refundAmount),0
+   );
+
+   const exchangeCredit=
+    closingExchangeCredits.get(ret.id)??0;
+
+   const due=this.netRefundDue(
+    grossReturn,
+    exchangeCredit
    );
 
    const settled=ret.settlements.reduce(
@@ -3473,6 +5543,8 @@ async saleReturnHistory(saleId:string,u:Principal){
     returnId:ret.id,
     saleId:ret.saleId,
     status:ret.status,
+    grossReturnValue:amount(grossReturn),
+    exchangeCredit:amount(exchangeCredit),
     refundDue:amount(due),
     settled:amount(settled),
     outstanding:amount(Math.max(0,due-settled)),
@@ -3534,13 +5606,16 @@ async saleReturnHistory(saleId:string,u:Principal){
     unresolved:unresolved.length,
     acceptedTotal:amount(acceptedSalesCents),
     tenderTotal:amount(tenderCents),
+    paymentCollections:amount(paymentCollectionCents),
+    exchangeCredit:amount(tenderTotals.EXCHANGE_CREDIT),
     tenderDifference:amount(
      acceptedSalesCents-tenderCents
     ),
     tenders:{
      cash:amount(tenderTotals.CASH),
      card:amount(tenderTotals.CARD),
-     other:amount(tenderTotals.OTHER)
+     other:amount(tenderTotals.OTHER),
+     exchangeCredit:amount(tenderTotals.EXCHANGE_CREDIT)
     },
     lateSynced:lateSyncedSales.length
    },
@@ -6471,6 +8546,71 @@ export class PosController {
   return this.pos.recordRefundSettlement(dto,u);
  }
  // R10_3D23_RECEIPT_LOOKUP_ROUTE
+ // R10_3D23B_EXCHANGE_ROUTE
+ @Get('exchanges/status/:key')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ exchangeStatusRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string
+ ){
+  return this.pos.exchangeStatus(key,u);
+ }
+
+ @Post('exchanges/:key/resolve')
+ @Roles('SUPER_ADMIN')
+ resolveExchangeRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string,
+  @Body() dto:ResolvePosExchangeDto
+ ){
+  return this.pos.resolveExchange(key,dto,u);
+ }
+
+ @Post('exchanges/:key/resume')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ resumeExchangeRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string
+ ){
+  return this.pos.resumeExchange(key,u);
+ }
+
+@Post('exchanges/:key/confirm-payment')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ confirmExchangePaymentRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string
+ ){
+  return this.pos.confirmExchangePayment(key,u);
+ }
+
+@Post('exchanges/register')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ registerExchangeRoute(
+  @CurrentUser() u:Principal,
+  @Body() dto:CreatePosExchangeDto
+ ){
+  return this.pos.registerExchange(dto,u);
+ }
+
+@Post('exchanges/quote')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ quoteExchangeRoute(
+  @CurrentUser() u:Principal,
+  @Body() dto:CreatePosExchangeDto
+ ){
+  return this.pos.quoteExchange(dto,u);
+ }
+
+ @Post('exchanges')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ createExchangeRoute(
+  @CurrentUser() u:Principal,
+  @Body() dto:CreatePosExchangeDto
+ ){
+  return this.pos.createExchange(dto,u);
+ }
+
  @Get('returns/receipt-lookup')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  lookupReturnSales(

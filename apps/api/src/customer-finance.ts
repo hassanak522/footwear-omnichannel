@@ -45,14 +45,75 @@ export class CustomerFinanceController {
   return rows.map(r=>({...r,amount:r.amount.toString()}));
  }
  @Post('refunds')
+ // R10_3D23B_LEGACY_REFUND_GUARD
  async request(@CurrentUser() u:Principal,@Body() d:RefundDto){
-  const ret=await this.db.posReturn.findUniqueOrThrow({where:{id:d.returnId},include:{lines:true}});
-  assertLocation(u,ret.locationId);
-  const amount=ret.lines.reduce((sum,l)=>sum+l.refundAmount.toNumber(),0);
-  if(amount<=0)throw new BadRequestException('Return has no refundable amount');
-  return this.db.refundRecord.create({data:{returnId:ret.id,locationId:ret.locationId,amount,method:d.method,requestedById:u.id}})
-    .catch(e=>{if(e?.code==='P2002')throw new ConflictException('Refund already registered');throw e;});
+
+  return this.db.$transaction(async tx=>{
+
+   await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+     hashtext(${`pos-refund-settlement:${d.returnId}`})
+    )
+   `;
+
+   const ret=await tx.posReturn.findUniqueOrThrow({
+    where:{id:d.returnId},
+    include:{
+     lines:true,
+     settlements:true,
+     exchange:true
+    }
+   });
+
+   assertLocation(u,ret.locationId);
+
+   if(ret.status!=='APPROVED'){
+    throw new ConflictException('Approved return required');
+   }
+
+   if(ret.exchange){
+    throw new ConflictException(
+     'Exchange refunds must use the POS settlement workflow'
+    );
+   }
+
+   if(ret.settlements.length){
+    throw new ConflictException(
+     'POS refund settlements already exist for this return'
+    );
+   }
+
+   const amount=ret.lines.reduce(
+    (sum,line)=>
+     sum+Math.round(line.refundAmount.toNumber()*100),
+    0
+   )/100;
+
+   if(amount<=0){
+    throw new BadRequestException(
+     'Return has no refundable amount'
+    );
+   }
+
+   return tx.refundRecord.create({
+    data:{
+     returnId:ret.id,
+     locationId:ret.locationId,
+     amount,
+     method:d.method,
+     requestedById:u.id
+    }
+   }).catch(e=>{
+    if(e?.code==='P2002'){
+     throw new ConflictException('Refund already registered');
+    }
+
+    throw e;
+   });
+
+  });
  }
+
  @Post('refunds/:id/approve')
  @Roles('SUPER_ADMIN')
  async approve(@CurrentUser() u:Principal,@Param('id') id:string){
