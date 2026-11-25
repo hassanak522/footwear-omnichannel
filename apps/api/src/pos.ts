@@ -4125,6 +4125,104 @@ async saleReturnHistory(saleId:string,u:Principal){
    return saved;
   });
  }
+ // R10_3D21_GOVERNANCE_QUEUE
+ async hqGovernanceQueue(u:Principal){
+  const isHq=u.roles.includes('SUPER_ADMIN');
+
+  if(!isHq&&!u.roles.includes('BRANCH_MANAGER')){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  const assignments=isHq?[]:
+   await this.db.userLocation.findMany({
+    where:{userId:u.id},
+    select:{locationId:true}
+   });
+
+  const rows=await this.db.hqCorrectiveAction.findMany({
+   where:{
+    status:{not:'COMPLETED'},
+    ...(isHq?{}:{
+     ownerId:u.id,
+     locationId:{
+      in:assignments.map(a=>a.locationId)
+     }
+    })
+   },
+   orderBy:{dueAt:'asc'}
+  });
+
+  const locationIds=[...new Set(rows.map(r=>r.locationId))];
+  const ownerIds=[...new Set(rows.map(r=>r.ownerId))];
+
+  const [locations,owners]=await Promise.all([
+   this.db.location.findMany({
+    where:{id:{in:locationIds}},
+    select:{id:true,name:true,code:true}
+   }),
+   this.db.user.findMany({
+    where:{id:{in:ownerIds}},
+    select:{id:true,name:true,status:true}
+   })
+  ]);
+
+  const locationMap=new Map(
+   locations.map(l=>[l.id,l])
+  );
+
+  const ownerMap=new Map(
+   owners.map(o=>[o.id,o])
+  );
+
+  const now=Date.now();
+
+  const priorityRank:Record<string,number>={
+   CRITICAL:0,
+   HIGH:1,
+   MEDIUM:2
+  };
+
+  const queue=rows.map(row=>{
+   const remainingMs=row.dueAt.getTime()-now;
+
+   const overdue=remainingMs<=0;
+   const dueSoon=!overdue&&remainingMs<=86400000;
+
+   return {
+    ...row,
+    branch:locationMap.get(row.locationId)||null,
+    owner:ownerMap.get(row.ownerId)||null,
+    overdue,
+    dueSoon,
+    remainingHours:Math.round(remainingMs/360000)/10
+   };
+  }).sort((a,b)=>
+   Number(b.overdue)-Number(a.overdue)||
+   (priorityRank[a.priority]??3)-
+    (priorityRank[b.priority]??3)||
+   a.dueAt.getTime()-b.dueAt.getTime()
+  );
+
+  return {
+   generatedAt:new Date(now).toISOString(),
+   summary:{
+    outstanding:queue.length,
+    overdue:queue.filter(a=>a.overdue).length,
+    dueSoon:queue.filter(a=>a.dueSoon).length,
+    critical:queue.filter(
+     a=>a.priority==='CRITICAL'
+    ).length,
+    inProgress:queue.filter(
+     a=>a.status==='IN_PROGRESS'
+    ).length,
+    inactiveOwners:queue.filter(
+     a=>!a.owner||a.owner.status!=='ACTIVE'
+    ).length
+   },
+   queue
+  };
+ }
+
  // R10_3D20_INTEGRATION_SERVICE
  async reviseHqCorrectiveAction(
   id:string,
@@ -5983,6 +6081,13 @@ export class PosController {
  ){
   return this.pos.transitionHqCorrectiveAction(id,body,u);
  }
+ // R10_3D21_GOVERNANCE_QUEUE_ROUTE
+ @Get('finance/hq-governance-queue')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ hqGovernanceQueueRoute(@CurrentUser() u:Principal){
+  return this.pos.hqGovernanceQueue(u);
+ }
+
  // R10_3D20_INTEGRATION_ROUTES
  @Post('finance/hq-corrective-actions/:id/revise')
  @Roles('SUPER_ADMIN')

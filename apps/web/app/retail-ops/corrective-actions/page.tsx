@@ -55,7 +55,36 @@ export default function CorrectiveActionsPage(){
   setError('');
 
   try{
-   setRows(await request<Action[]>());
+   // R10_3D21_MANAGER_QUEUE
+   const [history,response]=await Promise.all([
+    request<Action[]>(),
+    fetch('/api/v1/pos/finance/hq-governance-queue',{
+     credentials:'same-origin',
+     cache:'no-store'
+    })
+   ]);
+
+   const data=await response.json().catch(()=>({}));
+
+   if(!response.ok){
+    throw new Error(
+     data.message||'Unable to load outstanding work'
+    );
+   }
+
+   const outstanding=data.queue as Action[];
+
+   const completed=history.filter(
+    a=>a.status==='COMPLETED'
+   );
+
+   const merged=new Map<string,Action>();
+
+   for(const action of [...outstanding,...completed]){
+    merged.set(action.id,action);
+   }
+
+   setRows(Array.from(merged.values()));
   }catch(e){
    setError(e instanceof Error?e.message:'Unable to load actions');
   }finally{
@@ -106,6 +135,7 @@ export default function CorrectiveActionsPage(){
  return (
   <main style={{padding:24}}>
    <h1>Corrective Action Workspace</h1>
+   <p><a href="/retail-ops">Back to retail operations</a></p>
    <p>Review assigned corrective work and record completion evidence.</p>
 
    <div style={{
@@ -115,10 +145,10 @@ export default function CorrectiveActionsPage(){
     margin:'20px 0'
    }}>
     {[
-     ['Total actions',rows.length],
+     ['Loaded actions',rows.length],
      ['Outstanding',outstanding.length],
      ['Overdue',overdue.length],
-     ['Completed',rows.length-outstanding.length]
+     ['Loaded completed',rows.length-outstanding.length]
     ].map(([label,value])=>(
      <section className="card" key={label}>
       <div>{label}</div>

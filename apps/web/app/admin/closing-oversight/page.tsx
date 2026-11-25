@@ -8,6 +8,7 @@ import HqNotificationAnalytics from './HqNotificationAnalytics';
 import HqNotificationIntelligence from './HqNotificationIntelligence';
 import HqCorrectiveActions from './HqCorrectiveActions';
 import HqActionIntegration from './HqActionIntegration';
+import HqGovernanceQueue from './HqGovernanceQueue';
 
 type Branch={
  locationId:string;
@@ -340,18 +341,76 @@ export default function ClosingOversight(){
       ))}
      </div>
 
-     {/* R10.3D10B HQ ownership interface */}
-     <HqCorrectiveActions />
-     <HqActionIntegration />
-     <HqNotificationIntelligence />
-     <HqNotificationAnalytics />
-     <HqNotificationGovernance />
-     <HqSlaBreachRegister />
+     {/* R10_3D21_HQ_NAVIGATION */}
+     <nav aria-label="Governance sections"
+      style={{
+       display:'flex',
+       flexWrap:'wrap',
+       gap:16,
+       padding:16,
+       marginBottom:20,
+       border:'1px solid #ddd',
+       borderRadius:8
+      }}>
+      <a href="#governance-command-center">
+       Command center
+      </a>
+      <a href="#action-management">
+       Corrective actions
+      </a>
+      <a href="#escalation-management">
+       Escalations
+      </a>
+      <a href="#sla-register">
+       SLA register
+      </a>
+      <a href="#governance-analytics">
+       Analytics
+      </a>
+      <a href="#closing-reports">
+       Closing reports
+      </a>
+      <a href="/retail-ops/corrective-actions">
+       Manager workspace
+      </a>
+     </nav>
 
-     <HqEscalationAssignments
-      branches={report.branches}
-      dates={report.dates}
-     />
+     <div id="governance-command-center">
+      <HqGovernanceQueue />
+     </div>
+
+     <div id="action-management">
+      <HqCorrectiveActions />
+      <HqActionIntegration />
+     </div>
+
+     <div id="escalation-management">
+      <HqEscalationAssignments
+       branches={report.branches}
+       dates={report.dates}
+      />
+     </div>
+
+     <div id="sla-register">
+      <HqSlaBreachRegister />
+     </div>
+
+     <details id="governance-analytics"
+      style={{margin:'20px 0'}}>
+      <summary style={{
+       cursor:'pointer',
+       fontWeight:600,
+       padding:16
+      }}>
+       Executive intelligence and governance analytics
+      </summary>
+
+      <HqNotificationIntelligence />
+      <HqNotificationAnalytics />
+      <HqNotificationGovernance />
+     </details>
+
+     <div id="closing-reports"/>
      <section className="card" style={{marginBottom:20}}>
       <h2>HQ Priority Exception Queue</h2>
 
