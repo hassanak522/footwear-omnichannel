@@ -2376,6 +2376,81 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    }
   ));
  }
+ // R10_3D23_RECEIPT_LOOKUP
+ async lookupReturnSales(
+  locationId:string,
+  receipt:string,
+  u:Principal
+ ){
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid branch required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const query=(receipt||'').trim().toLowerCase();
+
+  if(query.length<6||query.length>80){
+   throw new BadRequestException(
+    'Enter at least six receipt characters'
+   );
+  }
+
+  const matches=await this.db.$queryRaw<
+   {id:string}[]
+  >`
+   SELECT "id"
+   FROM "PosSale"
+   WHERE "locationId"=${locationId}::uuid
+   AND "status"='ACCEPTED'
+   AND (
+    LEFT(LOWER("id"::text),${query.length})=${query}
+    OR LEFT(LOWER("localSaleId"),${query.length})=${query}
+   )
+   ORDER BY "soldAt" DESC
+   LIMIT 51
+  `;
+
+  if(matches.length>50){
+   throw new BadRequestException(
+    'Too many matches. Enter a longer receipt reference.'
+   );
+  }
+
+  return this.db.posSale.findMany({
+   where:{
+    locationId,
+    status:'ACCEPTED',
+    id:{in:matches.map(row=>row.id)}
+   },
+   orderBy:{soldAt:'desc'},
+   include:{
+    lines:{
+     include:{
+      variant:{
+       select:{
+        sku:true,
+        barcode:true,
+        size:true,
+        color:true
+       }
+      }
+     }
+    },
+    tenders:true
+   }
+  });
+ }
+
 async saleReturnHistory(saleId:string,u:Principal){
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(saleId)){
    throw new BadRequestException('Valid sale UUID required');
@@ -6395,6 +6470,19 @@ export class PosController {
  ){
   return this.pos.recordRefundSettlement(dto,u);
  }
+ // R10_3D23_RECEIPT_LOOKUP_ROUTE
+ @Get('returns/receipt-lookup')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ lookupReturnSales(
+  @Query('locationId') locationId:string,
+  @Query('receipt') receipt:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.lookupReturnSales(
+   locationId,receipt,u
+  );
+ }
+
  @Get('returns/sale/:saleId')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  returnHistory(

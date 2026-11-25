@@ -10,6 +10,12 @@ type ReturnLine = {
   variantId: string;
   quantity: number;
   unitPrice?: string | number;
+  variant?: {
+    sku: string;
+    barcode: string;
+    size: string;
+    color: string;
+  };
 };
 
 type Sale = {
@@ -17,6 +23,8 @@ type Sale = {
   status: string;
   localSaleId?: string;
   syncedAt?: string;
+  soldAt?: string;
+  total?: string | number;
   lines: ReturnLine[];
 };
 
@@ -73,6 +81,29 @@ export default function ReturnsPanel({
   token: string;
   shiftId: string;
 }) {
+  // R10_3D23_RETURN_SEARCH
+  const [receiptSearch,setReceiptSearch]=useState('');
+  const [catalogLabels,setCatalogLabels]=useState<
+   Record<string,string>
+  >({});
+
+  useEffect(()=>{
+   let cancelled=false;
+
+   void window.pos.listCatalog().then(items=>{
+    if(cancelled)return;
+
+    setCatalogLabels(Object.fromEntries(
+     items.map(item=>[
+      item.id,
+      `${item.title} | ${item.sku} | Size ${item.size} | ${item.color}`
+     ])
+    ));
+   }).catch(()=>{});
+
+   return ()=>{cancelled=true;};
+  },[location]);
+
   const [sales, setSales] = useState<Sale[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([]);
@@ -123,7 +154,7 @@ export default function ReturnsPanel({
       !Number.isSafeInteger(Math.round(amount * 100)) ||
       amount <= 0 ||
       Math.round(amount * 100) > Math.round(outstanding * 100) ||
-      Math.round(amount * 100) !== amount * 100
+      Math.abs(Math.round(amount * 100) - amount * 100) > 0.000001
     ) {
       setPayoutMessage(
         'Enter a valid amount within the outstanding refund balance.'
@@ -262,6 +293,57 @@ export default function ReturnsPanel({
     setResult(null);
   }
 
+  async function searchReceipt(){
+   if(busy||key||payoutKey)return;
+
+   if(!token||!location){
+    setMessage('Sign in and select a branch first.');
+    return;
+   }
+
+   if(receiptSearch.trim().length<6){
+    setMessage('Enter at least six receipt characters.');
+    return;
+   }
+
+   setBusy(true);
+   setMessage('');
+
+   try{
+    const data=await request(
+     '/pos/returns/receipt-lookup?locationId='+
+     encodeURIComponent(location)+
+     '&receipt='+
+     encodeURIComponent(receiptSearch.trim())
+    );
+
+    if(!Array.isArray(data)){
+     throw new Error('Invalid receipt lookup response');
+    }
+
+    setSales(data);
+    setSelectedId('');
+    setLines([]);
+    setReason('');
+    setResult(null);
+    resetPayout();
+
+    setMessage(
+     data.length
+      ?`${data.length} matching accepted sale(s).`
+      :'No matching accepted sale in this branch.'
+    );
+   }catch(error){
+    setMessage(
+     error instanceof Error
+      ?error.message
+      :'Receipt search failed'
+    );
+   }finally{
+    setBusy(false);
+   }
+  }
+
   async function loadSales() {
     if (!token || !location) {
       setMessage('Sign in and select a branch first.');
@@ -295,7 +377,7 @@ export default function ReturnsPanel({
   }
 
   function selectSale(id: string) {
-    if (key || busy) return;
+    if (key || busy || payoutBusy || payoutKey) return;
     const sale = sales.find(s => s.id === id);
 
     resetPayout();
@@ -315,7 +397,7 @@ export default function ReturnsPanel({
     variantId: string,
     changes: Partial<DraftLine>
   ) {
-    if (key || busy) return;
+    if (key || busy || payoutBusy || payoutKey) return;
     setLines(current => current.map(line =>
       line.variantId === variantId
         ? { ...line, ...changes }
@@ -371,6 +453,21 @@ export default function ReturnsPanel({
       }
     }
 
+    if(!key&&!window.confirm(
+     'APPROVE MERCHANDISE RETURN\n\n'+
+     'Units: '+selectedLines.reduce(
+      (sum,line)=>sum+line.quantity,0
+     )+'\n'+
+     'Quarantined units: '+selectedLines.filter(
+      line=>line.quarantined
+     ).reduce((sum,line)=>sum+line.quantity,0)+'\n\n'+
+     'This restores inventory and creates a refund obligation. '+
+     'It does not record a physical refund payment.\n\n'+
+     'Confirm approval?'
+    )){
+     return;
+    }
+
     const returnKey = key || crypto.randomUUID();
     setKey(returnKey);
     setBusy(true);
@@ -392,7 +489,9 @@ export default function ReturnsPanel({
         throw new Error('Return confirmation was incomplete');
       }
 
-      setResult(response);
+      // R10_3D23_REFUND_SAFETY
+    setResult(response);
+    setHistoryRevision(value=>value+1);
       setMessage(
         'Return recorded successfully. ' +
         'Arrange the refund payment according to branch policy.'
@@ -407,6 +506,75 @@ export default function ReturnsPanel({
     }
   }
 
+  // R10_3D23_RETURN_DOCUMENT
+  function downloadReturnConfirmation(){
+   if(!result?.id||!selected)return;
+
+   const rows=Array.isArray(result.lines)
+    ?result.lines
+    :[];
+
+   const total=rows.reduce(
+    (sum:number,line:any)=>
+     sum+Math.round(Number(line.refundAmount||0)*100),
+    0
+   )/100;
+
+   const content=[
+    'ROYAL STEP',
+    'MERCHANDISE RETURN CONFIRMATION',
+    '----------------------------------------',
+    'Return ID: '+result.id,
+    'Original sale: '+selected.id,
+    'Original receipt: '+(selected.localSaleId||selected.id),
+    'Branch ID: '+location,
+    'Return recorded: '+(
+     result.createdAt
+      ?new Date(result.createdAt).toLocaleString()
+      :'See central transaction record'
+    ),
+    'Reason: '+reason,
+    '----------------------------------------',
+    ...rows.map((line:any)=>[
+     catalogLabels[line.variantId]||line.variantId,
+     'Quantity: '+line.quantity,
+     'Condition: '+(
+      line.quarantined?'QUARANTINED':'SELLABLE'
+     ),
+     'Refund due: PKR '+Number(
+      line.refundAmount||0
+     ).toFixed(2),
+     '----------------------------------------'
+    ].join('\n')),
+    'TOTAL REFUND DUE: PKR '+total.toFixed(2),
+    '',
+    'This document confirms merchandise return approval.',
+    'It is not proof of refund payment.',
+    'Actual payments are recorded separately.',
+    '',
+    'Thank you for shopping at Royal Step.'
+   ].join('\r\n');
+
+   const url=URL.createObjectURL(
+    new Blob([content],{
+     type:'text/plain;charset=utf-8'
+    })
+   );
+
+   const link=document.createElement('a');
+
+   link.href=url;
+   link.download='Royal-Step-Return-'+result.id+'.txt';
+
+   document.body.appendChild(link);
+   link.click();
+   link.remove();
+
+   window.setTimeout(
+    ()=>URL.revokeObjectURL(url),1000
+   );
+  }
+
   const refundDue = result?.lines?.reduce(
     (sum: number, line: any) =>
       sum + Number(line.refundAmount || 0),
@@ -417,6 +585,43 @@ export default function ReturnsPanel({
     <section className="panel">
       <h2>Sales returns and refund review</h2>
 
+      <div style={{
+       display:'flex',
+       flexWrap:'wrap',
+       gap:8,
+       margin:'12px 0'
+      }}>
+       <input
+        value={receiptSearch}
+        disabled={busy||!!key||!!payoutKey}
+        onChange={e=>setReceiptSearch(e.target.value)}
+        placeholder="Original receipt or sale ID"
+        onKeyDown={e=>{
+         if(e.key==='Enter'){
+          e.preventDefault();
+          void searchReceipt();
+         }
+        }}
+       />
+
+       <button
+        className="secondary"
+        disabled={
+         busy||!!key||!!payoutKey||
+         !token||!location||
+         receiptSearch.trim().length<6
+        }
+        onClick={()=>void searchReceipt()}
+       >
+        Find original receipt
+       </button>
+      </div>
+
+      <p className="hint">
+       Historical receipt lookup searches accepted
+       transactions in the selected branch.
+      </p>
+
       <p>
         Manager authorization is required. Returns must be
         submitted online. Refund payments are handled separately.
@@ -424,7 +629,7 @@ export default function ReturnsPanel({
 
       <button
         className="secondary"
-        disabled={busy || !!key || !token || !location}
+        disabled={busy || !!key || payoutBusy || !!payoutKey || !token || !location}
         onClick={() => void loadSales()}
       >
         Load branch sales
@@ -434,15 +639,20 @@ export default function ReturnsPanel({
         Original accepted sale
         <select
           value={selectedId}
-          disabled={busy || !!key}
+          disabled={busy || !!key || payoutBusy || !!payoutKey}
           onChange={e => selectSale(e.target.value)}
         >
           <option value="">Select sale</option>
           {sales.map(sale => (
             <option key={sale.id} value={sale.id}>
-              {sale.id.slice(0, 12)}
+              {sale.localSaleId||sale.id}
               {' — '}
-              {sale.syncedAt || 'Accepted'}
+              {sale.soldAt||sale.syncedAt
+ ?new Date(sale.soldAt||sale.syncedAt||'').toLocaleString()
+ :'Accepted'}
+{sale.total!=null
+ ?' | Rs. '+Number(sale.total).toFixed(2)
+ :''}
             </option>
           ))}
         </select>
@@ -546,7 +756,7 @@ export default function ReturnsPanel({
             Approved return
             <select
               value={payoutReturnId}
-              disabled={payoutBusy}
+              disabled={payoutBusy || !!payoutKey}
               onChange={e => {
                 setPayoutReturnId(e.target.value);
                 const ret = summary.returns.find(
@@ -672,6 +882,66 @@ export default function ReturnsPanel({
         <>
           <h3>Items to return</h3>
 
+          {/* R10_3D23_RETURN_SELECTION */}
+          <div style={{
+           display:'flex',
+           flexWrap:'wrap',
+           gap:8,
+           margin:'12px 0'
+          }}>
+           <button
+            className="secondary"
+            disabled={busy||!!key||!summary||summaryLoading}
+            onClick={()=>{
+             if(!summary||key||busy)return;
+
+             setLines(current=>current.map(line=>({
+              ...line,
+              quantity:summary.lines.find(
+               item=>item.variantId===line.variantId
+              )?.remainingQuantity||0
+             })));
+            }}
+           >
+            Return all remaining items
+           </button>
+
+           <button
+            className="secondary"
+            disabled={busy||!!key}
+            onClick={()=>{
+             if(key||busy)return;
+
+             setLines(current=>current.map(line=>({
+              ...line,
+              quantity:0
+             })));
+            }}
+           >
+            Clear quantities
+           </button>
+          </div>
+
+          <p>
+           Selected units:
+           {' '}
+           <strong>
+            {lines.reduce((sum,line)=>sum+line.quantity,0)}
+           </strong>
+          </p>
+
+          <p className="hint">
+           Inspect every item before approval.
+           Select quarantine for damaged or otherwise
+           non-sellable merchandise.
+           Quarantined units must not be sold.
+          </p>
+
+          <p className="hint">
+           The server calculates the actual refund from
+           the original sale and discount allocations.
+          </p>
+
           <div className="tablewrap">
             <table>
               <thead>
@@ -681,7 +951,7 @@ export default function ReturnsPanel({
                   <th>Previously returned</th>
                   <th>Remaining</th>
                   <th>Return qty</th>
-                  <th>Quarantine</th>
+                  <th>Damaged / quarantine</th>
                 </tr>
               </thead>
               <tbody>
@@ -700,7 +970,9 @@ export default function ReturnsPanel({
 
                   return (
                     <tr key={sold.variantId}>
-                      <td>{sold.variantId.slice(0, 12)}</td>
+                      <td>{sold.variant
+ ?`${sold.variant.sku} | Size ${sold.variant.size} | ${sold.variant.color}`
+ :catalogLabels[sold.variantId]||sold.variantId}</td>
                       <td>{sold.quantity}</td>
                       <td>{balance?.returnedQuantity ?? '—'}</td>
                       <td>{summary ? remaining : '—'}</td>
@@ -712,7 +984,7 @@ export default function ReturnsPanel({
                           max={remaining}
                           step={1}
                           value={draft?.quantity || 0}
-                          disabled={busy || !!key}
+                          disabled={busy || !!key || payoutBusy || !!payoutKey}
                           onChange={e => {
                             const value = Number(e.target.value);
 
@@ -733,7 +1005,7 @@ export default function ReturnsPanel({
                         <input
                           type="checkbox"
                           checked={draft?.quarantined || false}
-                          disabled={busy || !!key}
+                          disabled={busy || !!key || payoutBusy || !!payoutKey}
                           onChange={e =>
                             updateLine(sold.variantId, {
                               quarantined: e.target.checked
@@ -753,9 +1025,9 @@ export default function ReturnsPanel({
             <textarea
               value={reason}
               maxLength={500}
-              disabled={busy || !!key}
+              disabled={busy || !!key || payoutBusy || !!payoutKey}
               onChange={e => {
-                if (key || busy) return;
+                if (key || busy || payoutBusy || payoutKey) return;
                 setReason(e.target.value);
                 invalidateDraft();
               }}
@@ -775,6 +1047,13 @@ export default function ReturnsPanel({
       {result && (
         <div>
           <h3>Return confirmation</h3>
+
+          <button
+           className="secondary"
+           onClick={downloadReturnConfirmation}
+          >
+           Download return confirmation
+          </button>
           <p>Return ID: {result.id}</p>
           {Number.isFinite(refundDue) && (
             <p>
@@ -788,6 +1067,14 @@ export default function ReturnsPanel({
           <button
             className="secondary"
             onClick={() => {
+              if(payoutBusy||payoutKey){
+               setMessage(
+                'Reconcile the existing refund payment first.'
+               );
+               return;
+              }
+
+              resetPayout();
               setSelectedId('');
               setLines([]);
               setReason('');
