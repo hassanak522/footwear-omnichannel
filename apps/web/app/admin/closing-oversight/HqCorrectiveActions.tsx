@@ -59,6 +59,14 @@ async function request<T>(path:string,body?:unknown):Promise<T>{
 
 // R10_3D19_ACTION_UI
 export default function HqCorrectiveActions(){
+ // R10_3D20_ESCALATION_SELECTOR
+ const [escalations,setEscalations]=useState<{
+  id:string;
+  locationId:string;
+  closingDate:string;
+  status:string;
+  priority:string;
+ }[]>([]);
  const [rows,setRows]=useState<Action[]>([]);
  const [owners,setOwners]=useState<Owner[]>([]);
  const [branches,setBranches]=useState<Branch[]>([]);
@@ -82,6 +90,15 @@ export default function HqCorrectiveActions(){
     request<Branch[]>('/hq-corrective-action-branches')
    ]);
 
+   const linked=await request<{
+    id:string;
+    locationId:string;
+    closingDate:string;
+    status:string;
+    priority:string;
+   }[]>('/hq-escalation-action-summary');
+
+   setEscalations(linked);
    setRows(actions);
    setOwners(eligible);
    setBranches(locations);
@@ -182,6 +199,7 @@ export default function HqCorrectiveActions(){
       onChange={e=>{
        setLocationId(e.target.value);
        setOwnerId('');
+       setEscalationId('');
       }}>
       <option value="">Select branch</option>
       {branches.map(b=>(
@@ -229,9 +247,18 @@ export default function HqCorrectiveActions(){
     </label>
 
     <label>
-     Related escalation UUID (optional)
-     <input value={escalationId}
-      onChange={e=>setEscalationId(e.target.value)}/>
+     Related escalation (optional)
+     <select value={escalationId}
+      onChange={e=>setEscalationId(e.target.value)}>
+      <option value="">Independent corrective action</option>
+      {escalations.filter(e=>
+       e.locationId===locationId&&e.status!=='RESOLVED'
+      ).map(e=>(
+       <option key={e.id} value={e.id}>
+        {e.closingDate.slice(0,10)} — {e.priority} — {e.status}
+       </option>
+      ))}
+     </select>
     </label>
    </div>
 
