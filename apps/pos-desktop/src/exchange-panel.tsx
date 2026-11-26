@@ -281,7 +281,7 @@ export default function ExchangePanel(props:Props){
   if(!window.confirm(
    'Prepare this exchange for processing? '+
    'Do not collect additional payment until the transaction '+
-   'has been saved locally and registered centrally.'
+   'has received exclusive central collection authorization.'
   ))return;
 
   active.current=true;
@@ -323,6 +323,7 @@ export default function ExchangePanel(props:Props){
    if(
     !registration||
     registration.id!==attempt.id||
+    registration.duplicate!==false||
     registration.status!=='REGISTERED'||
     registration.paymentState!==(
      amountCents>0?'UNCONFIRMED':'NO_PAYMENT_REQUIRED'
@@ -341,6 +342,48 @@ export default function ExchangePanel(props:Props){
     undefined,
     'Awaiting payment confirmation and central acceptance'
    );
+
+   // R10_3D24C_DESKTOP_COLLECTION_GATE
+   if(amountCents>0){
+
+    if(!window.confirm(
+     'Request exclusive permission to collect '+
+     currency(additional)+'? No payment should have been collected yet.'
+    )){
+     setMessage(
+      'Exchange retained without payment collection authorization.'
+     );
+     return;
+    }
+
+    const authorization=await request(
+     '/pos/exchanges/'+encodeURIComponent(attempt.id)+
+     '/authorize-payment',
+     'POST'
+    );
+
+    if(
+     !authorization||
+     authorization.id!==attempt.id||
+     authorization.status!=='REGISTERED'||
+     authorization.paymentState!=='UNCONFIRMED'||
+     authorization.paymentAuthorized!==true||
+     authorization.duplicate!==false
+    ){
+     throw Error(
+      'Exclusive payment authorization not verified. '+
+      'Do not collect payment.'
+     );
+    }
+
+    window.alert(
+     'ONE-TIME COLLECTION AUTHORIZED\n\n'+
+     'Collect '+currency(additional)+' using '+method+
+     ' exactly once.\n\n'+
+     'If payment fails or its outcome is uncertain, stop and '+
+     'request manager reconciliation. Do not collect again.'
+    );
+   }
 
    const instruction=amountCents>0
     ?'Confirm additional payment of '+currency(additional)+

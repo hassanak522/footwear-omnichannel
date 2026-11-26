@@ -1,3 +1,5 @@
+import PaymentInvestigation from './payment-investigation';
+import CentralExchangeRecovery from './central-exchange-recovery';
 import {useEffect,useRef,useState} from 'react';
 
 type RequestFn=(
@@ -38,6 +40,8 @@ const [attempts,setAttempts]=useState<Attempt[]>([]);
  }
 
  useEffect(()=>{
+  setCentralStates({});
+  setMessage('');
   void refresh();
 
   const timer=setInterval(()=>{
@@ -66,11 +70,42 @@ const [attempts,setAttempts]=useState<Attempt[]>([]);
    throw Error('Central transaction identity mismatch');
   }
 
+  // R10_3D24C_LOCAL_EXCHANGE_INVESTIGATION
+
   if(
    result.status!=='NOT_FOUND'&&
-   result.locationId!==location
+   (
+    result.found!==true||
+    result.locationId!==location||
+    result.deviceId!==payload.deviceId||
+    result.shiftId!==payload.shiftId||
+    result.originalSaleId!==payload.originalSaleId
+   )
   ){
-   throw Error('Central branch identity mismatch');
+   throw Error('Central exchange identity mismatch');
+  }
+
+  if(
+   result.status==='ACCEPTED'&&
+   (
+    result.integrityVerified!==true||
+    result.centralAttemptVerified!==true
+   )
+  ){
+   throw Error('Central exchange acceptance is not verified');
+  }
+
+  if(
+   result.status==='RESOLVED_NO_EXCHANGE'&&
+   (
+    !['REVERSED','NOT_COLLECTED','NO_PAYMENT_REQUIRED']
+     .includes(result.paymentState)||
+    !result.resolvedById||
+    !result.resolvedAt||
+    !result.resolutionReason
+   )
+  ){
+   throw Error('Central exchange resolution is not verified');
   }
 
   setCentralStates(current=>({
@@ -123,6 +158,26 @@ const [attempts,setAttempts]=useState<Attempt[]>([]);
    }
 
    const base='/pos/exchanges/'+encodeURIComponent(attempt.id);
+    // R10_3D24C_CENTRAL_RECOVERY_INTEGRATION
+    if(
+     action!=='CHECK'&&
+     central.status!=='NOT_FOUND'&&
+     central.reversalStatus!=='NONE'
+    ){
+     throw Error(
+      'Exchange is reserved for HQ reversal reconciliation'
+     );
+    }
+
+    if(
+     action==='RESOLVE'&&
+     central.paymentState!=='NO_PAYMENT_REQUIRED'
+    ){
+     throw Error(
+      'Payment-bearing exchange requires the controlled HQ reconciliation workflow'
+     );
+    }
+
 
    if(action==='REGISTER'){
 
@@ -142,7 +197,15 @@ const [attempts,setAttempts]=useState<Attempt[]>([]);
     );
    }
 
+   // R10_3D24C_LOCAL_COLLECTION_PERMISSION
    if(action==='CONFIRM'){
+
+    if(central.canConfirmCollection!==true){
+     throw Error(
+      'Original payment operator permission is unavailable. '+
+      'Use independent payment investigation.'
+     );
+    }
 
     if(
      !['REGISTERED','UNKNOWN'].includes(central.status)||
@@ -185,76 +248,38 @@ const [attempts,setAttempts]=useState<Attempt[]>([]);
     await request(base+'/resume','POST');
    }
 
+   // R10_3D24C_ZERO_PAYMENT_RESOLUTION_ONLY
    if(action==='RESOLVE'){
 
-    if(!['REGISTERED','UNKNOWN'].includes(central.status)){
-     throw Error('Central registration required before resolution');
-    }
-
-    let paymentState:string;
-
-    if(central.paymentState==='NO_PAYMENT_REQUIRED'){
-     paymentState='NO_PAYMENT_REQUIRED';
-    }else{
-
-     const answer=window.prompt(
-      'HQ authorization required. Enter NOT_COLLECTED or REVERSED '+
-      'after independently verifying the physical payment outcome.'
-     );
-
-     if(answer===null)return;
-
-     paymentState=answer.trim().toUpperCase();
-
-     if(!['NOT_COLLECTED','REVERSED'].includes(paymentState)){
-      throw Error('Invalid resolution payment state');
-     }
-    }
-
     if(
-     central.paymentState==='CONFIRMED'&&
-     paymentState!=='REVERSED'
+     !['REGISTERED','UNKNOWN'].includes(central.status)||
+     central.paymentState!=='NO_PAYMENT_REQUIRED'||
+     central.reversalStatus!=='NONE'
     ){
-     throw Error('Confirmed payment must be reversed');
+     throw Error(
+      'Only verified zero-payment exchanges may be resolved here'
+     );
     }
 
     const reason=window.prompt(
-     'Enter a detailed resolution reason (10-500 characters).'
-    );
+     'Enter the detailed zero-payment cancellation reason.'
+    )?.trim();
 
-    if(reason===null)return;
+    if(reason===undefined)return;
 
-    if(reason.trim().length<10||reason.trim().length>500){
-     throw Error('Detailed resolution reason required');
-    }
-
-    let evidenceReference:string|undefined;
-
-    if(paymentState==='REVERSED'){
-
-     const evidence=window.prompt(
-      'Enter the completed payment reversal evidence reference.'
-     );
-
-     if(evidence===null)return;
-
-     if(evidence.trim().length<5||evidence.trim().length>200){
-      throw Error('Valid reversal evidence required');
-     }
-
-     evidenceReference=evidence.trim();
+    if(reason.length<10||reason.length>500){
+     throw Error('Reason must contain 10-500 characters');
     }
 
     if(!window.confirm(
-     'Resolve without completing the exchange? '+
-     'Confirm that merchandise and payment have been reconciled. '+
-     'This action is permanently audited.'
+     'Cancel the original exchange without completion? '+
+     'Confirm no additional payment was collected and '+
+     'no replacement merchandise was released.'
     ))return;
 
     await request(base+'/resolve','POST',{
-     paymentState,
-     reason:reason.trim(),
-     evidenceReference
+     paymentState:'NO_PAYMENT_REQUIRED',
+     reason
     });
    }
 
@@ -381,7 +406,13 @@ function downloadReceipt(attempt:Attempt){
 
  return (
   <section className="panel">
-   <h3>Exchange transaction history and recovery</h3>
+
+    <CentralExchangeRecovery
+     request={request}
+     token={token}
+     location={location}
+    />
+<h3>Exchange transaction history and recovery</h3>
 
    {unresolved.length>0&&(
     <p role="alert">
@@ -435,6 +466,50 @@ function downloadReceipt(attempt:Attempt){
            </p>
           )}
 
+          {!['ACCEPTED','RESOLVED_NO_EXCHANGE'].includes(attempt.status)&&
+           ['REGISTERED','UNKNOWN'].includes(
+            centralStates[attempt.id]?.status
+           )&&
+           centralStates[attempt.id]?.paymentState==='UNCONFIRMED'&&
+           centralStates[attempt.id]?.reversalStatus==='NONE'&&
+           centralStates[attempt.id]?.deviceId&&
+           centralStates[attempt.id]?.shiftId&&(
+            <PaymentInvestigation
+             key={attempt.id+':collection'}
+             request={request}
+             token={token}
+             attemptId={attempt.id}
+             locationId={location}
+             deviceId={centralStates[attempt.id].deviceId}
+             shiftId={centralStates[attempt.id].shiftId}
+             kind="EXCHANGE_COLLECTION"
+             disabled={busy||!token}
+             onChanged={()=>perform(attempt,'CHECK')}
+            />
+          )}
+
+          {!['ACCEPTED','RESOLVED_NO_EXCHANGE'].includes(attempt.status)&&
+           ['REGISTERED','UNKNOWN'].includes(
+            centralStates[attempt.id]?.status
+           )&&
+           centralStates[attempt.id]?.paymentState==='CONFIRMED'&&
+           centralStates[attempt.id]?.reversalStatus==='AUTHORIZED'&&
+           centralStates[attempt.id]?.deviceId&&
+           centralStates[attempt.id]?.shiftId&&(
+            <PaymentInvestigation
+             key={attempt.id+':reversal'}
+             request={request}
+             token={token}
+             attemptId={attempt.id}
+             locationId={location}
+             deviceId={centralStates[attempt.id].deviceId}
+             shiftId={centralStates[attempt.id].shiftId}
+             kind="EXCHANGE_REVERSAL"
+             disabled={busy||!token}
+             onChanged={()=>perform(attempt,'CHECK')}
+            />
+          )}
+
           {!['ACCEPTED','RESOLVED_NO_EXCHANGE'].includes(attempt.status)&&(
            <>
             {centralStates[attempt.id]?.status==='NOT_FOUND'&&(
@@ -447,11 +522,13 @@ function downloadReceipt(attempt:Attempt){
              </button>
             )}
 
-            {['REGISTERED','UNKNOWN'].includes(
-             centralStates[attempt.id]?.status
-            )&&(
+            {centralStates[attempt.id]?.reversalStatus==='NONE'&&
+             ['REGISTERED','UNKNOWN'].includes(
+              centralStates[attempt.id]?.status
+             )&&(
              <>
-              {centralStates[attempt.id]?.paymentState==='UNCONFIRMED'&&(
+              {centralStates[attempt.id]?.paymentState==='UNCONFIRMED'&&
+               centralStates[attempt.id]?.canConfirmCollection===true&&(
                <button
                 className="secondary"
                 disabled={busy||!token}
@@ -473,13 +550,13 @@ function downloadReceipt(attempt:Attempt){
                </button>
               )}
 
-              <button
+              {centralStates[attempt.id]?.paymentState==='NO_PAYMENT_REQUIRED'&&(<button
                className="secondary"
                disabled={busy||!token}
                onClick={()=>void perform(attempt,'RESOLVE')}
               >
                HQ: Resolve without exchange
-              </button>
+              </button>)}
              </>
             )}
            </>

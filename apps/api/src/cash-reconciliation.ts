@@ -59,8 +59,61 @@ export class CashReconciliationController {
   if(rec.status!=='SUBMITTED')throw new ConflictException('Already reviewed');
   if(d.status!=='APPROVED'&&d.status!=='DISPUTED')throw new BadRequestException('Review must APPROVE or DISPUTE');
   if(!d.note.trim())throw new BadRequestException('Review note required');
-  const result=await this.db.cashReconciliation.updateMany({where:{id,status:'SUBMITTED'},data:{status:d.status,reviewedById:u.id,reviewedAt:new Date(),reviewNote:d.note.trim()}});
-  if(result.count!==1)throw new ConflictException('Reconciliation changed; reload');
-  return this.db.cashReconciliation.findUniqueOrThrow({where:{id}});
+  // R10_3D24A_INDEPENDENT_REVIEW
+  if(rec.submittedById===u.id){
+   throw new ForbiddenException(
+    'Reconciliation submitter cannot review their own submission'
+   );
+  }
+
+  return this.db.$transaction(async tx=>{
+
+   const result=await tx.cashReconciliation.updateMany({
+    where:{
+     id,
+     status:'SUBMITTED'
+    },
+    data:{
+     status:d.status,
+     reviewedById:u.id,
+     reviewedAt:new Date(),
+     reviewNote:d.note.trim()
+    }
+   });
+
+   if(result.count!==1){
+    throw new ConflictException(
+     'Reconciliation changed; reload'
+    );
+   }
+
+   const reviewed=await tx.cashReconciliation.findUniqueOrThrow({
+    where:{id}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'CASH_RECONCILIATION_REVIEWED',
+     entityType:'CashReconciliation',
+     entityId:id,
+     before:{
+      status:rec.status
+     },
+     after:{
+      status:reviewed.status,
+      shiftId:reviewed.shiftId,
+      locationId:reviewed.locationId,
+      submittedById:reviewed.submittedById,
+      reviewedById:u.id,
+      variance:reviewed.variance.toString(),
+      reviewNote:d.note.trim()
+     }
+    }
+   });
+
+   return reviewed;
+
+  });
  }
 }

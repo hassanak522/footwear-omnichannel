@@ -1,3 +1,6 @@
+import CentralRefundRecovery from './central-refund-recovery';
+import {executeCentralRefund} from './refund-payment';
+import RefundRecovery from './refund-recovery';
 import ExchangeRecovery from './exchange-recovery';
 import ExchangePanel from './exchange-panel';
 import { useEffect, useState } from 'react';
@@ -148,99 +151,99 @@ export default function ReturnsPanel({
     setPayoutMessage('');
   }
 
-  async function recordPayout() {
-    if (payoutBusy || !selectedPayoutReturn) return;
+  // R10_3D24C_DURABLE_PAYOUT
+  // R10_3D24C_AUTHORIZED_DESKTOP_PAYOUT
+  async function recordPayout(){
 
-    const amount = Number(payoutAmount);
-    const outstanding =
-      Number(selectedPayoutReturn.refundOutstanding);
+   if(
+    payoutBusy||
+    payoutKey||
+    !selectedPayoutReturn
+   )return;
 
-    if (
-      !Number.isFinite(amount) ||
-      !Number.isSafeInteger(Math.round(amount * 100)) ||
-      amount <= 0 ||
-      Math.round(amount * 100) > Math.round(outstanding * 100) ||
-      Math.abs(Math.round(amount * 100) - amount * 100) > 0.000001
-    ) {
-      setPayoutMessage(
-        'Enter a valid amount within the outstanding refund balance.'
-      );
-      return;
+   const amount=Number(payoutAmount);
+   const cents=Math.round(amount*100);
+
+   if(
+    !Number.isFinite(amount)||
+    !Number.isSafeInteger(cents)||
+    cents<=0||
+    cents>999999999999||
+    Math.abs(amount*100-cents)>0.000001||
+    cents>Math.round(
+     Number(selectedPayoutReturn.refundOutstanding)*100
+    )
+   ){
+    setPayoutMessage('Enter a valid outstanding refund amount.');
+    return;
+   }
+
+   const reference=payoutReference.trim();
+
+   if(
+    payoutMethod!=='CASH'&&
+    !reference
+   ){
+    setPayoutMessage(
+     'A non-cash payment reference is required.'
+    );
+    return;
+   }
+
+   if(reference.length>200){
+    setPayoutMessage('Payment reference is too long.');
+    return;
+   }
+
+   setPayoutBusy(true);
+
+   try{
+
+    const shiftId=await window.pos.getConfig('shiftId');
+
+    if(!shiftId){
+     throw new Error(
+      'An active terminal shift is required for every refund.'
+     );
     }
 
-    if (payoutMethod === 'CASH' && !shiftId) {
-      setPayoutMessage(
-        'Open a cashier shift before recording a cash payout.'
-      );
-      return;
-    }
+    const result=await executeCentralRefund(
+     request,
+     location,
+     {
+      returnId:selectedPayoutReturn.id,
+      method:payoutMethod,
+      amount:cents/100,
+      ...(payoutMethod==='CASH'
+       ?{payoutShiftId:shiftId}:{}
+      ),
+      ...(reference?{reference}:{})
+     },
+     key=>setPayoutKey(key)
+    );
 
-    if (
-      payoutMethod !== 'CASH' &&
-      !payoutReference.trim()
-    ) {
-      setPayoutMessage(
-        'Card and other payouts require a payment reference.'
-      );
-      return;
-    }
+    resetPayout();
 
-    if (
-      !window.confirm(
-        'Confirm the refund was actually paid? ' +
-        'This records a financial settlement and cannot be undone here.'
-      )
-    ) return;
+    setHistoryRevision(value=>value+1);
 
-    const identity = payoutKey || crypto.randomUUID();
-    setPayoutKey(identity);
-    setPayoutBusy(true);
-    setPayoutMessage('');
+    setPayoutMessage(
+     `Refund ${result.amount} successfully settled and verified.`
+    );
 
-    try {
-      const response = await request(
-        '/pos/returns/settlements',
-        'POST',
-        {
-          returnId: selectedPayoutReturn.id,
-          idempotencyKey: identity,
-          method: payoutMethod,
-          amount,
-          ...(payoutMethod === 'CASH'
-            ? { payoutShiftId: shiftId }
-            : {}),
-          ...(payoutReference.trim()
-            ? { reference: payoutReference.trim() }
-            : {})
-        }
-      );
+   }catch(error:any){
 
-      if (!response?.id) {
-        throw new Error('Settlement confirmation was incomplete');
-      }
+    setPayoutMessage(
+     `${error?.message||'Refund processing interrupted'}. `+
+     'Use refund recovery before attempting another payout.'
+    );
 
-      setPayoutMessage(
-        response.duplicate
-          ? 'Existing settlement confirmation retrieved.'
-          : 'Refund settlement recorded. Refreshing history.'
-      );
+   }finally{
 
-      setPayoutKey('');
-      setPayoutAmount('');
-      setPayoutReference('');
-      setPayoutReturnId('');
-      setHistoryRevision(value => value + 1);
+    setPayoutBusy(false);
 
-    } catch (error: any) {
-      setPayoutMessage(
-        (error.message || 'Unable to record settlement') +
-        ' Do not repeat the physical payout. Retry using the ' +
-        'same settlement details or reconcile with HQ.'
-      );
-    } finally {
-      setPayoutBusy(false);
-    }
+   }
   }
+
   const selected = sales.find(s => s.id === selectedId);
 
   useEffect(() => {
@@ -300,7 +303,7 @@ export default function ReturnsPanel({
   }
 
   async function searchReceipt(){
-   if(busy||key||payoutKey)return;
+   if(busy||key||payoutKey||payoutBusy)return;
 
    if(!token||!location){
     setMessage('Sign in and select a branch first.');
@@ -414,7 +417,7 @@ export default function ReturnsPanel({
   }
 
   async function submitReturn() {
-    if(exchangeMode)return;
+    if(exchangeMode||payoutBusy||payoutKey)return;
         if (busy) return;
 
     if (!summary || summaryLoading || summaryError) {
@@ -774,9 +777,9 @@ export default function ReturnsPanel({
         <div className="panel">
           <h3>Record refund payment</h3>
           <p className="hint">
-            Manager-only operation. Record payment only after
-            cash has been handed over or the external refund
-            has actually been completed.
+            Manager-only operation. Prepare the refund before
+            handing over cash or completing the external refund.
+            Follow the payment confirmation instructions.
           </p>
 
           <label>
@@ -840,7 +843,7 @@ export default function ReturnsPanel({
               </label>
 
               <label>
-                Amount paid (PKR)
+                Refund amount to authorize (PKR)
                 <input
                   type="number"
                   min="0.01"
@@ -887,15 +890,15 @@ export default function ReturnsPanel({
                 disabled={
                   payoutBusy ||
                   !payoutAmount ||
-                  (payoutMethod === 'CASH' && !shiftId) ||
+                  !!payoutKey || !shiftId || !deviceId ||
                   (payoutMethod !== 'CASH' &&
                     !payoutReference.trim())
                 }
                 onClick={() => void recordPayout()}
               >
                 {payoutBusy
-                  ? 'Recording settlement...'
-                  : 'Confirm payment already made'}
+                  ? 'Processing authorized refund...'
+                  : 'Prepare refund payment'}
               </button>
             </>
           )}
@@ -1139,7 +1142,30 @@ export default function ReturnsPanel({
         />
       )}
 
-      {/* R10_3D23B_RECOVERY_PANEL */}
+      {/* R10_3D24C_REFUND_RECOVERY_PANEL */}
+      {/* R10_3D24C_CENTRAL_RECOVERY_PANEL */}
+<CentralRefundRecovery
+ request={request}
+ token={token}
+ location={location}
+ payoutBusy={payoutBusy}
+ onCompleted={()=>{
+  resetPayout();
+  setHistoryRevision(value=>value+1);
+ }}
+/>
+<RefundRecovery
+       payoutBusy={payoutBusy}
+       request={request}
+       token={token}
+       location={location}
+       onCompleted={()=>{
+        resetPayout();
+        setHistoryRevision(value=>value+1);
+       }}
+      />
+
+{/* R10_3D23B_RECOVERY_PANEL */}
       <ExchangeRecovery
        request={request}
        token={token}

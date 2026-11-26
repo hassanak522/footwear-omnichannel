@@ -22,14 +22,106 @@ function money(n:number){return new Prisma.Decimal(n.toFixed(2));}
 export class DrawerMovementController {
  constructor(private readonly db:Db){}
  @Post() @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ // R10_3D24B_DRAWER_CREATION
  async create(@Body() d:MovementDto,@CurrentUser() u:Principal){
-  if(!d.reason.trim())throw new BadRequestException('Reason required');
-  const shift=await this.db.posShift.findUniqueOrThrow({where:{id:d.shiftId}});
-  assertLocation(u,shift.locationId);
-  if(shift.status!=='OPEN')throw new ConflictException('Movements require an open shift');
-  if(!u.roles.includes('SUPER_ADMIN')&&!u.roles.includes('BRANCH_MANAGER')&&shift.cashierId!==u.id)throw new ForbiddenException('Not your shift');
-  return this.db.drawerMovement.create({data:{locationId:shift.locationId,shiftId:shift.id,type:d.type,amount:money(d.amount),reason:d.reason.trim(),externalReference:d.externalReference?.trim()||null,createdById:u.id}});
+
+  const amountCents=Math.round(d.amount*100);
+  const reason=d.reason.trim();
+  const reference=d.externalReference?.trim()||null;
+
+  if(reason.length<3){
+   throw new BadRequestException('Detailed movement reason required');
+  }
+
+  if(
+   !Number.isFinite(d.amount)||
+   !Number.isSafeInteger(amountCents)||
+   amountCents<=0||
+   amountCents>999999999999||
+   Math.abs(d.amount*100-amountCents)>0.000001
+  ){
+   throw new BadRequestException('Invalid drawer movement amount');
+  }
+
+  if(d.type==='CASH_REFUND'){
+   throw new BadRequestException(
+    'Customer refunds must use the dedicated refund settlement workflow'
+   );
+  }
+
+  if(reference&&/^POS_REFUND:|^POS_RETURN:/i.test(reference)){
+   throw new BadRequestException(
+    'Reserved refund reference'
+   );
+  }
+
+  return this.db.$transaction(async tx=>{
+
+   await tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+     hashtext(${`pos-shift-id:${d.shiftId}`})
+    )
+   `;
+
+   const shift=await tx.posShift.findUniqueOrThrow({
+    where:{id:d.shiftId}
+   });
+
+   assertLocation(u,shift.locationId);
+
+   if(shift.status!=='OPEN'){
+    throw new ConflictException(
+     'Movements require an open shift'
+    );
+   }
+
+   if(
+    !u.roles.includes('SUPER_ADMIN')&&
+    !u.roles.includes('BRANCH_MANAGER')&&
+    shift.cashierId!==u.id
+   ){
+    throw new ForbiddenException('Not your shift');
+   }
+
+   const movement=await tx.drawerMovement.create({
+    data:{
+     locationId:shift.locationId,
+     shiftId:shift.id,
+     type:d.type,
+     amount:money(d.amount),
+     reason,
+     externalReference:reference,
+     status:'PENDING',
+     createdById:u.id
+    }
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'DRAWER_MOVEMENT_CREATED',
+     entityType:'DrawerMovement',
+     entityId:movement.id,
+     after:{
+      shiftId:shift.id,
+      locationId:shift.locationId,
+      type:movement.type,
+      amount:movement.amount.toString(),
+      status:movement.status,
+      reason,
+      externalReference:reference
+     }
+    }
+   });
+
+   return movement;
+
+  },{
+   isolationLevel:Prisma.TransactionIsolationLevel.ReadCommitted,
+   timeout:15000
+  });
  }
+
  @Get() @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
  async list(@Query('locationId') locationId:string,@Query('shiftId') shiftId:string|undefined,@CurrentUser() u:Principal){
   if(!locationId)throw new BadRequestException('locationId required');assertLocation(u,locationId);
@@ -85,7 +177,38 @@ async review(
       );
     }
 
-    const updated=await tx.drawerMovement.updateMany({
+    // R10_3D24B_INDEPENDENT_APPROVAL
+    if(movement.createdById===u.id){
+     throw new ForbiddenException(
+      'Movement creator cannot review their own request'
+     );
+    }
+
+    if(movement.status!=='PENDING'){
+     throw new ConflictException(
+      'Only pending movements can be reviewed'
+     );
+    }
+
+    if(
+     d.status==='APPROVED'&&
+     movement.type==='CASH_REFUND'
+    ){
+     throw new ConflictException(
+      'Manual refund approval is disabled; use refund settlement'
+     );
+    }
+
+    if(
+     !movement.amount.isPositive()||
+     !movement.amount.isFinite()
+    ){
+     throw new ConflictException(
+      'Invalid movement amount'
+     );
+    }
+
+const updated=await tx.drawerMovement.updateMany({
       where:{id,status:'PENDING'},
       data:{
         status:d.status,

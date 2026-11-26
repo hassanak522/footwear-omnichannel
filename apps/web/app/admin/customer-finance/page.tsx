@@ -1,6 +1,8 @@
 "use client";
 
 import {useState} from "react";
+import RefundReconciliation from "./refund-reconciliation";
+import ExchangeReconciliation from "./exchange-reconciliation";
 
 const BASE="/api/v1";
 
@@ -582,7 +584,11 @@ export default function CustomerFinance(){
       )}
      </section>
 
-     <section style={panel}>
+     {/* R10_3D24C_HQ_RECONCILIATION_PANEL */}
+<RefundReconciliation call={call}/>
+{/* R10_3D24C_HQ_EXCHANGE_PANEL */}
+<ExchangeReconciliation call={call}/>
+<section style={panel}>
       <h2 style={{color:"#104c72"}}>
        Draft Promotions
       </h2>

@@ -87,6 +87,30 @@ class RecordPosRefundSettlementDto {
  @IsOptional() @IsString() @MaxLength(200)
  reference?:string;
 }
+// R10_3D24C_REFUND_REGISTRATION_CONTRACT
+class RegisterPosRefundDto extends RecordPosRefundSettlementDto {
+ @IsUUID()
+ deviceId!:string;
+
+ @IsUUID()
+ locationId!:string;
+
+ @IsUUID()
+ shiftId!:string;
+}
+
+class ResolvePosRefundDto {
+ @IsString()
+ @MinLength(10)
+ @MaxLength(500)
+ reason!:string;
+
+ @IsString()
+ @MinLength(5)
+ @MaxLength(200)
+ evidenceReference!:string;
+}
+
 // R10_3D23B_EXCHANGE_CONTRACT
 class ExchangeReplacementLineDto {
  @IsUUID()
@@ -275,8 +299,73 @@ export class PosService {
   return this.db.posDevice.create({data:{code:dto.code,locationId:dto.locationId}});
  }
  // R10_2_SHIFT_INTEGRITY
- async openShift(dto:OpenShiftDto,u:Principal){
+ // R10_3D24A_ACTIVE_SHIFT_RECOVERY
+ async activeShift(u:Principal){
+
+  const shifts=await this.db.posShift.findMany({
+   where:{
+    cashierId:u.id,
+    status:'OPEN'
+   },
+   orderBy:{openedAt:'desc'},
+   take:2
+  });
+
+  if(shifts.length>1){
+   throw new ConflictException(
+    'Multiple active cashier shifts require HQ reconciliation'
+   );
+  }
+
+  if(!shifts.length){
+   return {
+    found:false,
+    status:'NO_ACTIVE_SHIFT'
+   };
+  }
+
+  const shift=shifts[0];
+
+  this.branchAccess(u,shift.locationId);
+
+  const device=await this.db.posDevice.findUnique({
+   where:{id:shift.deviceId}
+  });
+
+  if(
+   !device||
+   !device.active||
+   device.locationId!==shift.locationId
+  ){
+   throw new ConflictException(
+    'Active shift device requires administrator review'
+   );
+  }
+
+  return {
+   found:true,
+   status:'OPEN',
+   shiftId:shift.id,
+   cashierId:shift.cashierId,
+   deviceId:shift.deviceId,
+   locationId:shift.locationId,
+   openingCash:shift.openingCash.toString(),
+   openedAt:shift.openedAt
+  };
+ }
+
+async openShift(dto:OpenShiftDto,u:Principal){
+   // R10_3D24A_SHIFT_OPENING_GUARD
   const openingCents=Math.round(dto.openingCash*100);
+
+  if(
+   !Number.isFinite(dto.openingCash)||
+   Math.abs(dto.openingCash*100-openingCents)>0.000001
+  ){
+   throw new BadRequestException(
+    'Opening cash must have at most two decimal places'
+   );
+  }
 
   if(
    !Number.isSafeInteger(openingCents)||
@@ -295,7 +384,32 @@ export class PosService {
      )
     `;
 
-    const device=await tx.posDevice.findUnique({
+     // R10_3D24A_CASHIER_SHIFT_LOCK
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-cashier-shift:${u.id}`})
+     )
+    `;
+
+    const cashierShift=await tx.posShift.findFirst({
+     where:{
+      cashierId:u.id,
+      status:'OPEN'
+     },
+     select:{
+      id:true,
+      deviceId:true,
+      locationId:true
+     }
+    });
+
+    if(cashierShift){
+     throw new ConflictException(
+      'Cashier already has an open shift. Recover or close that shift first.'
+     );
+    }
+
+const device=await tx.posDevice.findUnique({
      where:{id:dto.deviceId}
     });
 
@@ -360,7 +474,22 @@ export class PosService {
   ));
  }
 async closeShift(id:string,dto:CloseShiftDto,u:Principal){
- return this.db.$transaction(async tx=>{
+  // R10_3D24A_SHIFT_CLOSING_GUARD
+ const closingCents=Math.round(dto.closingCash*100);
+
+ if(
+  !Number.isFinite(dto.closingCash)||
+  !Number.isSafeInteger(closingCents)||
+  closingCents<0||
+  closingCents>999999999999||
+  Math.abs(dto.closingCash*100-closingCents)>0.000001
+ ){
+  throw new BadRequestException(
+   'Invalid closing cash amount'
+  );
+ }
+
+ return withPosTransactionRetry(()=>this.db.$transaction(async tx=>{
   await tx.$executeRaw`
    SELECT pg_advisory_xact_lock(hashtext(${`pos-shift-id:${id}`}))
   `;
@@ -391,7 +520,23 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    include:{tenders:true}
   });
 
-  // R10_3D23B_CENTRAL_SHIFT_GUARD
+  // R10_3D24C_CENTRAL_REFUND_SHIFT_GUARD
+   const unresolvedRefundAttempts=await tx.posRefundAttempt.count({
+    where:{
+     shiftId:id,
+     status:{
+      notIn:['ACCEPTED','RESOLVED_NO_PAYMENT']
+     }
+    }
+   });
+
+   if(unresolvedRefundAttempts>0){
+    throw new ConflictException(
+     'Shift closing blocked: unresolved central refund payouts'
+    );
+   }
+
+// R10_3D23B_CENTRAL_SHIFT_GUARD
   const unresolvedExchangeAttempts=
    await tx.posExchangeAttempt.count({
     where:{
@@ -526,7 +671,23 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
    );
   }
 
-  const movements=await tx.drawerMovement.findMany({
+   // R10_3D24A_PENDING_DRAWER_GUARD
+   const pendingMovements=await tx.drawerMovement.count({
+    where:{
+     shiftId:id,
+     status:'PENDING'
+    }
+   });
+
+   if(pendingMovements>0){
+    throw new ConflictException(
+     'Shift closing blocked: '+
+     pendingMovements+
+     ' cash drawer movement(s) require manager review'
+    );
+   }
+
+const movements=await tx.drawerMovement.findMany({
    where:{shiftId:id,status:'APPROVED'}
   });
 
@@ -544,7 +705,32 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
     .filter(t=>t.type===type)
     .reduce((sum,t)=>sum+cents(t.amount),0);
 
-  const cash=tenderTotal('CASH');
+   // R10_3D24A_TENDER_INTEGRITY
+   for(const sale of accepted){
+
+    const saleCents=cents(sale.total);
+
+    const tenderCents=sale.tenders.reduce(
+     (sum,t)=>sum+cents(t.amount),0
+    );
+
+    if(
+     !Number.isSafeInteger(saleCents)||
+     !Number.isSafeInteger(tenderCents)||
+     saleCents<0||
+     sale.tenders.some(t=>
+      !Number.isSafeInteger(cents(t.amount))||
+      cents(t.amount)<0
+     )||
+     saleCents!==tenderCents
+    ){
+     throw new ConflictException(
+      'Accepted sale has inconsistent tender totals: '+sale.id
+     );
+    }
+   }
+
+const cash=tenderTotal('CASH');
   const card=tenderTotal('CARD');
   const other=tenderTotal('OTHER');
 
@@ -561,7 +747,34 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
   const counted=cents(money(dto.closingCash));
   const expected=opening+cash+drawerAdjustment;
   const variance=counted-expected;
-  const closedAt=new Date();
+   // R10_3D24A_MONETARY_TOTAL_GUARD
+   const financialValues=[
+    opening,cash,card,other,exchangeCredit,
+    drawerAdjustment,counted,expected,variance
+   ];
+
+   if(
+    financialValues.some(value=>
+     !Number.isSafeInteger(value)||
+     Math.abs(value)>999999999999
+    )
+   ){
+    throw new ConflictException(
+     'Shift financial totals exceed supported precision'
+    );
+   }
+
+   if(movements.some(m=>
+    m.locationId!==shift.locationId||
+    !Number.isSafeInteger(cents(m.amount))||
+    cents(m.amount)<=0
+   )){
+    throw new ConflictException(
+     'Invalid approved cash drawer movement'
+    );
+   }
+
+const closedAt=new Date();
 
   const result=await tx.posShift.update({
    where:{id},
@@ -614,7 +827,7 @@ async closeShift(id:string,dto:CloseShiftDto,u:Principal){
  },{
   isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
   timeout:15000
- });
+ }));
 }
 
  // R8_01G_4B8_CENTRAL_REGISTRATION
@@ -2472,93 +2685,2429 @@ await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entity
    conflictReason:sale.conflictReason
   };
  }
-  async recordRefundSettlement(
-  dto:RecordPosRefundSettlementDto,
+  // R10_3D24C_REFUND_STATUS
+ async refundSettlementStatus(key:string,u:Principal){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException(
+    'Manager authorization required'
+   );
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException(
+    'Invalid settlement identity'
+   );
+  }
+
+  const settlement=await this.db.posRefundSettlement.findUnique({
+   where:{idempotencyKey:key},
+   include:{
+    return:{
+     select:{locationId:true,status:true}
+    }
+   }
+  });
+
+  // R10_3D24C_AUTHORITATIVE_REFUND_STATUS
+  const attempt=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(attempt){
+   this.branchAccess(u,attempt.locationId);
+  }
+
+  if(!settlement){
+
+   if(!attempt){
+    return {
+     found:false,
+     status:'NOT_FOUND',
+     idempotencyKey:key
+    };
+   }
+
+   if(attempt.status==='ACCEPTED'){
+    throw new ConflictException(
+     'Accepted refund has no linked settlement'
+    );
+   }
+
+   const payload=
+    attempt.payload as unknown as RegisterPosRefundDto;
+
+   if(
+    payload.idempotencyKey!==attempt.id||
+    payload.returnId!==attempt.returnId||
+    payload.locationId!==attempt.locationId||
+    payload.deviceId!==attempt.deviceId||
+    payload.shiftId!==attempt.shiftId||
+    payload.method!==attempt.method||
+    Math.round(payload.amount*100)!==
+     Math.round(attempt.amount.toNumber()*100)||
+    this.refundPayloadHash(payload)!==attempt.payloadHash
+   ){
+    throw new ConflictException(
+     'Central refund payload integrity failed'
+    );
+   }
+
+    // R10_3D24C_REFUND_CONFIRMATION_DISCOVERY
+
+    const pendingInvestigation=
+     await this.db.posPaymentReconciliation.findFirst({
+      where:{
+       refundAttemptId:key,
+       status:'PENDING'
+      },
+      select:{id:true}
+     });
+
+    const abandonedExecution=
+     await this.db.posPaymentReconciliation.findFirst({
+      where:{
+       refundAttemptId:key,
+       kind:'REFUND_PAYOUT',
+       proposedOutcome:'NOT_PAID',
+       executionAbandoned:true
+      },
+      select:{id:true}
+     });
+
+    return {
+     found:true,
+     status:attempt.status,
+     investigationPending:!!pendingInvestigation,
+     executionAbandoned:!!abandonedExecution,
+     canConfirmPayment:
+      attempt.status==='PAYMENT_AUTHORIZED'&&
+      attempt.paymentState==='UNKNOWN'&&
+      !!attempt.authorizedAt&&
+      attempt.authorizedById===u.id&&
+      !pendingInvestigation&&
+      !abandonedExecution,
+    paymentState:attempt.paymentState,
+    idempotencyKey:attempt.id,
+    returnId:attempt.returnId,
+    locationId:attempt.locationId,
+    deviceId:attempt.deviceId,
+    shiftId:attempt.shiftId,
+    amount:attempt.amount.toString(),
+    method:attempt.method,
+    payload,
+    registeredAt:attempt.createdAt,
+    resolutionReason:attempt.resolutionReason,
+    evidenceReference:attempt.evidenceReference,
+    authorizedById:attempt.authorizedById,
+    authorizedAt:attempt.authorizedAt,
+    confirmedById:attempt.confirmedById,
+    confirmedAt:attempt.confirmedAt,
+    resolvedById:attempt.resolvedById,
+    resolvedAt:attempt.resolvedAt,
+    paymentAuthorized:false
+   };
+  }
+
+  if(attempt){
+   if(
+    attempt.status!=='ACCEPTED'||
+    attempt.paymentState!=='CONFIRMED'||
+    attempt.settlementId!==settlement.id||
+    attempt.returnId!==settlement.returnId||
+    attempt.locationId!==settlement.return.locationId||
+    attempt.method!==settlement.method||
+    !attempt.amount.equals(settlement.amount)||
+    (
+     settlement.method==='CASH'&&
+     settlement.payoutShiftId!==attempt.shiftId
+    )
+   ){
+    throw new ConflictException(
+     'Refund settlement and central attempt do not match'
+    );
+   }
+  }
+
+  this.branchAccess(u,settlement.return.locationId);
+
+  if(settlement.return.status!=='APPROVED'){
+   throw new ConflictException(
+    'Settlement requires return reconciliation'
+   );
+  }
+
+  if(settlement.method==='CASH'){
+
+   const movements=await this.db.drawerMovement.findMany({
+    where:{
+     externalReference:`POS_REFUND:${settlement.id}`
+    },
+    take:2
+   });
+
+   if(
+    movements.length!==1||
+    movements[0].status!=='APPROVED'||
+    movements[0].type!=='CASH_REFUND'||
+    movements[0].shiftId!==settlement.payoutShiftId||
+    movements[0].locationId!==settlement.return.locationId||
+    !movements[0].amount.equals(settlement.amount)
+   ){
+    throw new ConflictException(
+     'Refund drawer movement requires reconciliation'
+    );
+   }
+  }
+
+  const {return:parent,...record}=settlement;
+
+  return {
+   ...record,
+   found:true,
+   status:'ACCEPTED',
+   locationId:parent.locationId,
+   integrityVerified:true,
+   centralAttemptVerified:!!attempt,
+   paymentState:attempt?.paymentState??null,
+   deviceId:attempt?.deviceId??null,
+   shiftId:attempt?.shiftId??settlement.payoutShiftId,
+   verifiedAt:new Date().toISOString()
+  };
+ }
+
+// R10_3D24C_CENTRAL_REFUND_DISCOVERY
+ async pendingRefundAttempts(
+  locationId:string,
   u:Principal
  ){
-  this.assertPhysicalTender(dto.method);
-  const manager=
-   u.roles.includes('SUPER_ADMIN')||
-   u.roles.includes('BRANCH_MANAGER');
 
-  if(!manager){
-   throw new ForbiddenException('Manager authorization required');
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException(
+    'Manager authorization required'
+   );
+  }
+
+  if(
+   typeof locationId!=='string'||
+   !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(locationId)
+  ){
+   throw new BadRequestException(
+    'Valid branch identity required'
+   );
+  }
+
+  this.branchAccess(u,locationId);
+
+  const attempts=await this.db.posRefundAttempt.findMany({
+   where:{
+    locationId,
+    status:{
+     notIn:['ACCEPTED','RESOLVED_NO_PAYMENT']
+    }
+   },
+   orderBy:{createdAt:'asc'},
+   take:201,
+   select:{
+    id:true,
+    returnId:true,
+    locationId:true,
+    deviceId:true,
+    shiftId:true,
+    amount:true,
+    method:true,
+    status:true,
+    paymentState:true,
+    registeredById:true,
+    createdAt:true,
+    updatedAt:true
+   }
+  });
+
+  const records=attempts.slice(0,200).map(a=>({
+   ...a,
+   idempotencyKey:a.id,
+   amount:a.amount.toString(),
+   requiresReconciliation:
+    a.status==='PAYMENT_AUTHORIZED',
+   canResume:
+    a.status==='PAID'&&
+    a.paymentState==='CONFIRMED',
+   canCancel:
+    u.roles.includes('SUPER_ADMIN')&&
+    a.status==='REGISTERED'&&
+    a.paymentState==='UNCONFIRMED',
+   paymentAuthorized:false
+  }));
+
+  return {
+   locationId,
+   records,
+   truncated:attempts.length>200,
+   returnedCount:records.length,
+   fetchedAt:new Date().toISOString()
+  };
+ }
+
+// R10_3D24C_CENTRAL_REGISTRATION
+ private refundPayloadHash(dto:RegisterPosRefundDto){
+  return hash({
+   idempotencyKey:dto.idempotencyKey,
+   returnId:dto.returnId,
+   locationId:dto.locationId,
+   deviceId:dto.deviceId,
+   shiftId:dto.shiftId,
+   method:dto.method,
+   amountCents:Math.round(dto.amount*100),
+   payoutShiftId:dto.payoutShiftId??null,
+   reference:dto.reference?.trim()||null
+  });
+ }
+
+ async registerRefundAttempt(
+  dto:RegisterPosRefundDto,
+  u:Principal
+ ){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException(
+    'Manager authorization required'
+   );
+  }
+
+  this.branchAccess(u,dto.locationId);
+  this.assertPhysicalTender(dto.method);
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dto.idempotencyKey)){
+   throw new BadRequestException(
+    'Invalid refund attempt identity'
+   );
   }
 
   const amountCents=Math.round(dto.amount*100);
 
-  if(!Number.isSafeInteger(amountCents)||amountCents<=0){
-   throw new BadRequestException('Invalid settlement amount');
-  }
-
-  const reference=dto.reference?.trim()||null;
-
-  if(dto.method!=='CASH'&&!reference){
+  if(
+   !Number.isFinite(dto.amount)||
+   !Number.isSafeInteger(amountCents)||
+   amountCents<=0||
+   amountCents>999999999999||
+   Math.abs(dto.amount*100-amountCents)>0.000001
+  ){
    throw new BadRequestException(
-    'Non-cash refunds require a payment reference'
+    'Invalid refund amount'
    );
   }
 
-  if(dto.method==='CASH'&&!dto.payoutShiftId){
+  if(
+   dto.method==='CASH'&&
+   dto.payoutShiftId!==dto.shiftId
+  ){
    throw new BadRequestException(
-    'Cash refunds require an open payout shift'
+    'Cash payout shift must match the registered shift'
    );
   }
 
-  if(dto.method!=='CASH'&&dto.payoutShiftId){
+  if(
+   dto.method!=='CASH'&&
+   (
+    dto.payoutShiftId||
+    !dto.reference?.trim()
+   )
+  ){
    throw new BadRequestException(
-    'Only cash refunds may specify a payout shift'
+    'Non-cash refunds require a payment reference and no cash payout shift'
    );
   }
 
-  return withPosTransactionRetry(()=>this.db.$transaction(
-   async tx=>{
+  const payloadHash=this.refundPayloadHash(dto);
 
-    // Cash settlements share the same shift lock as shift closing.
-    // This prevents a payout from being posted after closing.
-    if(dto.method==='CASH'){
-     await tx.$executeRaw`
-      SELECT pg_advisory_xact_lock(
-       hashtext(${`pos-shift-id:${dto.payoutShiftId}`})
-      )
-     `;
-    }
+  return withPosTransactionRetry(
+   ()=>this.db.$transaction(async tx=>{
 
-    // Serialize all settlement attempts for the same return.
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${dto.shiftId}`})
+     )
+    `;
+
     await tx.$executeRaw`
      SELECT pg_advisory_xact_lock(
       hashtext(${`pos-refund-settlement:${dto.returnId}`})
      )
     `;
 
-    const existing=await tx.posRefundSettlement.findUnique({
-     where:{idempotencyKey:dto.idempotencyKey}
+    const existing=await tx.posRefundAttempt.findUnique({
+     where:{id:dto.idempotencyKey}
     });
 
     if(existing){
-     const previousReturn=await tx.posReturn.findUniqueOrThrow({
-      where:{id:existing.returnId}
-     });
 
-     this.branchAccess(u,previousReturn.locationId);
+     this.branchAccess(u,existing.locationId);
 
-     if(
-      existing.returnId!==dto.returnId||
-      existing.method!==dto.method||
-      Math.round(existing.amount.toNumber()*100)!==amountCents||
-      (existing.payoutShiftId??null)!==
-       (dto.payoutShiftId??null)||
-      (existing.reference??null)!==reference
-     ){
+     if(existing.payloadHash!==payloadHash){
       throw new ConflictException(
-       'Settlement idempotency key reused with different details'
+       'Refund identity reused with different details'
       );
      }
 
-     return {...existing,duplicate:true};
+     return {
+      idempotencyKey:existing.id,
+      status:existing.status,
+      paymentState:existing.paymentState,
+      duplicate:true
+     };
     }
 
-    const ret=await tx.posReturn.findUnique({
+    const settled=await tx.posRefundSettlement.findUnique({
+     where:{idempotencyKey:dto.idempotencyKey}
+    });
+
+    if(settled){
+     throw new ConflictException(
+      'Refund identity already belongs to a settlement'
+     );
+    }
+
+    const device=await tx.posDevice.findUnique({
+     where:{id:dto.deviceId}
+    });
+
+    if(
+     !device||
+     !device.active||
+     device.locationId!==dto.locationId
+    ){
+     throw new ConflictException(
+      'Active terminal at the refund branch required'
+     );
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:dto.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.deviceId!==dto.deviceId||
+     shift.locationId!==dto.locationId
+    ){
+     throw new ConflictException(
+      'An open matching terminal shift is required'
+     );
+    }
+
+    const eligibility=
+     await this.validateRefundEligibility(
+      tx,dto,u,amountCents
+     );
+
+    if(eligibility.ret.locationId!==dto.locationId){
+     throw new ConflictException(
+      'Return branch does not match refund branch'
+     );
+    }
+
+    const pending=await tx.posRefundAttempt.findFirst({
+     where:{
+      status:{
+       notIn:['ACCEPTED','RESOLVED_NO_PAYMENT']
+      },
+      OR:[
+       {returnId:dto.returnId},
+       {deviceId:dto.deviceId}
+      ]
+     }
+    });
+
+    if(pending){
+     throw new ConflictException(
+      'An unresolved refund attempt already exists'
+     );
+    }
+
+    const manualMovement=await tx.drawerMovement.findFirst({
+     where:{
+      locationId:dto.locationId,
+      type:'CASH_REFUND',
+      status:{in:['PENDING','APPROVED']},
+      externalReference:{
+       in:[
+        dto.returnId,
+        `POS_RETURN:${dto.returnId}`
+       ]
+      }
+     }
+    });
+
+    if(manualMovement){
+     throw new ConflictException(
+      'A manual refund movement requires reconciliation'
+     );
+    }
+
+    const attempt=await tx.posRefundAttempt.create({
+     data:{
+      id:dto.idempotencyKey,
+      returnId:dto.returnId,
+      locationId:dto.locationId,
+      deviceId:dto.deviceId,
+      shiftId:dto.shiftId,
+      registeredById:u.id,
+      amount:new Prisma.Decimal(
+       (amountCents/100).toFixed(2)
+      ),
+      method:dto.method,
+      payload:JSON.parse(JSON.stringify(dto)),
+      payloadHash,
+      status:'REGISTERED',
+      paymentState:'UNCONFIRMED'
+     }
+    });
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_REFUND_ATTEMPT_REGISTERED',
+      entityType:'PosRefundAttempt',
+      entityId:attempt.id,
+      after:{
+       returnId:attempt.returnId,
+       locationId:attempt.locationId,
+       deviceId:attempt.deviceId,
+       shiftId:attempt.shiftId,
+       amount:attempt.amount.toString(),
+       method:attempt.method,
+       status:attempt.status
+      }
+     }
+    });
+
+    return {
+     idempotencyKey:attempt.id,
+     status:attempt.status,
+     paymentState:attempt.paymentState,
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:
+     Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   })
+  );
+ }
+
+// R10_3D24C_STATE_ALIGNMENT
+// R10_3D24C_RECOVERY_DEVICE_GUARD
+// R10_3D24C_PAYMENT_AUTHORIZATION
+ async authorizeRefundPayment(
+  key:string,
+  u:Principal
+ ){
+
+  return this.transitionRefundPayment(
+   key,u,'AUTHORIZE'
+  );
+ }
+
+ // R10_3D24C_PAYMENT_CONFIRMATION
+ async confirmRefundPayment(
+  key:string,
+  u:Principal
+ ){
+
+  return this.transitionRefundPayment(
+   key,u,'CONFIRM'
+  );
+ }
+
+ private async transitionRefundPayment(
+  key:string,
+  u:Principal,
+  action:'AUTHORIZE'|'CONFIRM'
+ ){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException(
+    'Manager authorization required'
+   );
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException(
+    'Invalid refund attempt identity'
+   );
+  }
+
+  const initial=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException(
+    'Registered refund attempt not found'
+   );
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(
+   ()=>this.db.$transaction(async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-refund-settlement:${initial.returnId}`})
+     )
+    `;
+
+    const attempt=await tx.posRefundAttempt.findUniqueOrThrow({
+     where:{id:key}
+    });
+
+    this.branchAccess(u,attempt.locationId);
+
+    if(
+     attempt.status==='ACCEPTED'||
+     attempt.status==='RESOLVED_NO_PAYMENT'
+    ){
+     throw new ConflictException(
+      'Refund attempt is already finalized'
+     );
+    }
+
+    const payload=
+     attempt.payload as unknown as RegisterPosRefundDto;
+
+    if(
+     payload.idempotencyKey!==attempt.id||
+     payload.returnId!==attempt.returnId||
+     payload.locationId!==attempt.locationId||
+     payload.deviceId!==attempt.deviceId||
+     payload.shiftId!==attempt.shiftId||
+     payload.method!==attempt.method||
+     Math.round(payload.amount*100)!==
+      Math.round(attempt.amount.toNumber()*100)||
+     this.refundPayloadHash(payload)!==attempt.payloadHash
+    ){
+     throw new ConflictException(
+      'Refund attempt payload integrity failed'
+     );
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:attempt.shiftId}
+    });
+
+    const device=await tx.posDevice.findUnique({
+     where:{id:attempt.deviceId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.deviceId!==attempt.deviceId||
+     shift.locationId!==attempt.locationId||
+     !device||
+     (action==='AUTHORIZE'&&!device.active)||
+     device.locationId!==attempt.locationId
+    ){
+     throw new ConflictException(
+      'Refund terminal or shift requires reconciliation'
+     );
+    }
+
+    if(action==='AUTHORIZE'){
+
+     if(
+      attempt.status!=='REGISTERED'||
+      attempt.paymentState!=='UNCONFIRMED'
+     ){
+      throw new ConflictException(
+       'Payment authorization already issued or unavailable. Do not pay again.'
+      );
+     }
+
+     await this.validateRefundEligibility(
+      tx,payload,u,
+      Math.round(attempt.amount.toNumber()*100)
+     );
+
+     const manualMovement=await tx.drawerMovement.findFirst({
+      where:{
+       locationId:attempt.locationId,
+       type:'CASH_REFUND',
+       status:{in:['PENDING','APPROVED']},
+       externalReference:{
+        in:[
+         attempt.returnId,
+         `POS_RETURN:${attempt.returnId}`
+        ]
+       }
+      }
+     });
+
+     if(manualMovement){
+      throw new ConflictException(
+       'Manual refund movement requires reconciliation'
+      );
+     }
+
+    }else{
+
+     if(
+      attempt.status==='PAID'&&
+      attempt.paymentState==='CONFIRMED'
+     ){
+      return {
+       idempotencyKey:key,
+       status:attempt.status,
+       paymentState:attempt.paymentState,
+       paymentAuthorized:false,
+       duplicate:true
+      };
+     }
+
+     if(
+      attempt.status!=='PAYMENT_AUTHORIZED'||
+      attempt.paymentState!=='UNKNOWN'
+     ){
+      throw new ConflictException(
+       'Refund has not received payment authorization'
+      );
+     }
+    }
+
+
+    await this.assertOrdinaryPaymentExecutionAvailable(
+     tx,key,'REFUND_PAYOUT'
+    );
+
+    // R10_3D24C_REFUND_CONFIRMATION_OWNERSHIP
+    const pendingInvestigation=
+     await tx.posPaymentReconciliation.findFirst({
+      where:{
+       refundAttemptId:key,
+       status:'PENDING'
+      },
+      select:{id:true}
+     });
+
+    if(pendingInvestigation){
+     throw new ConflictException(
+      'Independent payment investigation is pending'
+     );
+    }
+
+    if(
+     action==='CONFIRM'&&(
+      !attempt.authorizedById||
+      !attempt.authorizedAt||
+      attempt.authorizedById!==u.id
+     )
+    ){
+     throw new ForbiddenException(
+      'Only the original payment authorizer may confirm. '+
+      'Otherwise independent HQ reconciliation is required.'
+     );
+    }
+
+    const updated=await tx.posRefundAttempt.updateMany({
+     where:{
+      id:key,
+      status:attempt.status,
+      paymentState:attempt.paymentState
+     },
+     data:{
+       // R10_3D24C_PERSISTENT_REFUND_EVIDENCE
+       ...(action==='AUTHORIZE'
+        ?{
+          authorizedById:u.id,
+          authorizedAt:new Date()
+         }
+        :{
+          confirmedById:u.id,
+          confirmedAt:new Date()
+         }),
+
+      status:action==='AUTHORIZE'?'PAYMENT_AUTHORIZED':'PAID',
+      paymentState:
+       action==='AUTHORIZE'
+        ?'UNKNOWN'
+        :'CONFIRMED'
+     }
+    });
+
+    if(updated.count!==1){
+     throw new ConflictException(
+      'Refund attempt changed; reconcile before proceeding'
+     );
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:
+       action==='AUTHORIZE'
+        ?'POS_REFUND_PAYMENT_AUTHORIZED'
+        :'POS_REFUND_PAYMENT_CONFIRMED',
+      entityType:'PosRefundAttempt',
+      entityId:key,
+      before:{
+       status:attempt.status,
+       paymentState:attempt.paymentState
+      },
+      after:{
+       status:action==='AUTHORIZE'?'PAYMENT_AUTHORIZED':'PAID',
+       paymentState:
+        action==='AUTHORIZE'
+         ?'UNKNOWN'
+         :'CONFIRMED',
+       returnId:attempt.returnId,
+       locationId:attempt.locationId,
+       deviceId:attempt.deviceId,
+       shiftId:attempt.shiftId,
+       amount:attempt.amount.toString(),
+       method:attempt.method
+      }
+     }
+    });
+
+    return {
+     idempotencyKey:key,
+     status:action==='AUTHORIZE'?'PAYMENT_AUTHORIZED':'PAID',
+     paymentState:
+      action==='AUTHORIZE'
+       ?'UNKNOWN'
+       :'CONFIRMED',
+     paymentAuthorized:action==='AUTHORIZE',
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:
+     Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   })
+  );
+ }
+
+ // R10_3D24C_REFUND_INVESTIGATION_SUBMISSION
+
+ private reconciliationText(
+  value:unknown,min:number,max:number,label:string
+ ):string{
+  if(typeof value!=='string'){
+   throw new BadRequestException(label+' is required');
+  }
+  const text=value.trim();
+  if(text.length<min||text.length>max){
+   throw new BadRequestException(
+    label+' must contain '+min+'-'+max+' characters'
+   );
+  }
+  return text;
+ }
+
+ private reconciliationUuid(value:string){
+  if(
+   typeof value!=='string'||
+   !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+  ){
+   throw new BadRequestException('Invalid reconciliation identity');
+  }
+ }
+
+ private assertReconciliationManager(u:Principal){
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager authorization required');
+  }
+ }
+
+ private async withRefundInvestigation<T>(
+  key:string,
+  u:Principal,
+  operation:(
+   tx:Prisma.TransactionClient,
+   attempt:Prisma.PosRefundAttemptGetPayload<{}>
+  )=>Promise<T>
+ ):Promise<T>{
+
+  this.assertReconciliationManager(u);
+  this.reconciliationUuid(key);
+
+  const initial=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException('Refund attempt not found');
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(
+   ()=>this.db.$transaction(async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-refund-settlement:${initial.returnId}`})
+     )
+    `;
+
+    const attempt=await tx.posRefundAttempt.findUniqueOrThrow({
+     where:{id:key}
+    });
+
+    this.branchAccess(u,attempt.locationId);
+
+    if(
+     attempt.status!=='PAYMENT_AUTHORIZED'||
+     attempt.paymentState!=='UNKNOWN'||
+     !attempt.authorizedById||
+     !attempt.authorizedAt||
+     attempt.settlementId
+    ){
+     throw new ConflictException(
+      'Refund is not eligible for uncertain-payment reconciliation'
+     );
+    }
+
+    const payload=
+     attempt.payload as unknown as RegisterPosRefundDto;
+
+    if(
+     payload.idempotencyKey!==attempt.id||
+     payload.returnId!==attempt.returnId||
+     payload.locationId!==attempt.locationId||
+     payload.deviceId!==attempt.deviceId||
+     payload.shiftId!==attempt.shiftId||
+     payload.method!==attempt.method||
+     Math.round(payload.amount*100)!==
+      Math.round(attempt.amount.toNumber()*100)||
+     this.refundPayloadHash(payload)!==attempt.payloadHash
+    ){
+     throw new ConflictException('Refund payload integrity failed');
+    }
+
+    const settlement=await tx.posRefundSettlement.findUnique({
+     where:{idempotencyKey:key}
+    });
+
+    if(settlement){
+     throw new ConflictException('Financial settlement already exists');
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:attempt.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.locationId!==attempt.locationId||
+     shift.deviceId!==attempt.deviceId
+    ){
+     throw new ConflictException(
+      'Original shift requires exceptional reconciliation'
+     );
+    }
+
+    return operation(tx,attempt);
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   })
+  );
+ }
+
+
+ // R10_3D24C_EXCHANGE_INVESTIGATION_SERVICE
+
+ private async withExchangeInvestigation<T>(
+  key:string,
+  u:Principal,
+  operation:(
+   tx:Prisma.TransactionClient,
+   attempt:Prisma.PosExchangeAttemptGetPayload<{}>
+  )=>Promise<T>
+ ){
+
+  this.assertReconciliationManager(u);
+  this.reconciliationUuid(key);
+
+  const initial=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException('Exchange attempt not found');
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(
+   ()=>this.db.$transaction(async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${key}`})
+     )
+    `;
+
+    const attempt=await tx.posExchangeAttempt.findUniqueOrThrow({
+     where:{id:key}
+    });
+
+    this.branchAccess(u,attempt.locationId);
+
+    if(
+     attempt.locationId!==initial.locationId||
+     attempt.deviceId!==initial.deviceId||
+     attempt.shiftId!==initial.shiftId||
+     attempt.payloadHash!==initial.payloadHash||
+     !['REGISTERED','UNKNOWN'].includes(attempt.status)
+    ){
+     throw new ConflictException(
+      'Exchange identity changed or attempt is terminal'
+     );
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:attempt.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.locationId!==attempt.locationId||
+     shift.deviceId!==attempt.deviceId
+    ){
+     throw new ConflictException(
+      'Original exchange shift must remain open'
+     );
+    }
+
+    return operation(tx,attempt);
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   })
+  );
+ }
+
+ private exchangeInvestigationSnapshot(
+  attempt:Prisma.PosExchangeAttemptGetPayload<{}>,
+  kind:string
+ ){
+
+  const payload=attempt.payload as any;
+
+  if(
+   !payload||
+   typeof payload.expectedReplacementValue!=='number'||
+   typeof payload.expectedReturnValue!=='number'
+  ){
+   throw new ConflictException('Invalid stored exchange values');
+  }
+
+  const amount=new Prisma.Decimal(
+   payload.expectedReplacementValue
+  ).minus(payload.expectedReturnValue);
+
+  if(
+   !amount.isFinite()||
+   amount.lte(0)||
+   amount.decimalPlaces()>2||
+   amount.gt('9999999999.99')
+  ){
+   throw new ConflictException('Invalid investigation amount');
+  }
+
+
+  // R10_3D24C_INVESTIGATION_PAYLOAD_INTEGRITY
+
+  const returned=Math.round(payload.expectedReturnValue*100);
+  const replacement=Math.round(payload.expectedReplacementValue*100);
+
+  if(
+   payload.idempotencyKey!==attempt.id||
+   payload.locationId!==attempt.locationId||
+   payload.deviceId!==attempt.deviceId||
+   payload.shiftId!==attempt.shiftId||
+   payload.originalSaleId!==attempt.originalSaleId||
+   !Array.isArray(payload.additionalTenders)||
+   !Number.isSafeInteger(returned)||
+   !Number.isSafeInteger(replacement)||
+   returned<0||
+   replacement<=returned||
+   this.exchangePayloadHash(
+    payload as CreatePosExchangeDto,
+    returned,
+    replacement
+   )!==attempt.payloadHash
+  ){
+   throw new ConflictException(
+    'Exchange investigation payload integrity failure'
+   );
+  }
+
+  let operatorId:string|null=null;
+
+  if(kind==='EXCHANGE_COLLECTION'){
+
+   if(
+    attempt.paymentState!=='UNCONFIRMED'||
+    attempt.reversalStatus!=='NONE'||
+    !attempt.paymentAuthorizedById||
+    !attempt.paymentAuthorizedAt||
+    attempt.paymentConfirmedAt
+   ){
+    throw new ConflictException(
+     'Exchange collection is not eligible for investigation'
+    );
+   }
+
+   operatorId=attempt.paymentAuthorizedById;
+
+  }else if(kind==='EXCHANGE_REVERSAL'){
+
+   if(
+    attempt.paymentState!=='CONFIRMED'||
+    attempt.reversalStatus!=='AUTHORIZED'||
+    !attempt.reversalExecutionById||
+    !attempt.reversalExecutionAt||
+    attempt.reversalConfirmedAt
+   ){
+    throw new ConflictException(
+     'Exchange reversal is not eligible for investigation'
+    );
+   }
+
+   operatorId=attempt.reversalExecutionById;
+
+  }else{
+   throw new BadRequestException('Invalid investigation kind');
+  }
+
+  return {amount,operatorId};
+ }
+
+
+ // R10_3D24C_PERMANENT_EXECUTION_ABANDONMENT
+
+ private async assertOrdinaryPaymentExecutionAvailable(
+  tx:Prisma.TransactionClient,
+  key:string,
+  kind:'REFUND_PAYOUT'|'EXCHANGE_COLLECTION'|'EXCHANGE_REVERSAL'
+ ){
+
+  const identity=kind==='REFUND_PAYOUT'
+   ?{refundAttemptId:key}
+   :{exchangeAttemptId:key};
+
+  const pending=await tx.posPaymentReconciliation.findFirst({
+   where:{
+    ...identity,
+    status:'PENDING'
+   },
+   select:{id:true}
+  });
+
+  if(pending){
+   throw new ConflictException(
+    'Independent payment investigation is pending. '+
+    'Ordinary payment execution and confirmation are blocked.'
+   );
+  }
+
+  const abandoned=await tx.posPaymentReconciliation.findFirst({
+   where:{
+    ...identity,
+    kind,
+    executionAbandoned:true,
+    proposedOutcome:{
+     in:['NOT_PAID','NOT_COLLECTED','NOT_REVERSED']
+    }
+   },
+   select:{id:true}
+  });
+
+  if(abandoned){
+   throw new ConflictException(
+    'Original payment authorization was permanently abandoned. '+
+    'Independent HQ reconciliation is required. '+
+    'Do not repeat any physical payment operation.'
+   );
+  }
+ }
+
+ async submitExchangeInvestigation(
+  key:string,
+  body:any,
+  u:Principal
+ ){
+
+  const kind=body?.kind;
+  const outcome=body?.proposedOutcome;
+
+  if(
+   !(
+    kind==='EXCHANGE_COLLECTION'&&
+    ['COLLECTED','NOT_COLLECTED'].includes(outcome)
+   )&&
+   !(
+    kind==='EXCHANGE_REVERSAL'&&
+    ['REVERSED','NOT_REVERSED'].includes(outcome)
+   )
+  ){
+   throw new BadRequestException(
+    'Invalid exchange investigation outcome'
+   );
+  }
+
+  const evidenceReference=this.reconciliationText(
+   body?.evidenceReference,5,200,'Evidence reference'
+  );
+
+  const reason=this.reconciliationText(
+   body?.reason,10,500,'Investigation reason'
+  );
+
+  const executionAbandoned=body?.executionAbandoned===true;
+
+  return this.withExchangeInvestigation(key,u,async(tx,attempt)=>{
+
+   const snapshot=this.exchangeInvestigationSnapshot(
+    attempt,kind
+   );
+
+   if(
+    ['NOT_COLLECTED','NOT_REVERSED'].includes(outcome)&&
+    (
+     snapshot.operatorId!==u.id||
+     !executionAbandoned
+    )
+   ){
+    throw new ForbiddenException(
+     'Original operator must attest non-execution '+
+     'and permanently abandon the authorization'
+    );
+   }
+
+   const hold=await tx.posPaymentReconciliation.findFirst({
+    where:{
+     exchangeAttemptId:key,
+     kind:'EXCHANGE_REVERSAL',
+     proposedOutcome:'NOT_REVERSED',
+     status:'APPROVED'
+    }
+   });
+
+   // R10_3D24C_EXCEPTIONAL_HQ_HOLD_RESOLUTION
+
+   if(hold){
+
+    if(
+     !u.roles.includes('SUPER_ADMIN')||
+     kind!=='EXCHANGE_REVERSAL'||
+     outcome!=='REVERSED'||
+     snapshot.operatorId===u.id||
+     executionAbandoned
+    ){
+     throw new ForbiddenException(
+      'Financial hold requires independent HQ evidence '+
+      'of an already completed reversal. '+
+      'Physical payment execution remains prohibited.'
+     );
+    }
+
+   }
+
+   // R10_3D24C_DISTINCT_EXCEPTIONAL_EVIDENCE
+
+   if(hold){
+
+    const negativeCases=await tx.posPaymentReconciliation.findMany({
+     where:{
+      exchangeAttemptId:key,
+      kind:'EXCHANGE_REVERSAL',
+      proposedOutcome:'NOT_REVERSED',
+      status:'APPROVED'
+     },
+     select:{
+      evidenceReference:true
+     }
+    });
+
+    const normalized=evidenceReference.trim().toLowerCase();
+
+    if(
+     negativeCases.some(
+      item=>item.evidenceReference.trim().toLowerCase()===normalized
+     )
+    ){
+     throw new ConflictException(
+      'Exceptional resolution requires distinct positive reversal evidence. '+
+      'Previously approved negative evidence cannot be reused.'
+     );
+    }
+   }
+
+   const pending=await tx.posPaymentReconciliation.findFirst({
+    where:{
+     exchangeAttemptId:key,
+     status:'PENDING'
+    }
+   });
+
+   if(pending){
+
+    if(
+     pending.kind===kind&&
+     pending.submittedById===u.id&&
+     pending.proposedOutcome===outcome&&
+     pending.evidenceReference===evidenceReference&&
+     pending.reason===reason&&
+     pending.executionAbandoned===executionAbandoned
+    ){
+     return {
+      ...pending,
+      duplicate:true,
+      paymentExecutionAuthorized:false
+     };
+    }
+
+    throw new ConflictException(
+     'Another exchange investigation is pending'
+    );
+   }
+
+   const investigation=await tx.posPaymentReconciliation.create({
+    data:{
+     kind,
+     exchangeAttemptId:key,
+     locationId:attempt.locationId,
+     deviceId:attempt.deviceId,
+     shiftId:attempt.shiftId,
+     paymentOperatorId:snapshot.operatorId,
+     payloadHash:attempt.payloadHash,
+     amount:snapshot.amount,
+     originalStatus:attempt.status,
+     originalPaymentState:attempt.paymentState,
+     originalReversalStatus:attempt.reversalStatus,
+     proposedOutcome:outcome,
+     evidenceReference,
+     reason,
+     executionAbandoned,
+     submittedById:u.id
+    }
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'POS_EXCHANGE_INVESTIGATION_SUBMITTED',
+     entityType:'PosPaymentReconciliation',
+     entityId:investigation.id,
+     after:{
+      exchangeAttemptId:key,
+      locationId:attempt.locationId,
+      kind,
+      proposedOutcome:outcome,
+      amount:snapshot.amount.toString(),
+      evidenceReference,
+      reason,
+      executionAbandoned
+     }
+    }
+   });
+
+   return {
+    ...investigation,
+    duplicate:false,
+    paymentExecutionAuthorized:false
+   };
+
+  });
+ }
+
+ async exchangeInvestigationHistory(
+  key:string,
+  u:Principal
+ ){
+
+  this.assertReconciliationManager(u);
+  this.reconciliationUuid(key);
+
+  const attempt=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!attempt){
+   throw new NotFoundException('Exchange attempt not found');
+  }
+
+  this.branchAccess(u,attempt.locationId);
+
+  const records=await this.db.posPaymentReconciliation.findMany({
+   where:{exchangeAttemptId:key},
+   orderBy:[
+    {submittedAt:'desc'},
+    {id:'desc'}
+   ],
+   take:201
+  });
+
+  const hold=await this.db.posPaymentReconciliation.findFirst({
+   where:{
+    exchangeAttemptId:key,
+    kind:'EXCHANGE_REVERSAL',
+    proposedOutcome:'NOT_REVERSED',
+    status:'APPROVED'
+   },
+   select:{id:true}
+  });
+
+  // R10_3D24C_UNTRUNCATED_INVESTIGATION_FLAGS
+
+  const [pendingCase,abandonedCollection,abandonedReversal]=
+   await Promise.all([
+    this.db.posPaymentReconciliation.findFirst({
+     where:{exchangeAttemptId:key,status:'PENDING'},
+     select:{id:true}
+    }),
+    this.db.posPaymentReconciliation.findFirst({
+     where:{
+      exchangeAttemptId:key,
+      kind:'EXCHANGE_COLLECTION',
+      proposedOutcome:'NOT_COLLECTED',
+      executionAbandoned:true
+     },
+     select:{id:true}
+    }),
+    this.db.posPaymentReconciliation.findFirst({
+     where:{
+      exchangeAttemptId:key,
+      kind:'EXCHANGE_REVERSAL',
+      proposedOutcome:'NOT_REVERSED',
+      executionAbandoned:true
+     },
+     select:{id:true}
+    })
+   ]);
+
+  return {
+   idempotencyKey:key,
+   locationId:attempt.locationId,
+   deviceId:attempt.deviceId,
+   shiftId:attempt.shiftId,
+   status:attempt.status,
+   paymentState:attempt.paymentState,
+   reversalStatus:attempt.reversalStatus,
+   // R10_3D24C_ACTIVE_FINANCIAL_HOLD_STATUS
+
+   financialHold:
+    !!hold&&attempt.reversalStatus!=='CONFIRMED',
+
+   historicalFinancialHold:!!hold,
+
+   canSubmitExceptionalResolution:
+    !!hold&&
+    u.roles.includes('SUPER_ADMIN')&&
+    ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+    attempt.paymentState==='CONFIRMED'&&
+    attempt.reversalStatus==='AUTHORIZED'&&
+    !!attempt.reversalExecutionById&&
+    !!attempt.reversalExecutionAt&&
+    attempt.reversalExecutionById!==u.id&&
+    !attempt.reversalConfirmedAt&&
+    records.length<=200&&
+    !pendingCase,
+
+   // R10_3D24C_EXCHANGE_INVESTIGATION_PERMISSIONS
+
+   investigationPending:!!pendingCase,
+
+   collectionExecutionAbandoned:!!abandonedCollection,
+
+   reversalExecutionAbandoned:!!abandonedReversal,
+
+   paymentAuthorizedById:attempt.paymentAuthorizedById,
+   paymentAuthorizedAt:attempt.paymentAuthorizedAt,
+   reversalExecutionById:attempt.reversalExecutionById,
+   reversalExecutionAt:attempt.reversalExecutionAt,
+
+   canSubmitInvestigation:
+    ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+    records.length<=200&&
+    !hold&&
+    !pendingCase&&
+    (
+     (
+      attempt.paymentState==='UNCONFIRMED'&&
+      attempt.reversalStatus==='NONE'&&
+      !!attempt.paymentAuthorizedById&&
+      !!attempt.paymentAuthorizedAt&&
+      !attempt.paymentConfirmedAt
+     )||
+     (
+      attempt.paymentState==='CONFIRMED'&&
+      attempt.reversalStatus==='AUTHORIZED'&&
+      !!attempt.reversalExecutionById&&
+      !!attempt.reversalExecutionAt&&
+      !attempt.reversalConfirmedAt
+     )
+    ),
+
+   canDeclareNegative:
+    ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+    records.length<=200&&
+    !hold&&
+    !pendingCase&&
+    (
+     (
+      attempt.paymentState==='UNCONFIRMED'&&
+      attempt.reversalStatus==='NONE'&&
+      attempt.paymentAuthorizedById===u.id&&
+      !!attempt.paymentAuthorizedAt&&
+      !attempt.paymentConfirmedAt
+     )||
+     (
+      attempt.paymentState==='CONFIRMED'&&
+      attempt.reversalStatus==='AUTHORIZED'&&
+      attempt.reversalExecutionById===u.id&&
+      !!attempt.reversalExecutionAt&&
+      !attempt.reversalConfirmedAt
+     )
+    ),
+   records:records.slice(0,200).map(item=>({
+    ...item,
+    canReview:
+     u.roles.includes('SUPER_ADMIN')&&
+     item.status==='PENDING'&&
+     item.submittedById!==u.id&&
+     item.paymentOperatorId!==u.id
+   })),
+   truncated:records.length>200,
+   paymentExecutionAuthorized:false
+  };
+ }
+
+ async submitRefundInvestigation(
+  key:string,
+  body:any,
+  u:Principal
+ ){
+
+  const outcome=body?.proposedOutcome;
+
+  if(outcome!=='PAID'&&outcome!=='NOT_PAID'){
+   throw new BadRequestException('Invalid refund investigation outcome');
+  }
+
+  const evidenceReference=this.reconciliationText(
+   body?.evidenceReference,5,200,'Evidence reference'
+  );
+
+  const reason=this.reconciliationText(
+   body?.reason,10,500,'Investigation reason'
+  );
+
+  const executionAbandoned=body?.executionAbandoned===true;
+
+  return this.withRefundInvestigation(key,u,async(tx,attempt)=>{
+
+   if(
+    outcome==='NOT_PAID'&&(
+     attempt.authorizedById!==u.id||
+     !executionAbandoned
+    )
+   ){
+    throw new ForbiddenException(
+     'Original payment operator must attest no payout occurred '+
+     'and permanently abandon the authorization'
+    );
+   }
+
+   const pending=await tx.posPaymentReconciliation.findFirst({
+    where:{
+     refundAttemptId:key,
+     status:'PENDING'
+    }
+   });
+
+   if(pending){
+    if(
+     pending.submittedById===u.id&&
+     pending.proposedOutcome===outcome&&
+     pending.evidenceReference===evidenceReference&&
+     pending.reason===reason&&
+     pending.executionAbandoned===executionAbandoned
+    ){
+     return {
+      ...pending,
+      duplicate:true,
+      paymentExecutionAuthorized:false
+     };
+    }
+
+    throw new ConflictException(
+     'Another refund investigation is already pending'
+    );
+   }
+
+   const investigation=await tx.posPaymentReconciliation.create({
+    data:{
+     kind:'REFUND_PAYOUT',
+     refundAttemptId:key,
+     locationId:attempt.locationId,
+     deviceId:attempt.deviceId,
+     shiftId:attempt.shiftId,
+     paymentOperatorId:attempt.authorizedById!,
+     payloadHash:attempt.payloadHash,
+     amount:attempt.amount,
+     originalStatus:attempt.status,
+     originalPaymentState:attempt.paymentState,
+     proposedOutcome:outcome,
+     evidenceReference,
+     reason,
+     executionAbandoned,
+     submittedById:u.id
+    }
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'POS_REFUND_INVESTIGATION_SUBMITTED',
+     entityType:'PosPaymentReconciliation',
+     entityId:investigation.id,
+     after:{
+      refundAttemptId:key,
+      locationId:attempt.locationId,
+      amount:attempt.amount.toString(),
+      proposedOutcome:outcome,
+      evidenceReference,
+      reason,
+      executionAbandoned
+     }
+    }
+   });
+
+   return {
+    ...investigation,
+    duplicate:false,
+    paymentExecutionAuthorized:false
+   };
+
+  });
+ }
+
+ // R10_3D24C_REFUND_INVESTIGATION_REVIEW
+
+ async refundInvestigationHistory(key:string,u:Principal){
+
+  this.assertReconciliationManager(u);
+  this.reconciliationUuid(key);
+
+  const attempt=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!attempt){
+   throw new NotFoundException('Refund attempt not found');
+  }
+
+  this.branchAccess(u,attempt.locationId);
+
+  const records=await this.db.posPaymentReconciliation.findMany({
+   where:{
+    refundAttemptId:key,
+    kind:'REFUND_PAYOUT'
+   },
+   orderBy:[
+    {submittedAt:'desc'},
+    {id:'desc'}
+   ],
+   take:201
+  });
+
+  return {
+   idempotencyKey:key,
+   locationId:attempt.locationId,
+   status:attempt.status,
+   paymentState:attempt.paymentState,
+    authorizedById:attempt.authorizedById,
+
+    // R10_3D24C_REFUND_INVESTIGATION_CONTRACT
+
+    deviceId:attempt.deviceId,
+    shiftId:attempt.shiftId,
+    amount:attempt.amount.toString(),
+    method:attempt.method,
+
+    canDeclareNotPaid:
+     attempt.status==='PAYMENT_AUTHORIZED'&&
+     attempt.paymentState==='UNKNOWN'&&
+     !!attempt.authorizedAt&&
+     attempt.authorizedById===u.id,
+
+    canSubmitInvestigation:
+     attempt.status==='PAYMENT_AUTHORIZED'&&
+     attempt.paymentState==='UNKNOWN'&&
+     !!attempt.authorizedById&&
+     !!attempt.authorizedAt&&
+     records.length<=200&&
+     !records.some(item=>item.status==='PENDING'),
+
+    records:records.slice(0,200).map(item=>({
+    ...item,
+    canReview:
+     u.roles.includes('SUPER_ADMIN')&&
+     item.status==='PENDING'&&
+     item.submittedById!==u.id&&
+     item.paymentOperatorId!==u.id
+   })),
+   truncated:records.length>200,
+   paymentExecutionAuthorized:false
+  };
+ }
+
+
+ // R10_3D24C_EXCHANGE_INVESTIGATION_REVIEW
+
+ async reviewExchangeInvestigation(
+  key:string,
+  caseId:string,
+  body:any,
+  u:Principal
+ ){
+
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('Independent HQ review required');
+  }
+
+  this.reconciliationUuid(key);
+  this.reconciliationUuid(caseId);
+
+  const decision=body?.decision;
+
+  if(decision!=='APPROVED'&&decision!=='REJECTED'){
+   throw new BadRequestException('Invalid investigation decision');
+  }
+
+  const reviewNote=this.reconciliationText(
+   body?.reviewNote,10,1000,'Review note'
+  );
+
+  return this.withExchangeInvestigation(key,u,async(tx,attempt)=>{
+
+   const investigation=await tx.posPaymentReconciliation.findUnique({
+    where:{id:caseId}
+   });
+
+   if(
+    !investigation||
+    investigation.exchangeAttemptId!==key||
+    !['EXCHANGE_COLLECTION','EXCHANGE_REVERSAL'].includes(
+     investigation.kind
+    )
+   ){
+    throw new NotFoundException('Exchange investigation not found');
+   }
+
+   if(investigation.status!=='PENDING'){
+    throw new ConflictException(
+     'Investigation already reviewed; refresh authoritative status'
+    );
+   }
+
+   const snapshot=this.exchangeInvestigationSnapshot(
+    attempt,investigation.kind
+   );
+
+   if(
+    investigation.submittedById===u.id||
+    investigation.paymentOperatorId===u.id||
+    snapshot.operatorId===u.id
+   ){
+    throw new ForbiddenException(
+     'Reviewer must be independent of submitter and operator'
+    );
+   }
+
+   if(
+    investigation.locationId!==attempt.locationId||
+    investigation.deviceId!==attempt.deviceId||
+    investigation.shiftId!==attempt.shiftId||
+    investigation.payloadHash!==attempt.payloadHash||
+    investigation.originalStatus!==attempt.status||
+    investigation.originalPaymentState!==attempt.paymentState||
+    investigation.originalReversalStatus!==attempt.reversalStatus||
+    investigation.paymentOperatorId!==snapshot.operatorId||
+    !investigation.amount.equals(snapshot.amount)
+   ){
+    throw new ConflictException(
+     'Investigation no longer matches financial attempt'
+    );
+   }
+
+   const outcome=investigation.proposedOutcome;
+
+   if(
+    !(
+     investigation.kind==='EXCHANGE_COLLECTION'&&
+     ['COLLECTED','NOT_COLLECTED'].includes(outcome)
+    )&&
+    !(
+     investigation.kind==='EXCHANGE_REVERSAL'&&
+     ['REVERSED','NOT_REVERSED'].includes(outcome)
+    )
+   ){
+    throw new ConflictException('Invalid stored outcome');
+   }
+
+   if(
+    ['NOT_COLLECTED','NOT_REVERSED'].includes(outcome)&&
+    (
+     !investigation.executionAbandoned||
+     investigation.submittedById!==snapshot.operatorId
+    )
+   ){
+    throw new ConflictException(
+     'Original operator abandonment evidence missing'
+    );
+   }
+
+   const reviewedAt=new Date();
+
+   const reviewed=await tx.posPaymentReconciliation.updateMany({
+    where:{
+     id:caseId,
+     status:'PENDING'
+    },
+    data:{
+     status:decision,
+     reviewedById:u.id,
+     reviewedAt,
+     reviewNote
+    }
+   });
+
+   if(reviewed.count!==1){
+    throw new ConflictException('Investigation changed during review');
+   }
+
+   if(decision==='APPROVED'&&outcome!=='NOT_REVERSED'){
+
+    let data:Prisma.PosExchangeAttemptUpdateManyMutationInput;
+
+    if(outcome==='COLLECTED'){
+
+     data={
+      paymentState:'CONFIRMED',
+      paymentConfirmedById:u.id,
+      paymentConfirmedAt:reviewedAt
+     };
+
+    }else if(outcome==='NOT_COLLECTED'){
+
+     data={
+      status:'RESOLVED_NO_EXCHANGE',
+      paymentState:'NOT_COLLECTED',
+      resolutionReason:investigation.reason,
+      resolvedById:u.id,
+      resolvedAt:reviewedAt
+     };
+
+    }else if(outcome==='REVERSED'){
+
+     data={
+      reversalStatus:'CONFIRMED',
+      reversalConfirmedById:u.id,
+      reversalConfirmedAt:reviewedAt,
+      reversalEvidenceReference:investigation.evidenceReference
+     };
+
+    }else{
+     throw new ConflictException('Unsupported outcome');
+    }
+
+    const updated=await tx.posExchangeAttempt.updateMany({
+     where:{
+      id:key,
+      status:attempt.status,
+      paymentState:attempt.paymentState,
+      reversalStatus:attempt.reversalStatus,
+      payloadHash:attempt.payloadHash
+     },
+     data
+    });
+
+    if(updated.count!==1){
+     throw new ConflictException(
+      'Exchange changed during independent review'
+     );
+    }
+
+   }
+
+   const result=await tx.posExchangeAttempt.findUniqueOrThrow({
+    where:{id:key}
+   });
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'POS_EXCHANGE_INVESTIGATION_'+decision,
+     entityType:'PosPaymentReconciliation',
+     entityId:caseId,
+     before:{
+      investigationStatus:'PENDING',
+      exchangeStatus:attempt.status,
+      paymentState:attempt.paymentState,
+      reversalStatus:attempt.reversalStatus
+     },
+     after:{
+      investigationStatus:decision,
+      exchangeAttemptId:key,
+      locationId:attempt.locationId,
+      kind:investigation.kind,
+      proposedOutcome:outcome,
+      paymentOperatorId:investigation.paymentOperatorId,
+      submittedById:investigation.submittedById,
+      reviewedById:u.id,
+      evidenceReference:investigation.evidenceReference,
+      reviewNote,
+      amount:snapshot.amount.toString(),
+      exchangeStatus:result.status,
+      paymentState:result.paymentState,
+      reversalStatus:result.reversalStatus
+     }
+    }
+   });
+
+   return {
+    idempotencyKey:key,
+    investigationId:caseId,
+    decision,
+    proposedOutcome:outcome,
+    locationId:result.locationId,
+    status:result.status,
+    paymentState:result.paymentState,
+    reversalStatus:result.reversalStatus,
+    reviewedById:u.id,
+    reviewedAt,
+    financialHold:
+     result.reversalStatus!=='CONFIRMED'&&
+     !!(await tx.posPaymentReconciliation.findFirst({
+      where:{
+       exchangeAttemptId:key,
+       kind:'EXCHANGE_REVERSAL',
+       proposedOutcome:'NOT_REVERSED',
+       status:'APPROVED'
+      },
+      select:{id:true}
+     })),
+    canResume:
+     ['REGISTERED','UNKNOWN'].includes(result.status)&&
+     result.paymentState==='CONFIRMED'&&
+     result.reversalStatus==='NONE',
+    paymentExecutionAuthorized:false
+   };
+
+  });
+ }
+
+ async reviewRefundInvestigation(
+  key:string,
+  caseId:string,
+  body:any,
+  u:Principal
+ ){
+
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException('Independent HQ review required');
+  }
+
+  this.reconciliationUuid(key);
+  this.reconciliationUuid(caseId);
+
+  const decision=body?.decision;
+
+  if(decision!=='APPROVED'&&decision!=='REJECTED'){
+   throw new BadRequestException('Invalid investigation decision');
+  }
+
+  const reviewNote=this.reconciliationText(
+   body?.reviewNote,10,1000,'Review note'
+  );
+
+  return this.withRefundInvestigation(key,u,async(tx,attempt)=>{
+
+   const investigation=await tx.posPaymentReconciliation.findUnique({
+    where:{id:caseId}
+   });
+
+   if(
+    !investigation||
+    investigation.kind!=='REFUND_PAYOUT'||
+    investigation.refundAttemptId!==key
+   ){
+    throw new NotFoundException('Refund investigation not found');
+   }
+
+   if(
+    investigation.submittedById===u.id||
+    investigation.paymentOperatorId===u.id||
+    attempt.authorizedById===u.id
+   ){
+    throw new ForbiddenException(
+     'Reviewer must be independent of submitter and payment operator'
+    );
+   }
+
+   if(investigation.status!=='PENDING'){
+    throw new ConflictException(
+     'Investigation already reviewed; refresh authoritative status'
+    );
+   }
+
+   if(
+    investigation.locationId!==attempt.locationId||
+    investigation.deviceId!==attempt.deviceId||
+    investigation.shiftId!==attempt.shiftId||
+    investigation.payloadHash!==attempt.payloadHash||
+    !investigation.amount.equals(attempt.amount)||
+    investigation.paymentOperatorId!==attempt.authorizedById||
+    investigation.originalStatus!==attempt.status||
+    investigation.originalPaymentState!==attempt.paymentState
+   ){
+    throw new ConflictException(
+     'Investigation no longer matches the original financial attempt'
+    );
+   }
+
+   const outcome=investigation.proposedOutcome;
+
+   if(outcome!=='PAID'&&outcome!=='NOT_PAID'){
+    throw new ConflictException('Invalid stored investigation outcome');
+   }
+
+   if(
+    outcome==='NOT_PAID'&&(
+     !investigation.executionAbandoned||
+     investigation.submittedById!==attempt.authorizedById
+    )
+   ){
+    throw new ConflictException(
+     'Original operator abandonment evidence is missing'
+    );
+   }
+
+   const reviewedAt=new Date();
+
+   const reviewed=await tx.posPaymentReconciliation.updateMany({
+    where:{
+     id:caseId,
+     status:'PENDING'
+    },
+    data:{
+     status:decision,
+     reviewedById:u.id,
+     reviewedAt,
+     reviewNote
+    }
+   });
+
+   if(reviewed.count!==1){
+    throw new ConflictException('Investigation changed during review');
+   }
+
+   if(decision==='APPROVED'){
+
+    const updated=await tx.posRefundAttempt.updateMany({
+     where:{
+      id:key,
+      status:'PAYMENT_AUTHORIZED',
+      paymentState:'UNKNOWN',
+      payloadHash:attempt.payloadHash,
+      authorizedById:attempt.authorizedById,
+      settlementId:null
+     },
+     data:outcome==='PAID'
+      ?{
+       status:'PAID',
+       paymentState:'CONFIRMED',
+       confirmedById:u.id,
+       confirmedAt:reviewedAt
+      }
+      :{
+       status:'RESOLVED_NO_PAYMENT',
+       paymentState:'NOT_PAID',
+       resolutionReason:investigation.reason,
+       evidenceReference:investigation.evidenceReference,
+       resolvedById:u.id,
+       resolvedAt:reviewedAt
+      }
+    });
+
+    if(updated.count!==1){
+     throw new ConflictException(
+      'Refund changed during independent review'
+     );
+    }
+
+   }
+
+   await tx.auditLog.create({
+    data:{
+     actorId:u.id,
+     action:'POS_REFUND_INVESTIGATION_'+decision,
+     entityType:'PosPaymentReconciliation',
+     entityId:caseId,
+     before:{
+      status:'PENDING',
+      refundStatus:attempt.status,
+      paymentState:attempt.paymentState
+     },
+     after:{
+      status:decision,
+      refundAttemptId:key,
+      locationId:attempt.locationId,
+      proposedOutcome:outcome,
+      paymentOperatorId:investigation.paymentOperatorId,
+      submittedById:investigation.submittedById,
+      reviewedById:u.id,
+      evidenceReference:investigation.evidenceReference,
+      reviewNote,
+      amount:attempt.amount.toString()
+     }
+    }
+   });
+
+   const result=await tx.posRefundAttempt.findUniqueOrThrow({
+    where:{id:key}
+   });
+
+   return {
+    idempotencyKey:key,
+    investigationId:caseId,
+    decision,
+    proposedOutcome:outcome,
+    locationId:result.locationId,
+    status:result.status,
+    paymentState:result.paymentState,
+    reviewedById:u.id,
+    reviewedAt,
+    canResume:
+     result.status==='PAID'&&
+     result.paymentState==='CONFIRMED',
+    paymentExecutionAuthorized:false
+   };
+
+  });
+ }
+
+// R10_3D24C_HQ_REFUND_RESOLUTION
+ async resolveUnpaidRefund(
+  key:string,
+  reason:string,
+  u:Principal,
+  evidenceReference:string
+ ){
+
+  if(!u.roles.includes('SUPER_ADMIN')){
+   throw new ForbiddenException(
+    'HQ refund resolution required'
+   );
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException(
+    'Invalid refund attempt identity'
+   );
+  }
+
+  if(typeof reason!=='string'){
+   throw new BadRequestException(
+    'Resolution reason required'
+   );
+  }
+
+  reason=reason.trim();
+  if(
+   typeof evidenceReference!=='string'||
+   evidenceReference.trim().length<5||
+   evidenceReference.trim().length>200
+  ){
+   throw new BadRequestException(
+    'Resolution evidence reference required'
+   );
+  }
+
+  evidenceReference=evidenceReference.trim();
+
+
+
+  if(reason.length<10||reason.length>500){
+   throw new BadRequestException(
+    'Resolution reason must contain 10-500 characters'
+   );
+  }
+
+  const initial=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException(
+    'Refund attempt not found'
+   );
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(
+   ()=>this.db.$transaction(async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-refund-settlement:${initial.returnId}`})
+     )
+    `;
+
+    const attempt=await tx.posRefundAttempt.findUniqueOrThrow({
+     where:{id:key}
+    });
+
+    this.branchAccess(u,attempt.locationId);
+
+    const settlement=await tx.posRefundSettlement.findUnique({
+     where:{idempotencyKey:key}
+    });
+
+    if(settlement||attempt.settlementId){
+     throw new ConflictException(
+      'A financial settlement already exists'
+     );
+    }
+
+    if(attempt.status==='RESOLVED_NO_PAYMENT'){
+
+     if(attempt.resolutionReason!==reason||attempt.evidenceReference!==evidenceReference){
+      throw new ConflictException(
+       'Refund already resolved with a different reason'
+      );
+     }
+
+     return {
+      idempotencyKey:key,
+      status:attempt.status,
+      paymentState:attempt.paymentState,
+      locationId:attempt.locationId,
+      resolutionReason:attempt.resolutionReason,
+       evidenceReference:attempt.evidenceReference,
+      resolvedById:attempt.resolvedById,
+      resolvedAt:attempt.resolvedAt,
+      duplicate:true
+     };
+    }
+
+    if(
+     attempt.status!=='REGISTERED'||
+     attempt.paymentState!=='UNCONFIRMED'
+    ){
+     throw new ConflictException(
+      'Payment authorization has already been issued. '+
+      'Physical payment must be reconciled before resolution.'
+     );
+    }
+
+    const resolvedAt=new Date();
+
+    const updated=await tx.posRefundAttempt.updateMany({
+     where:{
+      id:key,
+      status:'REGISTERED',
+      paymentState:'UNCONFIRMED',
+      settlementId:null
+     },
+     data:{
+      status:'RESOLVED_NO_PAYMENT',
+      paymentState:'NOT_PAID',
+      resolutionReason:reason,
+       evidenceReference,
+       resolvedById:u.id,
+      resolvedAt
+     }
+    });
+
+    if(updated.count!==1){
+     throw new ConflictException(
+      'Refund attempt changed during resolution'
+     );
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_REFUND_RESOLVED_NO_PAYMENT',
+      entityType:'PosRefundAttempt',
+      entityId:key,
+      before:{
+       status:attempt.status,
+       paymentState:attempt.paymentState
+      },
+      after:{
+       status:'RESOLVED_NO_PAYMENT',
+       paymentState:'NOT_PAID',
+       reason,evidenceReference,
+       returnId:attempt.returnId,
+       locationId:attempt.locationId,
+       shiftId:attempt.shiftId,
+       amount:attempt.amount.toString()
+      }
+     }
+    });
+
+    return {
+     idempotencyKey:key,
+     status:'RESOLVED_NO_PAYMENT',
+     paymentState:'NOT_PAID',
+     locationId:attempt.locationId,
+     resolutionReason:reason,evidenceReference,
+     resolvedById:u.id,
+     resolvedAt,
+     duplicate:false
+    };
+
+   },{
+    isolationLevel:
+     Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   })
+  );
+ }
+
+ // R10_3D24C_PAID_REFUND_RECOVERY
+ async resumePaidRefund(key:string,u:Principal){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException(
+    'Manager authorization required'
+   );
+  }
+
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key)){
+   throw new BadRequestException(
+    'Invalid refund attempt identity'
+   );
+  }
+
+  const attempt=await this.db.posRefundAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!attempt){
+   throw new NotFoundException(
+    'Refund attempt not found'
+   );
+  }
+
+  this.branchAccess(u,attempt.locationId);
+
+  if(attempt.status==='ACCEPTED'){
+   return this.refundSettlementStatus(key,u);
+  }
+
+  if(
+   attempt.status!=='PAID'||
+   attempt.paymentState!=='CONFIRMED'
+  ){
+   throw new ConflictException(
+    'Only confirmed paid refunds can resume settlement'
+   );
+  }
+
+  const payload=
+   attempt.payload as unknown as RegisterPosRefundDto;
+
+  if(
+   payload.idempotencyKey!==key||
+   this.refundPayloadHash(payload)!==attempt.payloadHash
+  ){
+   throw new ConflictException(
+    'Registered refund payload integrity failed'
+   );
+  }
+
+  await this.recordRefundSettlement({
+   returnId:payload.returnId,
+   idempotencyKey:payload.idempotencyKey,
+   method:payload.method,
+   amount:payload.amount,
+   payoutShiftId:payload.payoutShiftId,
+   reference:payload.reference
+  },u);
+
+  return this.refundSettlementStatus(key,u);
+ }
+
+// R10_3D24C_SHARED_REFUND_ELIGIBILITY
+ private async validateRefundEligibility(
+  tx:Prisma.TransactionClient,
+  dto:RecordPosRefundSettlementDto,
+  u:Principal,
+  amountCents:number
+ ){
+
+const ret=await tx.posReturn.findUnique({
      where:{id:dto.returnId},
      include:{
       lines:true,
@@ -2648,7 +5197,211 @@ await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entity
      );
     }
 
-    let shift:null|{
+
+  if(
+   !Number.isSafeInteger(originalReturnCents)||
+   !Number.isSafeInteger(exchangeCreditCents)||
+   !Number.isSafeInteger(settledCents)||
+   !Number.isSafeInteger(dueCents)||
+   settledCents<0||
+   dueCents<0
+  ){
+   throw new ConflictException(
+    'Refund financial allocation requires reconciliation'
+   );
+  }
+
+  return {
+   ret,
+   originalReturnCents,
+   exchangeCreditCents,
+   dueCents,
+   settledCents
+  };
+ }
+
+async recordRefundSettlement(
+  dto:RecordPosRefundSettlementDto,
+  u:Principal
+ ){
+  this.assertPhysicalTender(dto.method);
+  const manager=
+   u.roles.includes('SUPER_ADMIN')||
+   u.roles.includes('BRANCH_MANAGER');
+
+  if(!manager){
+   throw new ForbiddenException('Manager authorization required');
+  }
+
+  const amountCents=Math.round(dto.amount*100);
+
+  // R10_3D24C_REFUND_AMOUNT_GUARD
+  if(
+   !Number.isFinite(dto.amount)||
+   !Number.isSafeInteger(amountCents)||
+   amountCents<=0||
+   amountCents>999999999999||
+   Math.abs(dto.amount*100-amountCents)>0.000001
+  ){
+   throw new BadRequestException('Invalid settlement amount');
+  }
+
+  const reference=dto.reference?.trim()||null;
+
+  if(dto.method!=='CASH'&&!reference){
+   throw new BadRequestException(
+    'Non-cash refunds require a payment reference'
+   );
+  }
+
+  if(dto.method==='CASH'&&!dto.payoutShiftId){
+   throw new BadRequestException(
+    'Cash refunds require an open payout shift'
+   );
+  }
+
+  if(dto.method!=='CASH'&&dto.payoutShiftId){
+   throw new BadRequestException(
+    'Only cash refunds may specify a payout shift'
+   );
+  }
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    // R10_3D24C_SETTLEMENT_LINK
+    const initialAttempt=await tx.posRefundAttempt.findUnique({
+     where:{id:dto.idempotencyKey}
+    });
+
+    if(initialAttempt){
+     this.branchAccess(u,initialAttempt.locationId);
+
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${`pos-shift-id:${initialAttempt.shiftId}`})
+      )
+     `;
+    }else if(dto.payoutShiftId){
+     await tx.$executeRaw`
+      SELECT pg_advisory_xact_lock(
+       hashtext(${`pos-shift-id:${dto.payoutShiftId}`})
+      )
+     `;
+    }
+
+// Serialize all settlement attempts for the same return.
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-refund-settlement:${dto.returnId}`})
+     )
+    `;
+
+    // R10_3D24C_REGISTERED_SHIFT_LOCK
+    const registered=await tx.posRefundAttempt.findUnique({
+     where:{id:dto.idempotencyKey}
+    });
+
+    if(registered){
+     this.branchAccess(u,registered.locationId);
+    }
+
+const existing=await tx.posRefundSettlement.findUnique({
+     where:{idempotencyKey:dto.idempotencyKey}
+    });
+
+    if(existing){
+     const previousReturn=await tx.posReturn.findUniqueOrThrow({
+      where:{id:existing.returnId}
+     });
+
+     this.branchAccess(u,previousReturn.locationId);
+
+     if(
+      existing.returnId!==dto.returnId||
+      existing.method!==dto.method||
+      Math.round(existing.amount.toNumber()*100)!==amountCents||
+      (existing.payoutShiftId??null)!==
+       (dto.payoutShiftId??null)||
+      (existing.reference??null)!==reference
+     ){
+      throw new ConflictException(
+       'Settlement idempotency key reused with different details'
+      );
+     }
+
+     return {...existing,duplicate:true};
+    }
+
+    // R10_3D24C_REQUIRED_RESERVATION
+    if(!registered){
+     throw new ConflictException(
+      'Central refund registration required'
+     );
+    }
+
+    if(
+     registered.status!=='PAID'||
+     registered.paymentState!=='CONFIRMED'
+    ){
+     throw new ConflictException(
+      'Confirmed physical refund payment required'
+     );
+    }
+
+    const registeredPayload=
+     registered.payload as unknown as RegisterPosRefundDto;
+
+    if(
+     registeredPayload.idempotencyKey!==registered.id||
+     registeredPayload.returnId!==registered.returnId||
+     registeredPayload.locationId!==registered.locationId||
+     registeredPayload.deviceId!==registered.deviceId||
+     registeredPayload.shiftId!==registered.shiftId||
+     registeredPayload.method!==registered.method||
+     registered.returnId!==dto.returnId||
+     registered.method!==dto.method||
+     Math.round(registered.amount.toNumber()*100)!==amountCents||
+     this.refundPayloadHash(registeredPayload)!==
+      registered.payloadHash||
+     this.refundPayloadHash({
+      ...dto,
+      locationId:registered.locationId,
+      deviceId:registered.deviceId,
+      shiftId:registered.shiftId
+     })!==registered.payloadHash
+    ){
+     throw new ConflictException(
+      'Settlement does not match the registered refund'
+     );
+    }
+
+    const registeredShift=await tx.posShift.findUnique({
+     where:{id:registered.shiftId}
+    });
+
+    if(
+     !registeredShift||
+     registeredShift.status!=='OPEN'||
+     registeredShift.locationId!==registered.locationId||
+     registeredShift.deviceId!==registered.deviceId
+    ){
+     throw new ConflictException(
+      'Registered refund shift requires reconciliation'
+     );
+    }
+
+const {
+     ret,
+     originalReturnCents,
+     exchangeCreditCents,
+     dueCents,
+     settledCents
+    }=await this.validateRefundEligibility(
+     tx,dto,u,amountCents
+    );
+
+let shift:null|{
      id:string;
      locationId:string;
      status:string;
@@ -2766,7 +5519,47 @@ await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entity
      }
     });
 
-    return {
+    // R10_3D24C_ATOMIC_FINALIZATION
+    const finalized=await tx.posRefundAttempt.updateMany({
+     where:{
+      id:registered.id,
+      payloadHash:registered.payloadHash,
+      status:'PAID',
+      paymentState:'CONFIRMED'
+     },
+     data:{status:'ACCEPTED',settlementId:settlement.id}
+    });
+
+    if(finalized.count!==1){
+     throw new ConflictException(
+      'Refund attempt could not be finalized atomically'
+     );
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:'POS_REFUND_ATTEMPT_FINALIZED',
+      entityType:'PosRefundAttempt',
+      entityId:registered.id,
+      before:{
+       status:'PAID',
+       paymentState:'CONFIRMED'
+      },
+      after:{
+       status:'ACCEPTED',
+       paymentState:'CONFIRMED',
+       settlementId:settlement.id,
+       returnId:ret.id,
+       locationId:ret.locationId,
+       shiftId:registered.shiftId,
+       amount:amount.toString(),
+       cashDrawerRecorded:!!shift
+      }
+     }
+    });
+
+return {
      ...settlement,
      duplicate:false,
      grossReturnValue:(originalReturnCents/100).toFixed(2),
@@ -2986,6 +5779,13 @@ return stableHash({
     if(existing){
 
      this.branchAccess(u,existing.locationId);
+      // R10_3D24C_EXCHANGE_REGISTRATION_EXCLUSION
+      if(existing.reversalStatus!=='NONE'){
+       throw new ConflictException(
+        'Exchange reserved for reversal investigation'
+       );
+      }
+
 
      if(existing.payloadHash!==payloadHash){
       throw new ConflictException(
@@ -3100,7 +5900,20 @@ return stableHash({
  }
 
  // R10_3D23B_PAYMENT_CONFIRMATION
+  // R10_3D24C_EXCLUSIVE_COLLECTION
+ async authorizeExchangePayment(key:string,u:Principal){
+  return this.transitionExchangePayment(key,u,'AUTHORIZE');
+ }
+
  async confirmExchangePayment(key:string,u:Principal){
+  return this.transitionExchangePayment(key,u,'CONFIRM');
+ }
+
+ private async transitionExchangePayment(
+  key:string,
+  u:Principal,
+  action:'AUTHORIZE'|'CONFIRM'
+ ){
 
   if(process.env.POS_EXCHANGE_ENABLED!=='true'){
    throw new ForbiddenException('Exchange checkout disabled');
@@ -3152,8 +5965,33 @@ return stableHash({
 
     this.branchAccess(u,attempt.locationId);
 
+    await this.assertOrdinaryPaymentExecutionAvailable(
+     tx,key,'EXCHANGE_COLLECTION'
+    );
+
+    // R10_3D24C_EXCHANGE_REVERSAL_CONFIRMATION_GUARD
+    if(attempt.reversalStatus!=='NONE'){
+     throw new ConflictException(
+      'Exchange reversal investigation is active. '+
+      'Payment confirmation is blocked.'
+     );
+    }
+
+
     if(attempt.status==='RESOLVED_NO_EXCHANGE'){
      throw new ConflictException('Exchange already resolved');
+    }
+
+    if(action==='AUTHORIZE'&&(
+     attempt.status!=='REGISTERED'||
+     attempt.paymentState!=='UNCONFIRMED'||
+     attempt.paymentAuthorizedById||
+     attempt.paymentAuthorizedAt
+    )){
+     throw new ConflictException(
+      'Payment collection is already authorized or unavailable. '+
+      'Do not collect payment again.'
+     );
     }
 
     if(
@@ -3189,11 +6027,100 @@ return stableHash({
      throw new ConflictException('Exchange shift unavailable');
     }
 
+    if(action==='AUTHORIZE'){
+
+     const device=await tx.posDevice.findUnique({
+      where:{id:attempt.deviceId}
+     });
+
+     if(!device?.active||device.locationId!==attempt.locationId){
+      throw new ConflictException('Exchange terminal unavailable');
+     }
+
+     const payload=attempt.payload as unknown as CreatePosExchangeDto;
+
+     const returned=Math.round(payload.expectedReturnValue*100);
+     const replacement=Math.round(payload.expectedReplacementValue*100);
+
+     if(
+      payload.idempotencyKey!==key||
+      payload.locationId!==attempt.locationId||
+      payload.deviceId!==attempt.deviceId||
+      payload.shiftId!==attempt.shiftId||
+      payload.originalSaleId!==attempt.originalSaleId||
+      this.exchangePayloadHash(payload,returned,replacement)!==
+       attempt.payloadHash
+     ){
+      throw new ConflictException('Exchange payload integrity failure');
+     }
+
+     const now=new Date();
+
+     const changed=await tx.posExchangeAttempt.updateMany({
+      where:{
+       id:key,
+       status:'REGISTERED',
+       paymentState:'UNCONFIRMED',
+       reversalStatus:'NONE',
+       paymentAuthorizedById:null,
+       paymentAuthorizedAt:null
+      },
+      data:{
+       paymentAuthorizedById:u.id,
+       paymentAuthorizedAt:now
+      }
+     });
+
+     if(changed.count!==1){
+      throw new ConflictException(
+       'Collection authorization unavailable. Do not collect payment.'
+      );
+     }
+
+     await tx.auditLog.create({
+      data:{
+       actorId:u.id,
+       action:'POS_EXCHANGE_PAYMENT_AUTHORIZED',
+       entityType:'PosExchangeAttempt',
+       entityId:key,
+       after:{
+        locationId:attempt.locationId,
+        deviceId:attempt.deviceId,
+        shiftId:attempt.shiftId,
+        authorizedAt:now.toISOString(),
+        additionalTenders:JSON.parse(
+         JSON.stringify(payload.additionalTenders)
+        )
+       }
+      }
+     });
+
+     return {
+      id:key,
+      status:'REGISTERED',
+      paymentState:'UNCONFIRMED',
+      paymentAuthorized:true,
+      duplicate:false
+     };
+    }
+
+    if(
+     !attempt.paymentAuthorizedAt||
+     attempt.paymentAuthorizedById!==u.id
+    ){
+     throw new ConflictException(
+      'Only the original authorized payment operator may confirm. '+
+      'Otherwise independent HQ reconciliation is required.'
+     );
+    }
+
     const updated=await tx.posExchangeAttempt.update({
      where:{id:key},
      data:{
       status:'UNKNOWN',
-      paymentState:'CONFIRMED'
+      paymentState:'CONFIRMED',
+      paymentConfirmedById:u.id,
+      paymentConfirmedAt:new Date()
      }
     });
 
@@ -3226,7 +6153,395 @@ return stableHash({
   ));
  }
 
- // R10_3D23B_MANAGER_RESOLUTION
+  // R10_3D24C_EXCLUSIVE_EXCHANGE_REVERSAL
+ async transitionExchangeReversal(
+  key:string,
+  action:'REQUEST'|'AUTHORIZE'|'CLAIM'|'CONFIRM',
+  detail:string,
+  u:Principal
+ ){
+
+  const hq=u.roles.includes('SUPER_ADMIN');
+  const manager=u.roles.includes('BRANCH_MANAGER');
+
+  if(!hq&&!manager){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  if(action==='AUTHORIZE'&&!hq){
+   throw new ForbiddenException('Independent HQ approval required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(key)){
+   throw new BadRequestException('Invalid exchange identity');
+  }
+
+  if(typeof detail!=='string'){
+   throw new BadRequestException('Valid evidence or reason required');
+  }
+
+  const value=detail.trim();
+
+  if(action==='REQUEST'&&(value.length<10||value.length>500)){
+   throw new BadRequestException('Detailed investigation reason required');
+  }
+
+  if(action!=='REQUEST'&&(value.length<5||value.length>200)){
+   throw new BadRequestException('Evidence reference required');
+  }
+
+  const initial=await this.db.posExchangeAttempt.findUnique({
+   where:{id:key}
+  });
+
+  if(!initial){
+   throw new NotFoundException('Exchange attempt not registered');
+  }
+
+  this.branchAccess(u,initial.locationId);
+
+  return withPosTransactionRetry(()=>this.db.$transaction(
+   async tx=>{
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-shift-id:${initial.shiftId}`})
+     )
+    `;
+
+    await tx.$executeRaw`
+     SELECT pg_advisory_xact_lock(
+      hashtext(${`pos-exchange:${key}`})
+     )
+    `;
+
+    const attempt=await tx.posExchangeAttempt.findUnique({
+     where:{id:key}
+    });
+
+    if(!attempt){
+     throw new NotFoundException('Exchange attempt missing');
+    }
+
+    this.branchAccess(u,attempt.locationId);
+
+    if(
+     attempt.shiftId!==initial.shiftId||
+     attempt.locationId!==initial.locationId||
+     attempt.deviceId!==initial.deviceId
+    ){
+     throw new ConflictException('Exchange identity changed');
+    }
+
+    const completed=await tx.posExchange.findUnique({
+     where:{idempotencyKey:key}
+    });
+
+    if(
+     completed||
+     !['REGISTERED','UNKNOWN'].includes(attempt.status)
+    ){
+     throw new ConflictException(
+      'Finalized exchange cannot enter reversal'
+     );
+    }
+
+    if(!['CONFIRMED','UNCONFIRMED'].includes(attempt.paymentState)){
+     throw new ConflictException(
+      'Exchange does not require a physical payment reversal'
+     );
+    }
+
+    const payload=attempt.payload as unknown as CreatePosExchangeDto;
+
+    if(
+     payload.idempotencyKey!==key||
+     payload.locationId!==attempt.locationId||
+     payload.deviceId!==attempt.deviceId||
+     payload.shiftId!==attempt.shiftId||
+     payload.originalSaleId!==attempt.originalSaleId||
+     !Array.isArray(payload.additionalTenders)
+    ){
+     throw new ConflictException('Stored exchange identity mismatch');
+    }
+
+    const returned=Math.round(payload.expectedReturnValue*100);
+    const replacement=Math.round(payload.expectedReplacementValue*100);
+
+    if(
+     !Number.isSafeInteger(returned)||
+     !Number.isSafeInteger(replacement)||
+     returned<0||
+     replacement<=returned||
+     this.exchangePayloadHash(payload,returned,replacement)!==attempt.payloadHash
+    ){
+     throw new ConflictException('Exchange payment integrity mismatch');
+    }
+
+    const shift=await tx.posShift.findUnique({
+     where:{id:attempt.shiftId}
+    });
+
+    if(
+     !shift||
+     shift.status!=='OPEN'||
+     shift.locationId!==attempt.locationId||
+     shift.deviceId!==attempt.deviceId
+    ){
+     throw new ConflictException('Original exchange shift unavailable');
+    }
+
+
+    await this.assertOrdinaryPaymentExecutionAvailable(
+     tx,key,'EXCHANGE_REVERSAL'
+    );
+
+    // R10_3D24C_REVERSAL_EXECUTION_GATE
+
+    if(action==='REQUEST'){
+
+     if(
+      attempt.paymentState==='UNCONFIRMED'&&
+      !attempt.paymentAuthorizedById
+     ){
+      throw new ConflictException(
+       'No collection authorization exists. '+
+       'Use unpaid exchange reconciliation.'
+      );
+     }
+
+     if(
+      attempt.paymentAuthorizedById&&
+      attempt.paymentAuthorizedById!==u.id
+     ){
+      throw new ForbiddenException(
+       'Original collection operator must initiate reversal '+
+       'and stop all outstanding collection activity.'
+      );
+     }
+    }
+
+    if(action==='AUTHORIZE'&&
+       attempt.paymentAuthorizedById===u.id){
+     throw new ForbiddenException(
+      'Collection operator cannot approve their own reversal'
+     );
+    }
+
+    // R10_3D24C_CONFIRMED_COLLECTION_REVERSAL
+    if(
+     attempt.paymentState!=='CONFIRMED'||
+     !attempt.paymentAuthorizedById
+    ){
+     throw new ConflictException(
+      'Confirmed collection required. Uncertain payments '+
+      'must use independent payment reconciliation.'
+     );
+    }
+
+    if(action==='CLAIM'){
+
+     if(
+      attempt.reversalStatus!=='AUTHORIZED'||
+      attempt.reversalRequestedById!==u.id||
+      !attempt.reversalApprovedById||
+      !attempt.reversalApprovalEvidence||
+      attempt.reversalApprovedById===u.id||
+      attempt.reversalExecutionById||
+      attempt.reversalExecutionAt
+     ){
+      throw new ConflictException(
+       'Reversal execution unavailable or already claimed. '+
+       'Do not perform a physical reversal.'
+      );
+     }
+
+     const claimedAt=new Date();
+
+     const claim=await tx.posExchangeAttempt.updateMany({
+      where:{
+       id:key,
+       reversalStatus:'AUTHORIZED',
+       reversalRequestedById:u.id,
+       reversalExecutionById:null,
+       reversalExecutionAt:null
+      },
+      data:{
+       reversalExecutionById:u.id,
+       reversalExecutionAt:claimedAt
+      }
+     });
+
+     if(claim.count!==1){
+      throw new ConflictException(
+       'Reversal execution claim unavailable'
+      );
+     }
+
+     await tx.auditLog.create({
+      data:{
+       actorId:u.id,
+       action:'POS_EXCHANGE_REVERSAL_EXECUTION_CLAIMED',
+       entityType:'PosExchangeAttempt',
+       entityId:key,
+       after:{
+        locationId:attempt.locationId,
+        shiftId:attempt.shiftId,
+        claimedAt:claimedAt.toISOString(),
+        executionEvidence:value,
+        additionalTenders:JSON.parse(
+         JSON.stringify(payload.additionalTenders)
+        )
+       }
+      }
+     });
+
+     return {
+      idempotencyKey:key,
+      locationId:attempt.locationId,
+      deviceId:attempt.deviceId,
+      shiftId:attempt.shiftId,
+      status:attempt.status,
+      paymentState:attempt.paymentState,
+      reversalStatus:'AUTHORIZED',
+      reversalExecutionById:u.id,
+      reversalExecutionAt:claimedAt,
+      paymentExecutionAuthorized:true,
+      duplicate:false
+     };
+    }
+
+    if(action==='CONFIRM'&&(
+     !attempt.reversalExecutionAt||
+     attempt.reversalExecutionById!==u.id||
+     !attempt.reversalApprovalEvidence
+    )){
+     throw new ConflictException(
+      'Exclusive reversal execution claim required'
+     );
+    }
+
+    const expected=
+     action==='REQUEST'?'NONE':
+     action==='AUTHORIZE'?'REQUESTED':
+     'AUTHORIZED';
+
+    const next=
+     action==='REQUEST'?'REQUESTED':
+     action==='AUTHORIZE'?'AUTHORIZED':
+     'CONFIRMED';
+
+    if(attempt.reversalStatus!==expected){
+     throw new ConflictException(
+      'Reversal state changed. Refresh central status. '+
+      'Do not repeat any physical payment operation.'
+     );
+    }
+
+    if(
+     action==='AUTHORIZE'&&
+     attempt.reversalRequestedById===u.id
+    ){
+     throw new ForbiddenException(
+      'Requester cannot approve their own reversal'
+     );
+    }
+
+    if(
+     action==='CONFIRM'&&
+     attempt.reversalRequestedById!==u.id
+    ){
+     throw new ForbiddenException(
+      'Designated reversal requester must confirm the outcome'
+     );
+    }
+
+    const now=new Date();
+
+    const data:Prisma.PosExchangeAttemptUpdateManyMutationInput=
+     action==='REQUEST'
+      ?{
+        reversalStatus:next,
+        reversalRequestedById:u.id,
+        reversalRequestedAt:now,
+        reversalRequestReason:value
+       }
+      :action==='AUTHORIZE'
+       ?{
+         reversalStatus:next,
+         reversalApprovedById:u.id,
+         reversalApprovedAt:now,
+         reversalApprovalEvidence:value
+        }
+       :{
+         reversalStatus:next,
+         reversalConfirmedById:u.id,
+         reversalConfirmedAt:now,
+         reversalEvidenceReference:value
+        };
+
+    const updated=await tx.posExchangeAttempt.updateMany({
+     where:{
+      id:key,
+      status:attempt.status,
+      paymentState:attempt.paymentState,
+      reversalStatus:expected,
+      payloadHash:attempt.payloadHash
+     },
+     data
+    });
+
+    if(updated.count!==1){
+     throw new ConflictException('Concurrent reversal transition detected');
+    }
+
+    await tx.auditLog.create({
+     data:{
+      actorId:u.id,
+      action:`POS_EXCHANGE_REVERSAL_${action}`,
+      entityType:'PosExchangeAttempt',
+      entityId:key,
+      before:{
+       reversalStatus:expected,
+       paymentState:attempt.paymentState
+      },
+      after:{
+       reversalStatus:next,
+       locationId:attempt.locationId,
+       shiftId:attempt.shiftId,
+       detail:value,
+       paymentAmount:((replacement-returned)/100).toFixed(2)
+      }
+     }
+    });
+
+    return {
+     idempotencyKey:key,
+     locationId:attempt.locationId,
+     deviceId:attempt.deviceId,
+     shiftId:attempt.shiftId,
+     status:attempt.status,
+     paymentState:attempt.paymentState,
+     reversalStatus:next,
+     reversalRequestedById:
+      action==='REQUEST'?u.id:attempt.reversalRequestedById,
+     reversalApprovedById:
+      action==='AUTHORIZE'?u.id:attempt.reversalApprovedById,
+     reversalConfirmedById:
+      action==='CONFIRM'?u.id:attempt.reversalConfirmedById,
+     duplicate:false,
+     paymentExecutionAuthorized:false
+    };
+
+   },{
+    isolationLevel:Prisma.TransactionIsolationLevel.Serializable,
+    timeout:15000
+   }
+  ));
+ }
+// R10_3D23B_MANAGER_RESOLUTION
  async resolveExchange(
   key:string,
   dto:ResolvePosExchangeDto,
@@ -3358,7 +6673,106 @@ return stableHash({
      );
     }
 
-    const updated=await tx.posExchangeAttempt.update({
+        // R10_3D24C_EXCHANGE_REVERSAL_RESOLUTION_GUARD
+
+// R10_3D24C_INDEPENDENT_REVERSAL_FINALIZATION
+
+    if(dto.paymentState==='REVERSED'){
+
+     if(
+      attempt.reversalStatus!=='CONFIRMED'||
+      attempt.paymentState!=='CONFIRMED'||
+      !attempt.reversalRequestedById||
+      !attempt.reversalApprovedById||
+      !attempt.reversalApprovedAt||
+      !attempt.reversalExecutionById||
+      !attempt.reversalExecutionAt||
+      !attempt.reversalConfirmedById||
+      !attempt.reversalConfirmedAt||
+      !attempt.reversalApprovalEvidence||
+      !attempt.reversalEvidenceReference||
+      attempt.reversalExecutionById!==attempt.reversalRequestedById||
+      attempt.reversalExecutionById===attempt.reversalApprovedById||
+      attempt.reversalExecutionAt<attempt.reversalApprovedAt||
+      attempt.reversalConfirmedAt<attempt.reversalExecutionAt||
+      attempt.reversalEvidenceReference!==dto.evidenceReference?.trim()
+     ){
+      throw new ConflictException(
+       'Complete verified reversal evidence required'
+      );
+     }
+
+     const pending=await tx.posPaymentReconciliation.findFirst({
+      where:{
+       exchangeAttemptId:key,
+       status:'PENDING'
+      },
+      select:{id:true}
+     });
+
+     if(pending){
+      throw new ConflictException(
+       'Pending investigation prevents finalization'
+      );
+     }
+
+     if(
+      attempt.reversalConfirmedById!==attempt.reversalExecutionById
+     ){
+
+      const independent=await tx.posPaymentReconciliation.findFirst({
+       where:{
+        exchangeAttemptId:key,
+        kind:'EXCHANGE_REVERSAL',
+        status:'APPROVED',
+        proposedOutcome:'REVERSED',
+        paymentOperatorId:attempt.reversalExecutionById,
+        reviewedById:attempt.reversalConfirmedById,
+        reviewedAt:attempt.reversalConfirmedAt,
+        evidenceReference:attempt.reversalEvidenceReference,
+        payloadHash:attempt.payloadHash,
+        locationId:attempt.locationId,
+        deviceId:attempt.deviceId,
+        shiftId:attempt.shiftId,
+        originalPaymentState:'CONFIRMED',
+        originalReversalStatus:'AUTHORIZED'
+       }
+      });
+
+      if(!independent){
+       throw new ConflictException(
+        'Approved independent reversal evidence unavailable'
+       );
+      }
+
+     }
+
+     if(
+      attempt.reversalExecutionById===u.id||
+      attempt.reversalConfirmedById===u.id
+     ){
+      throw new ForbiddenException(
+       'Reversal executor or confirmer cannot finalize this resolution'
+      );
+     }
+
+    }else{
+
+     if(attempt.reversalStatus!=='NONE'){
+      throw new ConflictException(
+       'Active reversal cannot be bypassed'
+      );
+     }
+
+     if(dto.paymentState==='NOT_COLLECTED'){
+      throw new ConflictException(
+       'Uncertain collection requires dedicated HQ reconciliation'
+      );
+     }
+
+    }
+
+const updated=await tx.posExchangeAttempt.update({
      where:{id:key},
      data:{
       status:'RESOLVED_NO_EXCHANGE',
@@ -3430,6 +6844,13 @@ return stableHash({
   }
 
   this.branchAccess(u,attempt.locationId);
+   // R10_3D24C_EXCHANGE_RESUME_EXCLUSION
+   if(attempt.reversalStatus!=='NONE'){
+    throw new ConflictException(
+     'Exchange is reserved for reversal reconciliation'
+    );
+   }
+
 
   if(attempt.status==='ACCEPTED'){
    return this.exchangeStatus(key,u);
@@ -3603,6 +7024,13 @@ return stableHash({
      }
 
      this.branchAccess(u,attempt.locationId);
+      // R10_3D24C_EXCHANGE_COMPLETION_EXCLUSION
+      if(attempt.reversalStatus!=='NONE'){
+       throw new ConflictException(
+        'Exchange reversal investigation is active'
+       );
+      }
+
 
      if(
       attempt.payloadHash!==payloadHash||
@@ -3988,6 +7416,7 @@ const original=await tx.posSale.findUnique({
       id:dto.idempotencyKey,
       payloadHash,
       status:{in:['REGISTERED','UNKNOWN']},
+       reversalStatus:'NONE',
       paymentState:{
        in:['CONFIRMED','NO_PAYMENT_REQUIRED']
       }
@@ -4109,7 +7538,178 @@ return {
   return grossCents-creditCents;
  }
 
- async exchangeStatus(key:string,u:Principal){
+  // R10_3D24C_CENTRAL_EXCHANGE_DISCOVERY
+ async pendingExchangeAttempts(
+  locationId:string,
+  u:Principal
+ ){
+
+  if(
+   !u.roles.includes('SUPER_ADMIN')&&
+   !u.roles.includes('BRANCH_MANAGER')
+  ){
+   throw new ForbiddenException('Manager access required');
+  }
+
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if(!uuid.test(locationId||'')){
+   throw new BadRequestException('Valid branch required');
+  }
+
+  this.branchAccess(u,locationId);
+
+  const attempts=await this.db.posExchangeAttempt.findMany({
+   where:{
+    locationId,
+    status:{
+     notIn:['ACCEPTED','RESOLVED_NO_EXCHANGE']
+    }
+   },
+   orderBy:[
+    {createdAt:'asc'},
+    {id:'asc'}
+   ],
+   take:201,
+   select:{
+    id:true,
+    originalSaleId:true,
+    locationId:true,
+    deviceId:true,
+    shiftId:true,
+    registeredById:true,
+    status:true,
+    paymentState:true,
+    reversalStatus:true,
+    reversalRequestedById:true,
+    reversalRequestedAt:true,
+    reversalRequestReason:true,
+    // R10_3D24C_EXECUTION_DISCOVERY
+    paymentAuthorizedById:true,
+    paymentAuthorizedAt:true,
+    reversalApprovalEvidence:true,
+    reversalExecutionById:true,
+    reversalExecutionAt:true,
+    reversalApprovedById:true,
+    reversalApprovedAt:true,
+    reversalConfirmedById:true,
+    reversalConfirmedAt:true,
+    reversalEvidenceReference:true,
+    createdAt:true,
+    updatedAt:true
+   }
+  });
+
+  // R10_3D24C_PENDING_EXCHANGE_PERMISSIONS
+
+  const ids=attempts.slice(0,200).map(a=>a.id);
+
+  const cases=await this.db.posPaymentReconciliation.findMany({
+   where:{
+    exchangeAttemptId:{in:ids},
+    OR:[
+     {status:'PENDING'},
+     {executionAbandoned:true}
+    ]
+   },
+   select:{
+    exchangeAttemptId:true,
+    kind:true,
+    status:true,
+    proposedOutcome:true,
+    executionAbandoned:true
+   }
+  });
+
+  const pendingIds=new Set(
+   cases.filter(c=>c.status==='PENDING')
+    .map(c=>c.exchangeAttemptId)
+  );
+
+  const abandonedReversalIds=new Set(
+   cases.filter(c=>
+    c.kind==='EXCHANGE_REVERSAL'&&
+    c.proposedOutcome==='NOT_REVERSED'&&
+    c.executionAbandoned
+   ).map(c=>c.exchangeAttemptId)
+  );
+
+  const abandonedCollectionIds=new Set(
+   cases.filter(c=>
+    c.kind==='EXCHANGE_COLLECTION'&&
+    c.proposedOutcome==='NOT_COLLECTED'&&
+    c.executionAbandoned
+   ).map(c=>c.exchangeAttemptId)
+  );
+
+  const records=attempts.slice(0,200).map(attempt=>({
+   investigationPending:pendingIds.has(attempt.id),
+   collectionExecutionAbandoned:
+    abandonedCollectionIds.has(attempt.id),
+   reversalExecutionAbandoned:
+    abandonedReversalIds.has(attempt.id),
+   ...attempt,
+   idempotencyKey:attempt.id,
+   canResume:
+     !pendingIds.has(attempt.id)&&
+    attempt.reversalStatus==='NONE'&&
+    ['CONFIRMED','NO_PAYMENT_REQUIRED'].includes(attempt.paymentState),
+   canRequestReversal:
+     !pendingIds.has(attempt.id)&&
+     !abandonedReversalIds.has(attempt.id)&&
+    attempt.reversalStatus==='NONE'&&
+    attempt.paymentState==='CONFIRMED'&&
+    attempt.paymentAuthorizedById===u.id,
+   canAuthorizeReversal:
+     !pendingIds.has(attempt.id)&&
+     !abandonedReversalIds.has(attempt.id)&&
+    u.roles.includes('SUPER_ADMIN')&&
+    attempt.reversalStatus==='REQUESTED'&&
+    attempt.paymentState==='CONFIRMED'&&
+    attempt.reversalRequestedById!==u.id&&
+    attempt.paymentAuthorizedById!==u.id,
+   canClaimReversal:
+     !pendingIds.has(attempt.id)&&
+     !abandonedReversalIds.has(attempt.id)&&
+    attempt.reversalStatus==='AUTHORIZED'&&
+    attempt.paymentState==='CONFIRMED'&&
+    attempt.reversalRequestedById===u.id&&
+    attempt.paymentAuthorizedById===u.id&&
+    !!attempt.reversalApprovalEvidence&&
+    !attempt.reversalExecutionById&&
+    !attempt.reversalExecutionAt,
+   canConfirmReversal:
+     !pendingIds.has(attempt.id)&&
+     !abandonedReversalIds.has(attempt.id)&&
+    attempt.reversalStatus==='AUTHORIZED'&&
+    attempt.paymentState==='CONFIRMED'&&
+    attempt.reversalRequestedById===u.id&&
+    attempt.reversalExecutionById===u.id&&
+    !!attempt.reversalExecutionAt,
+   canFinalizeReversal:
+     !pendingIds.has(attempt.id)&&
+    u.roles.includes('SUPER_ADMIN')&&
+    attempt.reversalStatus==='CONFIRMED'&&
+    !!attempt.reversalExecutionAt&&
+    !!attempt.reversalEvidenceReference&&
+    // R10_3D24C_INDEPENDENT_FINALIZER_DISCOVERY
+    !!attempt.reversalConfirmedById&&
+    !!attempt.reversalExecutionById&&
+    !!attempt.reversalApprovalEvidence&&
+    attempt.reversalExecutionById!==u.id&&
+    attempt.reversalConfirmedById!==u.id,
+   paymentExecutionAuthorized:false
+  }));
+
+  return {
+   locationId,
+   records,
+   truncated:attempts.length>200,
+   returnedCount:records.length,
+   fetchedAt:new Date().toISOString()
+  };
+ }
+async exchangeStatus(key:string,u:Principal){
 
   if(
    !u.roles.includes('SUPER_ADMIN')&&
@@ -4140,6 +7740,76 @@ return {
    }
   });
 
+  // R10_3D24C_ACCEPTED_CANONICAL_PAYLOAD_INTEGRITY
+
+  const verifyStoredExchangePayload=(
+   attempt:Prisma.PosExchangeAttemptGetPayload<{}>
+  )=>{
+
+   // R10_3D24C_PENDING_EXCHANGE_PAYLOAD_VERIFICATION
+
+   const storedPayload=attempt.payload as any;
+
+   if(
+    !storedPayload||
+    storedPayload.idempotencyKey!==attempt.id||
+    storedPayload.originalSaleId!==attempt.originalSaleId||
+    storedPayload.locationId!==attempt.locationId||
+    storedPayload.deviceId!==attempt.deviceId||
+    storedPayload.shiftId!==attempt.shiftId||
+    !Array.isArray(storedPayload.additionalTenders)||
+    !Number.isFinite(Number(storedPayload.expectedReturnValue))||
+    !Number.isFinite(Number(storedPayload.expectedReplacementValue))
+   ){
+    throw new ConflictException(
+     'Central exchange payload identity failed'
+    );
+   }
+
+   // R10_3D24C_CANONICAL_STATUS_PAYLOAD_HASH
+
+   const storedReturnCents=Math.round(
+    Number(storedPayload.expectedReturnValue)*100
+   );
+
+   const storedReplacementCents=Math.round(
+    Number(storedPayload.expectedReplacementValue)*100
+   );
+
+   if(
+    typeof storedPayload.expectedReturnValue!=='number'||
+    typeof storedPayload.expectedReplacementValue!=='number'||
+    !Number.isSafeInteger(storedReturnCents)||
+    !Number.isSafeInteger(storedReplacementCents)||
+    storedReturnCents<0||
+    storedReplacementCents<=0||
+    Math.abs(
+     storedPayload.expectedReturnValue*100-storedReturnCents
+    )>0.000001||
+    Math.abs(
+     storedPayload.expectedReplacementValue*100-storedReplacementCents
+    )>0.000001||
+    !Array.isArray(storedPayload.returnLines)||
+    !Array.isArray(storedPayload.replacementLines)||
+    this.exchangePayloadHash(
+     storedPayload as CreatePosExchangeDto,
+     storedReturnCents,
+     storedReplacementCents
+    )!==attempt.payloadHash
+   ){
+    throw new ConflictException(
+     'Central exchange canonical payload integrity failure'
+    );
+   }
+
+
+   return {
+    returnCents:storedReturnCents,
+    replacementCents:storedReplacementCents
+   };
+  };
+
+
   // R10_3D23B_PENDING_STATUS
   if(!exchange){
 
@@ -4149,6 +7819,7 @@ return {
 
    if(!attempt){
     return {
+     found:false,
      status:'NOT_FOUND',
      idempotencyKey:key
     };
@@ -4162,10 +7833,98 @@ return {
     );
    }
 
+   verifyStoredExchangePayload(attempt);
+
+   // R10_3D24C_EXCHANGE_STATUS_CONTRACT
+
+   const [pendingCase,abandonedCollection,abandonedReversal]=
+    await Promise.all([
+     this.db.posPaymentReconciliation.findFirst({
+      where:{exchangeAttemptId:key,status:'PENDING'},
+      select:{id:true}
+     }),
+     this.db.posPaymentReconciliation.findFirst({
+      where:{
+       exchangeAttemptId:key,
+       kind:'EXCHANGE_COLLECTION',
+       proposedOutcome:'NOT_COLLECTED',
+       executionAbandoned:true
+      },
+      select:{id:true}
+     }),
+     this.db.posPaymentReconciliation.findFirst({
+      where:{
+       exchangeAttemptId:key,
+       kind:'EXCHANGE_REVERSAL',
+       proposedOutcome:'NOT_REVERSED',
+       executionAbandoned:true
+      },
+      select:{id:true}
+     })
+    ]);
+
    return {
+    found:true,
+    centralAttemptVerified:true,
+    investigationPending:!!pendingCase,
+    collectionExecutionAbandoned:!!abandonedCollection,
+    reversalExecutionAbandoned:!!abandonedReversal,
+
+    canConfirmCollection:
+     ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+     attempt.paymentState==='UNCONFIRMED'&&
+     attempt.reversalStatus==='NONE'&&
+     attempt.paymentAuthorizedById===u.id&&
+     !!attempt.paymentAuthorizedAt&&
+     !attempt.paymentConfirmedAt&&
+     !pendingCase&&
+     !abandonedCollection,
+
     status:attempt.status,
     idempotencyKey:key,
     paymentState:attempt.paymentState,
+     reversalStatus:attempt.reversalStatus,
+     reversalRequestedById:attempt.reversalRequestedById,
+     reversalRequestedAt:attempt.reversalRequestedAt,
+     reversalRequestReason:attempt.reversalRequestReason,
+     reversalApprovedById:attempt.reversalApprovedById,
+     reversalApprovedAt:attempt.reversalApprovedAt,
+     paymentAuthorizedById:attempt.paymentAuthorizedById,
+     paymentAuthorizedAt:attempt.paymentAuthorizedAt,
+     reversalApprovalEvidence:attempt.reversalApprovalEvidence,
+     reversalExecutionById:attempt.reversalExecutionById,
+     reversalExecutionAt:attempt.reversalExecutionAt,
+     canRequestReversal:
+       !pendingCase&&
+       !abandonedReversal&&
+      ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+      attempt.reversalStatus==='NONE'&&
+      attempt.paymentState==='CONFIRMED'&&
+      attempt.paymentAuthorizedById===u.id,
+     canClaimReversal:
+       !pendingCase&&
+       !abandonedReversal&&
+      ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+      attempt.reversalStatus==='AUTHORIZED'&&
+      attempt.paymentState==='CONFIRMED'&&
+      attempt.reversalRequestedById===u.id&&
+      attempt.paymentAuthorizedById===u.id&&
+      !!attempt.reversalApprovalEvidence&&
+      !attempt.reversalExecutionAt&&
+      !attempt.reversalExecutionById,
+     canConfirmReversal:
+       !pendingCase&&
+       !abandonedReversal&&
+      ['REGISTERED','UNKNOWN'].includes(attempt.status)&&
+      attempt.reversalStatus==='AUTHORIZED'&&
+      attempt.paymentState==='CONFIRMED'&&
+      attempt.reversalRequestedById===u.id&&
+      attempt.reversalExecutionById===u.id&&
+      !!attempt.reversalExecutionAt,
+     reversalConfirmedById:attempt.reversalConfirmedById,
+     reversalConfirmedAt:attempt.reversalConfirmedAt,
+     reversalEvidenceReference:attempt.reversalEvidenceReference,
+     paymentExecutionAuthorized:false,
     locationId:attempt.locationId,
     deviceId:attempt.deviceId,
     shiftId:attempt.shiftId,
@@ -4188,6 +7947,7 @@ return {
   if(
    !acceptedAttempt||
    acceptedAttempt.status!=='ACCEPTED'||
+    acceptedAttempt.reversalStatus!=='NONE'||
    !['CONFIRMED','NO_PAYMENT_REQUIRED'].includes(
     acceptedAttempt.paymentState
    )||
@@ -4204,6 +7964,8 @@ return {
    );
   }
 
+
+  const verifiedPayload=verifyStoredExchangePayload(acceptedAttempt);
 
   const cents=(value:Prisma.Decimal)=>
    Math.round(value.toNumber()*100);
@@ -4246,6 +8008,11 @@ return {
     value=>Number.isSafeInteger(value)&&value>=0
    )||
    replacementValue<=0||
+   returnValue!==verifiedPayload.returnCents||
+   replacementValue!==verifiedPayload.replacementCents||
+   acceptedAttempt.paymentState!==(
+    additionalPayment>0?'CONFIRMED':'NO_PAYMENT_REQUIRED'
+   )||
    credit!==Math.min(returnValue,replacementValue)||
    credit+additionalPayment!==replacementValue||
    paid>returnValue-credit||
@@ -4263,8 +8030,12 @@ return {
   }
 
 return {
+   found:true,
    status:'ACCEPTED',
    integrityVerified:true,
+   centralAttemptVerified:true,
+   reversalStatus:acceptedAttempt.reversalStatus,
+   paymentExecutionAuthorized:false,
    paymentState:acceptedAttempt.paymentState,
    deviceId:acceptedAttempt.deviceId,
    shiftId:acceptedAttempt.shiftId,
@@ -8455,7 +12226,13 @@ export class PosController {
  }
  @Get('devices/:id/status') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') deviceStatus(@Param('id') id:string,@CurrentUser() u:Principal){return this.pos.deviceStatus(id,u);}
  @Post('devices') @Roles('SUPER_ADMIN','BRANCH_MANAGER') register(@Body() dto:RegisterDeviceDto,@CurrentUser() u:Principal){return this.pos.registerDevice(dto,u);}
- @Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
+ @Get('shifts/active')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER')
+ activeShiftRoute(@CurrentUser() u:Principal){
+  return this.pos.activeShift(u);
+ }
+
+@Post('shifts/open') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') open(@Body() dto:OpenShiftDto,@CurrentUser() u:Principal){return this.pos.openShift(dto,u);}
  @Post('shifts/:id/close') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') close(@Param('id') id:string,@Body() dto:CloseShiftDto,@CurrentUser() u:Principal){return this.pos.closeShift(id,dto,u);}
  @Post('checkout/preflight') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') preflight(@Body() dto:PreflightDto,@CurrentUser() u:Principal){return this.pos.preflight(dto,u);}
  @Post('checkout/quote') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') quote(@Body() dto:QuoteCartDto,@CurrentUser() u:Principal){return this.pos.quoteCart(dto,u);}
@@ -8537,7 +12314,148 @@ export class PosController {
   return this.pos.offlineSaleStatus(deviceId,localSaleId,u);
  }
  @Post('sales/sync') @Roles('SUPER_ADMIN','BRANCH_MANAGER','CASHIER') sync(@Body() dto:SyncSaleDto,@CurrentUser() u:Principal){return this.pos.syncSale(dto,u);}
- @Post('returns/settlements')
+  // R10_3D24C_CENTRAL_REFUND_DISCOVERY_ROUTE
+ @Get('returns/settlements/pending')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ pendingRefundAttemptsRoute(
+  @Query('locationId') locationId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.pendingRefundAttempts(
+   locationId,u
+  );
+ }
+
+// R10_3D24C_REFUND_RECOVERY_ROUTES
+
+ @Post('returns/settlements/register')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ registerRefundAttemptRoute(
+  @Body() dto:RegisterPosRefundDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.registerRefundAttempt(dto,u);
+ }
+
+ @Post('returns/settlements/:key/authorize-payment')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ authorizeRefundPaymentRoute(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.authorizeRefundPayment(key,u);
+ }
+
+ @Post('returns/settlements/:key/confirm-payment')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ confirmRefundPaymentRoute(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.confirmRefundPayment(key,u);
+ }
+
+ @Post('returns/settlements/:key/resume')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ resumePaidRefundRoute(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.resumePaidRefund(key,u);
+ }
+
+  // R10_3D24C_REFUND_INVESTIGATION_ROUTES
+
+
+ // R10_3D24C_EXCHANGE_INVESTIGATION_ROUTES
+
+ @Get('exchanges/:key/reconciliation')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ exchangeInvestigationHistory(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.exchangeInvestigationHistory(key,u);
+ }
+
+ @Post('exchanges/:key/reconciliation')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ submitExchangeInvestigation(
+  @Param('key') key:string,
+  @Body() body:any,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.submitExchangeInvestigation(key,body,u);
+ }
+
+ @Post('exchanges/:key/reconciliation/:caseId/review')
+ @Roles('SUPER_ADMIN')
+ reviewExchangeInvestigation(
+  @Param('key') key:string,
+  @Param('caseId') caseId:string,
+  @Body() body:any,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.reviewExchangeInvestigation(
+   key,caseId,body,u
+  );
+ }
+
+ @Get('returns/settlements/:key/reconciliation')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ refundInvestigationHistoryRoute(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.refundInvestigationHistory(key,u);
+ }
+
+ @Post('returns/settlements/:key/reconciliation')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ submitRefundInvestigationRoute(
+  @Param('key') key:string,
+  @Body() body:any,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.submitRefundInvestigation(key,body,u);
+ }
+
+ @Post('returns/settlements/:key/reconciliation/:caseId/review')
+ @Roles('SUPER_ADMIN')
+ reviewRefundInvestigationRoute(
+  @Param('key') key:string,
+  @Param('caseId') caseId:string,
+  @Body() body:any,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.reviewRefundInvestigation(key,caseId,body,u);
+ }
+
+@Post('returns/settlements/:key/resolve-no-payment')
+ @Roles('SUPER_ADMIN')
+ resolveUnpaidRefundRoute(
+  @Param('key') key:string,
+  @Body() dto:ResolvePosRefundDto,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.resolveUnpaidRefund(
+   key,
+   dto.reason,
+   u,
+   dto.evidenceReference
+  );
+ }
+
+@Get('returns/settlements/status/:key')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ refundSettlementStatusRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string
+ ){
+  return this.pos.refundSettlementStatus(key,u);
+ }
+
+@Post('returns/settlements')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  recordRefundSettlement(
   @Body() dto:RecordPosRefundSettlementDto,
@@ -8547,7 +12465,16 @@ export class PosController {
  }
  // R10_3D23_RECEIPT_LOOKUP_ROUTE
  // R10_3D23B_EXCHANGE_ROUTE
- @Get('exchanges/status/:key')
+  // R10_3D24C_CENTRAL_EXCHANGE_DISCOVERY_ROUTE
+ @Get('exchanges/pending')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ pendingExchangeAttemptsRoute(
+  @CurrentUser() u:Principal,
+  @Query('locationId') locationId:string
+ ){
+  return this.pos.pendingExchangeAttempts(locationId,u);
+ }
+@Get('exchanges/status/:key')
  @Roles('SUPER_ADMIN','BRANCH_MANAGER')
  exchangeStatusRoute(
   @CurrentUser() u:Principal,
@@ -8556,7 +12483,43 @@ export class PosController {
   return this.pos.exchangeStatus(key,u);
  }
 
- @Post('exchanges/:key/resolve')
+  // R10_3D24C_EXCHANGE_REVERSAL_ROUTES
+ @Post('exchanges/:key/reversal/request')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ requestExchangeReversalRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string,
+  @Body('reason') reason:string
+ ){
+  return this.pos.transitionExchangeReversal(
+   key,'REQUEST',reason,u
+  );
+ }
+
+ @Post('exchanges/:key/reversal/authorize')
+ @Roles('SUPER_ADMIN')
+ authorizeExchangeReversalRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string,
+  @Body('evidenceReference') evidenceReference:string
+ ){
+  return this.pos.transitionExchangeReversal(
+   key,'AUTHORIZE',evidenceReference,u
+  );
+ }
+
+ @Post('exchanges/:key/reversal/confirm')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ confirmExchangeReversalRoute(
+  @CurrentUser() u:Principal,
+  @Param('key') key:string,
+  @Body('evidenceReference') evidenceReference:string
+ ){
+  return this.pos.transitionExchangeReversal(
+   key,'CONFIRM',evidenceReference,u
+  );
+ }
+@Post('exchanges/:key/resolve')
  @Roles('SUPER_ADMIN')
  resolveExchangeRoute(
   @CurrentUser() u:Principal,
@@ -8573,6 +12536,27 @@ export class PosController {
   @Param('key') key:string
  ){
   return this.pos.resumeExchange(key,u);
+ }
+
+ @Post('exchanges/:key/claim-reversal')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ claimExchangeReversal(
+  @Param('key') key:string,
+  @Body() dto:{evidenceReference:string},
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.transitionExchangeReversal(
+   key,'CLAIM',dto?.evidenceReference,u
+  );
+ }
+
+ @Post('exchanges/:key/authorize-payment')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ authorizeExchangePayment(
+  @Param('key') key:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.authorizeExchangePayment(key,u);
  }
 
 @Post('exchanges/:key/confirm-payment')

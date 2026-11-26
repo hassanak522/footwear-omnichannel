@@ -1,7 +1,29 @@
 export type Variant={id:string;barcode:string;sku:string;title:string;size:string;color:string;price:number};
 export type SalePayload={customerId?:string;deviceId:string;shiftId:string;localSaleId?:string;soldAt?:string;lines:{variantId:string;quantity:number;unitPrice:number}[];tenders:{type:'CASH'|'CARD';amount:number;reference?:string}[]};
 declare global{interface Window{pos:{
- resolveExchange:(id:string,response:any)=>Promise<boolean>;
+ prepareRefund:(
+  locationId:string,
+  payload:any
+ )=>Promise<{id:string;payload:any}>;
+
+ resolveRefund:(id:string,response:any)=>Promise<boolean>;
+ listRefunds:()=>Promise<{
+  id:string;
+  location_id:string;
+  payload:string;
+  status:'PREPARED'|'UNKNOWN'|'PAID'|'ACCEPTED';
+  created_at:string;
+  updated_at:string;
+  server_response:string|null;
+ }[]>;
+
+ updateRefund:(
+  id:string,
+  status:'UNKNOWN'|'PAID'|'ACCEPTED',
+  response?:any
+ )=>Promise<boolean>;
+
+resolveExchange:(id:string,response:any)=>Promise<boolean>;
  printExchange:(id:string)=>Promise<{success:boolean;reason?:string}>;
 prepareExchange:(payload:any)=>Promise<{id:string;payload:any}>;
  listExchanges:()=>Promise<{

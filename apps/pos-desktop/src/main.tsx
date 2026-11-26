@@ -1,4 +1,5 @@
 import ReturnsPanel from './returns-panel';
+import {synchronizeFinancialJournal} from './financial-journal-sync';
 import React,{useEffect,useMemo,useRef,useState} from 'react';import{createRoot}from'react-dom/client';import{ShoppingCart,Search,RefreshCw,Wifi,WifiOff,Package,Receipt,Settings,LogOut,Plus,Minus,Trash2}from'lucide-react';import type{Variant,SalePayload}from'./global';import './style.css';
 import { recoverPendingSale } from './sale-recovery';
 type Line={item:Variant;qty:number};const money=(n:number)=>'Rs. '+n.toLocaleString('en-PK',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -38,14 +39,275 @@ async function request(path:string,method='GET',body?:unknown){
     throw new Error('QA_SIMULATED_OFFLINE: Central API unavailable');
   }
 
-  const res=await fetch(api.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const data=await res.json().catch(()=>({}));if(!res.ok)throw Error(Array.isArray(data.message)?data.message.join(', '):data.message||'HTTP '+res.status);return data;}
+  const res=await fetch(api.replace(/\/$/,'')+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});const data=await res.json().catch(()=>({}));if(!res.ok)throw Error('HTTP '+res.status+': '+(Array.isArray(data.message)?data.message.join(', '):data.message||'Request failed'));return data;}
 async function login(){setBusy(true);try{const data=await request('/auth/login','POST',{email,password});setToken(data.accessToken);authBlockedRef.current=false;setStatus('Logged in. Set branch and device, then open shift.');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
 async function loadBranches(){setBusy(true);try{const rows=await request('/inventory/locations');const list=Array.isArray(rows)?rows:(rows?.locations||[]);setBranches(list.filter((r:any)=>r.type==='BRANCH'&&r.active));setStatus('Branches loaded. Select the branch assigned to this terminal.');}catch(e){setStatus('Unable to load branches: '+String(e));}finally{setBusy(false);}}
 async function registerDevice(){if(!token){setStatus('Sign in before registering a device');return;}if(!location){setStatus('Select a branch first');return;}if(!/^[A-Z0-9_-]{3,50}$/.test(deviceCode)){setStatus('Device code must be 3–50 uppercase letters, digits, underscores or hyphens');return;}if(device){setStatus('This terminal already has a registered device ID. Do not create another without administrator approval.');return;}setBusy(true);try{const created=await request('/pos/devices','POST',{code:deviceCode,locationId:location});if(!created?.id)throw new Error('Server did not return a device ID');setDevice(created.id);await window.pos.setConfig('deviceId',created.id);await window.pos.setConfig('locationId',location);await window.pos.setConfig('apiUrl',api);setStatus('POS device registered and saved. Open a cashier shift next.');}catch(e){setStatus('Device registration failed: '+String(e));}finally{setBusy(false);}}
-async function openShift(){setBusy(true);try{const r=await request('/pos/shifts/open','POST',{deviceId:device,openingCash:Number(opening)});setShift(r.id);setServerShiftSummary(null);setServerSummaryFetchedAt("");setReviewAcknowledged(false);await window.pos.setConfig('shiftId',r.id);setStatus('Shift opened successfully');}catch(e){setStatus(String(e));}finally{setBusy(false);}}
+// R10_3D24A_DESKTOP_SHIFT_RECOVERY
+async function recoverActiveShift(){
+
+ const active=await request('/pos/shifts/active');
+
+ if(
+  active?.found===false&&
+  active.status==='NO_ACTIVE_SHIFT'
+ ){
+  return false;
+ }
+
+ if(
+  active?.found!==true||
+  active.status!=='OPEN'||
+  !active.shiftId
+ ){
+  throw new Error('Invalid central shift recovery response');
+ }
+
+ if(
+  active.deviceId!==device||
+  active.locationId!==location
+ ){
+  throw new Error(
+   'You have an active shift on another terminal or branch. '+
+   'Contact your manager before continuing.'
+  );
+ }
+
+ if(shift&&shift!==active.shiftId){
+  throw new Error(
+   'Local and central shift IDs differ. '+
+   'Reconcile local transactions before changing shifts.'
+  );
+ }
+
+ await window.pos.setConfig('shiftId',active.shiftId);
+
+ setShift(active.shiftId);
+ setServerShiftSummary(null);
+ setServerSummaryFetchedAt('');
+ setReviewAcknowledged(false);
+
+ setStatus(
+  'Existing active shift recovered successfully. '+
+  'Opening cash: PKR '+active.openingCash
+ );
+
+ return true;
+}
+
+async function openShift(){
+
+ if(!token||!device||!location){
+  setStatus('Sign in and configure the branch and device first.');
+  return;
+ }
+
+ setBusy(true);
+
+ try{
+
+  if(await recoverActiveShift()){
+   return;
+  }
+
+  if(shift){
+   throw new Error(
+    'A local shift ID remains configured but no active cashier shift was found. '+
+    'Manager reconciliation is required before opening another shift.'
+   );
+  }
+
+  const amount=Number(opening);
+  const amountCents=Math.round(amount*100);
+
+  if(
+   !String(opening).trim()||
+   !Number.isFinite(amount)||
+   !Number.isSafeInteger(amountCents)||
+   amountCents<0||
+   amountCents>999999999999||
+   Math.abs(amount*100-amountCents)>0.000001
+  ){
+   throw new Error('Enter a valid opening cash amount.');
+  }
+
+  if(!window.confirm(
+   'Open shift with PKR '+amount.toFixed(2)+' opening cash?'
+  )){
+   return;
+  }
+
+  try{
+
+   const r=await request(
+    '/pos/shifts/open',
+    'POST',
+    {
+     deviceId:device,
+     openingCash:amount
+    }
+   );
+
+   if(!r?.id){
+    throw new Error('Invalid shift opening response');
+   }
+
+   await window.pos.setConfig('shiftId',r.id);
+
+   setShift(r.id);
+   setServerShiftSummary(null);
+   setServerSummaryFetchedAt('');
+   setReviewAcknowledged(false);
+
+   setStatus('Shift opened successfully');
+
+  }catch(openError){
+
+   if(await recoverActiveShift()){
+    return;
+   }
+
+   throw openError;
+  }
+
+ }catch(e){
+
+  setStatus('Shift opening or recovery: '+String(e));
+
+ }finally{
+
+  setBusy(false);
+ }
+}
+
 async function cacheCatalog(){setBusy(true);try{const products=await request('/catalog/products');const variants:Variant[]=products.flatMap((p:any)=>(p.variants||[]).filter((v:any)=>v.active).map((v:any)=>({id:v.id,barcode:v.barcode,sku:v.sku,title:p.title,size:v.size,color:v.color,price:Number(v.price)})));await window.pos.replaceCatalog(variants);setItems(variants);setStatus(`Cached ${variants.length} variants for offline lookup`);}catch(e){setStatus(String(e));}finally{setBusy(false);}}
-async function sync(silent=false){if(!token||syncingRef.current||authBlockedRef.current){if(authBlockedRef.current&&!silent)setStatus('Session expired or unauthorized. Sign in again under Setup & shift before retrying.');return;}syncingRef.current=true;if(!silent)setBusy(true);let ok=0,conflicts=0;try{for(const row of await window.pos.pendingSales()){try{const result=await recoverPendingSale(row,device,request);if(result.status==='ACCEPTED'){await window.pos.setSaleResult(row.id,'ACCEPTED');ok++;}else if(result.status==='STOCK_CONFLICT'){await window.pos.setSaleResult(row.id,'STOCK_CONFLICT',result.conflictReason ?? undefined);conflicts++;}else await window.pos.setSaleResult(row.id,'PENDING','Unexpected server status');}catch(e){await window.pos.setSaleResult(row.id,'PENDING',String(e));if(/Unauthorized|HTTP 401/i.test(String(e))){authBlockedRef.current=true;setStatus('POS sync paused: session unauthorized. Sign in again under Setup & shift. Local sales are preserved.');}else if(!silent)setStatus('Sync paused: '+String(e));break;}}await refreshHistory();if(!silent||ok||conflicts)if(!authBlockedRef.current)setStatus(`Sync complete: ${ok} accepted, ${conflicts} stock conflicts. Pending items remain queued.`);}catch(e){if(!silent)setStatus('Sync failed: '+String(e));}finally{syncingRef.current=false;if(!silent)setBusy(false);}}
-useEffect(()=>{if(!token||!autoSync)return;const timer=window.setInterval(()=>{if(navigator.onLine&&!authBlockedRef.current)void sync(true);},30000);const onReconnect=()=>{void sync(true);};window.addEventListener('online',onReconnect);return()=>{window.clearInterval(timer);window.removeEventListener('online',onReconnect);};},[token,api,autoSync]);
+// R10_3D24C_FINANCIAL_SYNC_LIFECYCLE
+
+const financialContextRef=useRef({
+ token,api,device,location,tab,busy
+});
+
+financialContextRef.current={
+ token,api,device,location,tab,busy
+};
+
+const [financialSyncMessage,setFinancialSyncMessage]=useState('');
+
+async function syncFinancialJournal(){
+
+ const snapshot=financialContextRef.current;
+
+ const isCurrent=()=>{
+  const current=financialContextRef.current;
+
+  return (
+   !!snapshot.token&&
+   current.token===snapshot.token&&
+   current.api===snapshot.api&&
+   current.device===snapshot.device&&
+   current.location===snapshot.location&&
+   snapshot.tab==='settings'&&current.tab==='settings'&&
+   !current.busy&&
+   !checkoutLockRef.current&&
+   !authBlockedRef.current&&
+   navigator.onLine
+  );
+ };
+
+ if(!isCurrent())return;
+
+ try{
+
+  const result=await synchronizeFinancialJournal({
+   request:(path,method='GET')=>{
+    if(!isCurrent()){
+     throw Error('Financial synchronization context changed');
+    }
+
+    if(method!=='GET'){
+     throw Error('Automatic financial recovery is read-only');
+    }
+
+    return request(path,'GET');
+   },
+   locationId:snapshot.location,
+   deviceId:snapshot.device,
+   isCurrent
+  });
+
+  if(!isCurrent())return;
+
+  setFinancialSyncMessage(
+   'Financial journal: '+
+   result.refundsFinalized+' refunds finalized, '+
+   result.exchangesFinalized+' exchanges finalized, '+
+   result.unresolved+' unresolved.'+
+   (
+    result.discrepancies.length
+     ?' Manager attention required: '+
+       result.discrepancies.join(' | ')
+     :''
+   )
+  );
+
+ }catch(error){
+
+  // R10_3D24C_FINANCIAL_SYNC_SESSION_GUARD
+
+  if(
+   financialContextRef.current.token!==snapshot.token||
+   financialContextRef.current.api!==snapshot.api
+  ){
+   return;
+  }
+
+  if(/Unauthorized|HTTP 401/i.test(String(error))){
+
+   authBlockedRef.current=true;
+
+   setFinancialSyncMessage(
+    'Financial synchronization suspended. Sign in again. '+
+    'Local records are preserved.'
+   );
+
+  }else if(isCurrent()){
+
+   setFinancialSyncMessage(
+    'Financial synchronization unavailable. '+
+    'Local records preserved. '+String(error)
+   );
+  }
+ }
+}
+
+async function sync(silent=false){if(!token||syncingRef.current||authBlockedRef.current){if(authBlockedRef.current&&!silent)setStatus('Session expired or unauthorized. Sign in again under Setup & shift before retrying.');return;}syncingRef.current=true;
+
+try{
+
+ await syncFinancialJournal();
+
+ if(
+  authBlockedRef.current||
+  financialContextRef.current.token!==token||
+  financialContextRef.current.api!==api||
+  financialContextRef.current.device!==device||
+  financialContextRef.current.location!==location
+ ){
+  syncingRef.current=false;
+  return;
+ }
+
+}catch(error){
+
+ syncingRef.current=false;
+
+ if(!silent)setStatus('Synchronization paused: '+String(error));
+
+ return;
+}
+
+if(!silent)setBusy(true);let ok=0,conflicts=0;try{for(const row of await window.pos.pendingSales()){try{const result=await recoverPendingSale(row,device,request);if(result.status==='ACCEPTED'){await window.pos.setSaleResult(row.id,'ACCEPTED');ok++;}else if(result.status==='STOCK_CONFLICT'){await window.pos.setSaleResult(row.id,'STOCK_CONFLICT',result.conflictReason ?? undefined);conflicts++;}else await window.pos.setSaleResult(row.id,'PENDING','Unexpected server status');}catch(e){await window.pos.setSaleResult(row.id,'PENDING',String(e));if(/Unauthorized|HTTP 401/i.test(String(e))){authBlockedRef.current=true;setStatus('POS sync paused: session unauthorized. Sign in again under Setup & shift. Local sales are preserved.');}else if(!silent)setStatus('Sync paused: '+String(e));break;}}await refreshHistory();if(!silent||ok||conflicts)if(!authBlockedRef.current)setStatus(`Sync complete: ${ok} accepted, ${conflicts} stock conflicts. Pending items remain queued.`);}catch(e){if(!silent)setStatus('Sync failed: '+String(e));}finally{syncingRef.current=false;if(!silent)setBusy(false);}}
+useEffect(()=>{if(!token||!autoSync)return;const timer=window.setInterval(()=>{if(navigator.onLine&&!authBlockedRef.current)void sync(true);},30000);const onReconnect=()=>{void sync(true);};window.addEventListener('online',onReconnect);return()=>{window.clearInterval(timer);window.removeEventListener('online',onReconnect);};},[token,api,autoSync,device,location,tab]);
 // R10_3D22_BARCODE_SEARCH
 const searchRef=useRef<HTMLInputElement>(null);
 
@@ -910,7 +1172,16 @@ async function closeShift(){
   // R10_3D23B_SHIFT_EXCHANGE_GUARD
   const exchangeRecords=await window.pos.listExchanges();
 
-  const unresolvedExchanges=exchangeRecords.filter(
+  // R10_3D24C_REFUND_SHIFT_GUARD
+ const unresolvedRefunds=await window.pos.listRefunds();
+
+ if(unresolvedRefunds.length){
+  throw new Error(
+   'Shift closing blocked: reconcile all unresolved refund payouts first.'
+  );
+ }
+
+const unresolvedExchanges=exchangeRecords.filter(
    attempt=>!['ACCEPTED','RESOLVED_NO_EXCHANGE'].includes(attempt.status)
   );
 
@@ -1072,7 +1343,12 @@ async function closeShift(){
  }
 }
 async function saveSettings(){await Promise.all([window.pos.setConfig('apiUrl',api),window.pos.setConfig('deviceId',device),window.pos.setConfig('locationId',location)]);setStatus('Device settings saved locally');}
-return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop · v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier shift'}</h1><p>Barcode-first checkout · Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now {pending>0?`(${pending})`:''}</button></header>{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>×</button></div>}
+return <div className="app"><aside className="sidebar"><div className="brand"><div className="brandicon">F</div><div><strong>FOOTWEAR</strong><small>RETAIL POS</small></div></div><div className="sidehead">WORKSPACE</div><button className={tab==='sale'?'nav active':'nav'} onClick={()=>setTab('sale')}><ShoppingCart size={19}/> New sale</button><button className={tab==='history'?'nav active':'nav'} onClick={async()=>{await refreshHistory();setTab('history');}}><Receipt size={19}/> Sales & sync <span className="count">{pending}</span></button><button className={tab==='settings'?'nav active':'nav'} onClick={()=>setTab('settings')}><Settings size={19}/> Setup & shift</button><div className="sidebarbottom"><label className="hint"><input type="checkbox" checked={autoSync} onChange={e=>setAutoSync(e.target.checked)}/> Auto-sync every 30s</label><div className="connection">{online?<Wifi size={17}/>:<WifiOff size={17}/>} {online?'Network available':'Offline mode'}</div><div className="subtle">Local-first desktop · v0.1</div></div></aside><main className="main"><header><div><div className="eyebrow">BRANCH OPERATIONS</div><h1>{tab==='sale'?'New sale':tab==='history'?'Sales & synchronization':'Device setup & cashier shift'}</h1><p>Barcode-first checkout · Locally saved transactions</p></div><button className="secondary" onClick={()=>void sync(false)} disabled={busy||!token}><RefreshCw size={16}/> Sync now {pending>0?`(${pending})`:''}</button></header>{financialSyncMessage&&(
+ <div className="notice" role="status">
+  {financialSyncMessage}
+  <button onClick={()=>setFinancialSyncMessage('')}>Dismiss</button>
+ </div>
+)}{status&&<div className="notice" role="status">{status}<button onClick={()=>setStatus('')}>×</button></div>}
 {tab==='settings'&&<div className="settingsgrid"><section className="panel"><h2>1. API login</h2><label>Backend API URL<input value={api} readOnly title="API endpoint is locked for this testing environment"/></label><label>Email<input value={email} onChange={e=>setEmail(e.target.value)}/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)}/></label><button onClick={login} disabled={busy||!email||!password}>Sign in to central API</button><div className="hint">{token?'Authenticated for this session':'Not signed in'}. Login again after restarting.</div></section><section className="panel"><h2>2. Register branch device</h2><button className="secondary" onClick={()=>void loadBranches()} disabled={!token||busy}>Load available branches</button><label>Assigned branch<select value={location} disabled={!!device||!!shift} onChange={e=>setLocation(e.target.value)}><option value="">Select a branch</option>{branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}{location&&!branches.some(b=>b.id===location)&&<option value={location}>Previously configured branch ({location})</option>}</select></label><label>Device registration code<input value={deviceCode} disabled={!!device} onChange={e=>setDeviceCode(e.target.value.toUpperCase())} placeholder="BRANCH1-POS01"/></label><button onClick={()=>void registerDevice()} disabled={!token||!location||!!device||busy}>Register this terminal</button><label>Registered POS device UUID<input value={device} readOnly/></label><button className="secondary" onClick={()=>void saveSettings()} disabled={!device||!location||!!shift}>Save connection settings</button><div className="hint">Register once per physical terminal. The registered device is bound to its branch; changing branch requires administrator-assisted reprovisioning. Do not delete local sales data.</div></section><section className="panel"><h2>3. Cashier shift</h2><label>Opening cash (PKR)<input type="number" min="0" value={opening} onChange={e=>setOpening(e.target.value)}/></label><label>Current shift UUID<input value={shift} readOnly/></label><button onClick={openShift} disabled={busy||!token||!device||!!shift}>Open shift</button><div className="hint">Close requires all local shift sales accepted centrally. Stock conflicts must be reconciled first.</div><button className="secondary" onClick={refreshHistory}>Refresh reconciliation</button><button className="secondary" onClick={()=>void loadShiftSummary()} disabled={!shift||!token||busy}>Fetch central shift summary</button>{centralSummary&&(
  <div className="panel">
   <h3>Central cash reconciliation</h3>

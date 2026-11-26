@@ -77,7 +77,23 @@ export class CustomerFinanceController {
     );
    }
 
-   if(ret.settlements.length){
+   // R10_3D24C_LEGACY_RESERVATION_GUARD
+   const reserved=await tx.posRefundAttempt.count({
+    where:{
+     returnId:ret.id,
+     status:{
+      notIn:['ACCEPTED','RESOLVED_NO_PAYMENT']
+     }
+    }
+   });
+
+   if(reserved>0){
+    throw new ConflictException(
+     'A centrally registered POS refund requires reconciliation'
+    );
+   }
+
+if(ret.settlements.length){
     throw new ConflictException(
      'POS refund settlements already exist for this return'
     );

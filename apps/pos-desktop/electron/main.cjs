@@ -78,6 +78,22 @@ async function init(){
     response TEXT NOT NULL,
     resolved_at TEXT NOT NULL
    );
+CREATE TABLE IF NOT EXISTS refund_resolutions (
+ attempt_id TEXT PRIMARY KEY,
+ response TEXT NOT NULL,
+ resolved_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS refund_attempts (
+ id TEXT PRIMARY KEY,
+ location_id TEXT NOT NULL,
+ payload TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(
+  status IN ('PREPARED','UNKNOWN','PAID','ACCEPTED')
+ ),
+ created_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ server_response TEXT
+);
 CREATE TABLE IF NOT EXISTS exchange_attempts (
     id TEXT PRIMARY KEY,
     payload TEXT NOT NULL,
@@ -473,6 +489,256 @@ function persistExchangeMutation(action){
  }
 }
 
+// R10_3D24C_REFUND_JOURNAL
+
+ipcMain.handle('refund:prepare',(_,locationId,payload)=>{
+
+ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+ if(
+  !uuid.test(locationId||'')||
+  locationId!==readConfig('locationId')||
+  !payload||
+  !uuid.test(payload.returnId||'')||
+  payload.idempotencyKey
+ ){
+  throw Error('Invalid refund identity');
+ }
+
+ if(rows(
+  "SELECT id FROM refund_attempts WHERE status!='ACCEPTED' AND id NOT IN (SELECT attempt_id FROM refund_resolutions)"
+ ).length){
+  throw Error('Reconcile the existing refund payout first');
+ }
+
+ if(!['CASH','CARD','OTHER'].includes(payload.method)){
+  throw Error('Invalid refund method');
+ }
+
+ const cents=Math.round(payload.amount*100);
+
+ if(
+  typeof payload.amount!=='number'||
+  !Number.isFinite(payload.amount)||
+  !Number.isSafeInteger(cents)||
+  cents<=0||
+  cents>999999999999||
+  Math.abs(payload.amount*100-cents)>0.000001
+ ){
+  throw Error('Invalid refund amount');
+ }
+
+ const reference=String(payload.reference||'').trim();
+
+ if(reference.length>200){
+  throw Error('Refund reference is too long');
+ }
+
+ if(payload.method==='CASH'){
+  if(
+   !uuid.test(payload.payoutShiftId||'')||
+   payload.payoutShiftId!==readConfig('shiftId')
+  ){
+   throw Error('Refund requires the configured payout shift');
+  }
+ }else{
+  if(!reference||payload.payoutShiftId){
+   throw Error('Invalid external refund details');
+  }
+ }
+
+ // R10_3D24C_DURABLE_REFUND_IDENTITY
+ const deviceId=readConfig('deviceId');
+ const shiftId=readConfig('shiftId');
+
+ if(
+  !uuid.test(deviceId||'')||
+  !uuid.test(shiftId||'')
+ ){
+  throw Error(
+   'A registered terminal and open operational shift are required'
+  );
+ }
+
+ const id=crypto.randomUUID();
+
+ const saved={
+  returnId:payload.returnId,
+  idempotencyKey:id,
+  locationId,
+  deviceId,
+  shiftId,
+  method:payload.method,
+  amount:cents/100,
+  ...(payload.method==='CASH'
+   ?{payoutShiftId:payload.payoutShiftId}:{}
+  ),
+  ...(reference?{reference}:{})
+ };
+
+ const now=new Date().toISOString();
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'INSERT INTO refund_attempts VALUES (?,?,?,?,?,?,?)',
+   [
+    id,
+    locationId,
+    JSON.stringify(saved),
+    'PREPARED',
+    now,
+    now,
+    null
+   ]
+  );
+ });
+
+ return {id,payload:saved};
+});
+
+ipcMain.handle('refund:list',()=>rows(
+ "SELECT * FROM refund_attempts "+
+ "WHERE status!='ACCEPTED' AND id NOT IN (SELECT attempt_id FROM refund_resolutions) "+
+ "ORDER BY created_at ASC"
+));
+
+// R10_3D24C_LOCAL_REFUND_RESOLUTION
+ipcMain.handle('refund:resolve',(_,id,response)=>{
+
+ const attempt=rows(
+  'SELECT * FROM refund_attempts WHERE id=?',
+  [id]
+ )[0];
+
+ if(!attempt){
+  throw Error('Local refund attempt not found');
+ }
+
+ if(attempt.status==='ACCEPTED'||attempt.status==='PAID'){
+  throw Error(
+   'Paid or accepted refunds cannot be cancelled'
+  );
+ }
+
+ const payload=JSON.parse(attempt.payload);
+
+ if(
+  !response||
+  response.found!==true||
+  response.idempotencyKey!==id||
+  response.status!=='RESOLVED_NO_PAYMENT'||
+  response.paymentState!=='NOT_PAID'||
+  response.locationId!==attempt.location_id||
+  response.returnId!==payload.returnId||
+  response.method!==payload.method||
+  Math.round(Number(response.amount)*100)!==
+   Math.round(Number(payload.amount)*100)||
+  (payload.deviceId&&response.deviceId!==payload.deviceId)||
+  (payload.shiftId&&response.shiftId!==payload.shiftId)||
+  !response.resolvedById||
+  !response.resolvedAt||
+  !response.resolutionReason
+ ){
+  throw Error('Central refund resolution mismatch');
+ }
+
+ const existing=rows(
+  'SELECT * FROM refund_resolutions WHERE attempt_id=?',
+  [id]
+ )[0];
+
+ if(existing)return true;
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'INSERT INTO refund_resolutions(attempt_id,response,resolved_at) VALUES(?,?,?)',
+   [
+    id,
+    JSON.stringify(response),
+    new Date().toISOString()
+   ]
+  );
+ });
+
+ return true;
+});
+
+ipcMain.handle('refund:update',(_,id,status,response)=>{
+
+ const attempt=rows(
+  'SELECT * FROM refund_attempts WHERE id=?',
+  [id]
+ )[0];
+
+ if(!attempt){
+  throw Error('Refund attempt not found');
+ }
+
+ if(rows(
+  'SELECT attempt_id FROM refund_resolutions WHERE attempt_id=?',
+  [id]
+ ).length){
+  throw Error('Resolved refund cannot be reopened');
+ }
+
+ if(attempt.status==='ACCEPTED'){
+  if(status==='ACCEPTED')return true;
+  throw Error('Accepted refund cannot be reopened');
+ }
+
+ const allowed={
+  PREPARED:['UNKNOWN'],
+  UNKNOWN:['PAID'],
+  PAID:['ACCEPTED']
+ };
+
+ if(!(allowed[attempt.status]||[]).includes(status)){
+  throw Error('Invalid refund journal transition');
+ }
+
+ const payload=JSON.parse(attempt.payload);
+
+ if(status==='ACCEPTED'){
+
+  if(
+   !response||
+   !response.id||
+   response.found!==true||
+   response.status!=='ACCEPTED'||
+   response.integrityVerified!==true||
+   response.centralAttemptVerified!==true||
+   response.locationId!==attempt.location_id||
+   (payload.deviceId&&response.deviceId!==payload.deviceId)||
+   (payload.shiftId&&response.shiftId!==payload.shiftId)||
+   response.idempotencyKey!==id||
+   response.returnId!==payload.returnId||
+   response.method!==payload.method||
+   Math.round(Number(response.amount)*100)!==
+    Math.round(payload.amount*100)||
+   (response.payoutShiftId||null)!==
+    (payload.payoutShiftId||null)||
+   (response.reference||null)!==
+    (payload.reference||null)
+  ){
+   throw Error('Central refund confirmation mismatch');
+  }
+ }
+
+ persistExchangeMutation(()=>{
+  db.run(
+   'UPDATE refund_attempts SET status=?,updated_at=?,server_response=? WHERE id=?',
+   [
+    status,
+    new Date().toISOString(),
+    status==='ACCEPTED'?JSON.stringify(response):null,
+    id
+   ]
+  );
+ });
+
+ return true;
+});
+
 ipcMain.handle('exchange:prepare',(_,payload)=>{
 
  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -652,9 +918,19 @@ ipcMain.handle('exchange:resolve',(_,id,response)=>{
 
  if(
   !response||
+  // R10_3D24C_EXCHANGE_JOURNAL_INTEGRITY
+  response.found!==true||
   response.status!=='RESOLVED_NO_EXCHANGE'||
   response.idempotencyKey!==id||
   response.locationId!==payload.locationId||
+  response.deviceId!==payload.deviceId||
+  response.shiftId!==payload.shiftId||
+  response.originalSaleId!==payload.originalSaleId||
+  (
+   response.paymentState==='REVERSED'
+    ?response.reversalStatus!=='CONFIRMED'
+    :response.reversalStatus!=='NONE'
+  )||
   !response.resolvedById||
   !response.resolvedAt||
   !response.resolutionReason||
@@ -878,6 +1154,13 @@ ipcMain.handle('exchange:update',(_,id,status,response,error)=>{
   throw Error('Unknown exchange attempt');
  }
 
+ if(rows(
+  'SELECT attempt_id FROM exchange_resolutions WHERE attempt_id=?',
+  [id]
+ ).length){
+  throw Error('Resolved exchange cannot be reopened');
+ }
+
  // R10_3D23B_RECEIPT_REFRESH
  if(existing.status==='ACCEPTED'&&status!=='ACCEPTED'){
   throw Error('Accepted exchange cannot be downgraded');
@@ -911,6 +1194,16 @@ const payload=JSON.parse(existing.payload);
 
   if(
    !response||
+   // R10_3D24C_EXCHANGE_ACCEPTANCE_BOUNDARY
+
+   response.found!==true||
+   response.integrityVerified!==true||
+   response.centralAttemptVerified!==true||
+   response.paymentExecutionAuthorized!==false||
+   response.reversalStatus!=='NONE'||
+   !['CONFIRMED','NO_PAYMENT_REQUIRED'].includes(response.paymentState)||
+   response.deviceId!==payload.deviceId||
+   response.shiftId!==payload.shiftId||
    response.status!=='ACCEPTED'||
    response.idempotencyKey!==id||
    response.originalSaleId!==payload.originalSaleId||
