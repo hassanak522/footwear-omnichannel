@@ -36,6 +36,17 @@ export class FinanceManagementController {
  async post(@Body() d:JournalDto,@CurrentUser() u:Principal){
   assertLocation(u,d.locationId);
   if(!d.externalKey.trim()||!d.description.trim()||!d.sourceType.trim())throw new BadRequestException('Journal identifiers and description required');
+  // R10_3D24_48D3F_RESERVED_JOURNAL_NAMESPACE
+
+  if(
+    d.sourceType.trim().toUpperCase()==='POS_FINANCIAL_CORRECTION'||
+    d.externalKey.trim().toUpperCase().startsWith('POS_CORRECTION:')
+  ){
+    throw new ConflictException(
+      'Dedicated correction accounting workflow required'
+    );
+  }
+
   const lines=d.lines.map(l=>({...l,accountCode:l.accountCode.trim(),description:l.description?.trim()||null}));
   if(lines.some(l=>!l.accountCode||!Number.isSafeInteger(cents(l.debit))||!Number.isSafeInteger(cents(l.credit))||
     (cents(l.debit)===0&&cents(l.credit)===0)||(cents(l.debit)>0&&cents(l.credit)>0)))throw new BadRequestException('Each journal line must have either a positive debit or positive credit');
@@ -52,6 +63,17 @@ export class FinanceManagementController {
  async reverse(@Param('id') id:string,@Body() d:ReverseDto,@CurrentUser() u:Principal){
   if(!d.reason.trim())throw new BadRequestException('Reason required');
   const j=await this.db.financeJournal.findUniqueOrThrow({where:{id}});assertLocation(u,j.locationId);
+  // R10_3D24_48D3G2_CORRECTION_REVERSAL_PROTECTION
+
+  if(
+    j.sourceType.trim().toUpperCase()==='POS_FINANCIAL_CORRECTION'||
+    j.externalKey.trim().toUpperCase().startsWith('POS_CORRECTION:')
+  ){
+    throw new ConflictException(
+      'Correction journals require a dedicated compensating accounting workflow'
+    );
+  }
+
   const result=await this.db.financeJournal.updateMany({where:{id,status:'POSTED'},data:{status:'REVERSED',reversedById:u.id,reversedAt:new Date(),reversalReason:d.reason.trim()}});
   if(result.count!==1)throw new ConflictException('Journal already reversed');
   return this.db.financeJournal.findUniqueOrThrow({where:{id}});
@@ -80,6 +102,6 @@ export class FinanceManagementController {
    exceptionCounts,settlementBatches:settlements.length,matchCounts,statementGross:money(reportedGross),statementFees:money(reportedFees),statementNet:money(reportedNet),
    journals:{posted:journals.filter(j=>j.status==='POSTED').length,reversed:journals.filter(j=>j.status==='REVERSED').length},
    accountBalances:[...accounts.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([accountCode,v])=>({accountCode,debit:money(v.debit),credit:money(v.credit),netDebit:money(v.debit-v.credit)})),
-   limitations:'Manual posted journals only; no automatic POS ledger postings. Statement amounts are imported claims, not verified bank settlement. Approved cash adjustments are informational and not a full cash balance.'};
+   limitations:'Includes manual posted journals and dedicated verified POS correction journals; general automatic POS ledger posting is not implemented. Statement amounts are imported claims, not verified bank settlement. Approved cash adjustments are informational and not a full cash balance.'};
  }
 }

@@ -1,6 +1,8 @@
 "use client";
 
 import {useState} from "react";
+import CashOperations from "./cash-operations";
+import RefundRegister from "./refund-register";
 import RefundReconciliation from "./refund-reconciliation";
 import ExchangeReconciliation from "./exchange-reconciliation";
 
@@ -585,6 +587,14 @@ export default function CustomerFinance(){
      </section>
 
      {/* R10_3D24C_HQ_RECONCILIATION_PANEL */}
+{/* D24_FINAL_REFUND_REGISTER_INTERFACE */}
+{token&&(
+ <RefundRegister key={token} request={call}/>
+)}
+{/* D24_FINAL_CASH_INTERFACE */}
+{token&&(
+ <CashOperations key={token} request={call}/>
+)}
 <RefundReconciliation call={call}/>
 {/* R10_3D24C_HQ_EXCHANGE_PANEL */}
 <ExchangeReconciliation call={call}/>

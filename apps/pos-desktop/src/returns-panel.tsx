@@ -33,6 +33,108 @@ type Sale = {
   lines: ReturnLine[];
 };
 
+// R10_3D24_48D3G4D4I2B_DESKTOP_REFUND_POSITION
+
+type RefundPosition = {
+  returnId: string;
+  locationId: string;
+  currency: 'PKR';
+  refundDue: string;
+  refundSettled: string;
+  refundOutstanding: string;
+  ordinaryRefundPaid: string;
+  historicalRefundPaid: string;
+  legacyRefundPaid: string;
+  refundOverpayment: string;
+  settlementStatus:
+    | 'UNSETTLED'
+    | 'PARTIALLY_SETTLED'
+    | 'SETTLED'
+    | 'OVERPAID';
+  financialCorrectionHold: boolean;
+  refundExecutionBlocked: boolean;
+  requiresReconciliation: boolean;
+  paymentExecutionAuthorized: false;
+  blockers: string[];
+  calculatedAt: string;
+};
+
+function verifyRefundPosition(
+  data: any,
+  returnId: string,
+  locationId: string
+): RefundPosition {
+  const monetaryFields = [
+    'refundDue',
+    'refundSettled',
+    'refundOutstanding',
+    'ordinaryRefundPaid',
+    'historicalRefundPaid',
+    'legacyRefundPaid',
+    'refundOverpayment'
+  ];
+
+  if (
+    !data ||
+    data.returnId !== returnId ||
+    data.locationId !== locationId ||
+    data.currency !== 'PKR' ||
+    data.paymentExecutionAuthorized !== false ||
+    typeof data.refundExecutionBlocked !== 'boolean' ||
+    typeof data.financialCorrectionHold !== 'boolean' ||
+    typeof data.requiresReconciliation !== 'boolean' ||
+    !Array.isArray(data.blockers) ||
+    !data.blockers.every(
+      (item: unknown) => typeof item === 'string'
+    ) ||
+    ![
+      'UNSETTLED',
+      'PARTIALLY_SETTLED',
+      'SETTLED',
+      'OVERPAID'
+    ].includes(data.settlementStatus) ||
+    !monetaryFields.every(field =>
+      typeof data[field] === 'string' &&
+      /^\d+\.\d{2}$/.test(data[field]) &&
+      Number.isSafeInteger(
+        Math.round(Number(data[field]) * 100)
+      )
+    ) ||
+    !Number.isFinite(Date.parse(data.calculatedAt))
+  ) {
+    throw new Error(
+      'Authoritative refund position could not be verified'
+    );
+  }
+
+  const cents = (value: string) =>
+    Math.round(Number(value) * 100);
+
+  const paid =
+    cents(data.ordinaryRefundPaid) +
+    cents(data.historicalRefundPaid) +
+    cents(data.legacyRefundPaid);
+
+  const due = cents(data.refundDue);
+
+  if (
+    !Number.isSafeInteger(paid) ||
+    paid !== cents(data.refundSettled) ||
+    Math.max(0, due - paid) !==
+      cents(data.refundOutstanding) ||
+    Math.max(0, paid - due) !==
+      cents(data.refundOverpayment) ||
+    data.refundExecutionBlocked !==
+      (data.blockers.length > 0)
+  ) {
+    throw new Error(
+      'Refund financial totals require reconciliation'
+    );
+  }
+
+  return data as RefundPosition;
+}
+
 type ReturnSummary = {
   saleId: string;
   lines: {
@@ -50,7 +152,10 @@ type ReturnSummary = {
     settlementStatus:
       | 'UNSETTLED'
       | 'PARTIALLY_SETTLED'
-      | 'SETTLED';
+      | 'SETTLED'
+      | 'OVERPAID';
+    financialPosition?: RefundPosition;
+    financialPositionError?: string;
     settlements: {
       id: string;
       method: 'CASH' | 'CARD' | 'OTHER';
@@ -161,6 +266,17 @@ export default function ReturnsPanel({
     !selectedPayoutReturn
    )return;
 
+   if (
+    !selectedPayoutReturn.financialPosition ||
+    selectedPayoutReturn.financialPosition
+      .refundExecutionBlocked
+   ) {
+    setPayoutMessage(
+      'Refund blocked. Obtain a verified financial position or complete reconciliation.'
+    );
+    return;
+   }
+
    const amount=Number(payoutAmount);
    const cents=Math.round(amount*100);
 
@@ -205,6 +321,30 @@ export default function ReturnsPanel({
      throw new Error(
       'An active terminal shift is required for every refund.'
      );
+    }
+
+    const latestPosition = verifyRefundPosition(
+      await request(
+        '/pos/returns/' +
+        encodeURIComponent(selectedPayoutReturn.id) +
+        '/refund-position'
+      ),
+      selectedPayoutReturn.id,
+      location
+    );
+
+    if (
+      latestPosition.refundExecutionBlocked ||
+      latestPosition.requiresReconciliation ||
+      cents > Math.round(
+        Number(latestPosition.refundOutstanding) * 100
+      )
+    ) {
+      setHistoryRevision(value => value + 1);
+
+      throw new Error(
+        'Refund entitlement changed or requires reconciliation. No new payout initiated.'
+      );
     }
 
     const result=await executeCentralRefund(
@@ -271,7 +411,7 @@ export default function ReturnsPanel({
 
     void request(
       '/pos/returns/sale/' + encodeURIComponent(selectedId)
-    ).then((data: ReturnSummary) => {
+    ).then(async (data: ReturnSummary) => {
       if (cancelled) return;
 
       if (!data ||
@@ -281,7 +421,47 @@ export default function ReturnsPanel({
         throw new Error('Invalid return history response');
       }
 
-      setSummary(data);
+      const returns = await Promise.all(
+        data.returns.map(async ret => {
+          try {
+            const position = verifyRefundPosition(
+              await request(
+                '/pos/returns/' +
+                encodeURIComponent(ret.id) +
+                '/refund-position'
+              ),
+              ret.id,
+              location
+            );
+
+            return {
+              ...ret,
+              refundDue: position.refundDue,
+              refundSettled: position.refundSettled,
+              refundOutstanding:
+                position.refundOutstanding,
+              settlementStatus:
+                position.settlementStatus,
+              financialPosition: position,
+              financialPositionError: undefined
+            };
+          } catch {
+            return {
+              ...ret,
+              financialPosition: undefined,
+              financialPositionError:
+                'Authoritative refund position unavailable'
+            };
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      setSummary({
+        ...data,
+        returns
+      });
     }).catch((error: any) => {
       if (!cancelled) {
         setSummaryError(
@@ -726,20 +906,85 @@ export default function ReturnsPanel({
                       <td>{ret.id.slice(0,12)}</td>
                       <td>{ret.reason}</td>
                       <td>
-                        Rs. {Number(ret.refundDue).toFixed(2)}
+                        {ret.financialPosition ? "Rs. " + Number(ret.refundDue).toFixed(2) : "Unverified"}
                       </td>
                       <td>
-                        Rs. {Number(ret.refundSettled).toFixed(2)}
+                        {ret.financialPosition ? "Rs. " + Number(ret.refundSettled).toFixed(2) : "Unverified"}
                       </td>
                       <td>
-                        Rs. {Number(ret.refundOutstanding).toFixed(2)}
+                        {ret.financialPosition ? "Rs. " + Number(ret.refundOutstanding).toFixed(2) : "Unverified"}
                       </td>
                       <td>
-                        {ret.settlementStatus.replace(/_/g, ' ')}
+                        {/* R10_3D24_48D3G4D4I2B_FINANCIAL_DISPLAY */}
+                        {ret.financialPosition ? (
+                          <>
+                            <strong>
+                              {ret.settlementStatus.replace(/_/g, ' ')}
+                            </strong>
+
+                            {ret.financialPosition.refundExecutionBlocked && (
+                              <div style={{color:'#92400e'}}>
+                                Further payout blocked
+                              </div>
+                            )}
+
+                            {ret.financialPosition.requiresReconciliation && (
+                              <div style={{color:'#b91c1c'}}>
+                                Reconciliation required
+                              </div>
+                            )}
+
+                            {ret.financialPosition.blockers.map(blocker => (
+                              <div key={blocker} className="hint">
+                                {blocker.replace(/_/g,' ')}
+                              </div>
+                            ))}
+                          </>
+                        ) : (
+                          <span style={{color:'#b91c1c'}}>
+                            {ret.financialPositionError ||
+                              'Financial position unverified'}
+                          </span>
+                        )}
                       </td>
                       <td>
+                        {ret.financialPosition && (
+                          <div style={{marginBottom:10}}>
+                            <div>
+                              Ordinary payments: Rs.{' '}
+                              {ret.financialPosition.ordinaryRefundPaid}
+                            </div>
+
+                            <div>
+                              Historical payments: Rs.{' '}
+                              {ret.financialPosition.historicalRefundPaid}
+                            </div>
+
+                            <div>
+                              Legacy payments: Rs.{' '}
+                              {ret.financialPosition.legacyRefundPaid}
+                            </div>
+
+                            {Number(
+                              ret.financialPosition.refundOverpayment
+                            ) > 0 && (
+                              <strong style={{color:'#b91c1c'}}>
+                                Recorded overpayment: Rs.{' '}
+                                {ret.financialPosition.refundOverpayment}
+                              </strong>
+                            )}
+
+                            <div className="hint">
+                              Calculated:{' '}
+                              {new Date(
+                                ret.financialPosition.calculatedAt
+                              ).toLocaleString()}
+                            </div>
+                          </div>
+                        )}
+
                         {ret.settlements.length === 0 ? (
-                          <span>No payment recorded</span>
+                          <span>No ordinary POS settlement recorded</span>
                         ) : (
                           ret.settlements.map(payment => (
                             <div key={payment.id}>
@@ -765,10 +1010,11 @@ export default function ReturnsPanel({
           )}
 
           <p className="hint">
-            Refund approval does not confirm payment.
-            Recorded settlements show paid amounts and
-            outstanding refund balances. Cash payouts
-            must be reconciled against drawer movements.
+            Refund balances include ordinary, historical and
+            legacy payment records. Recorded payments are not
+            independent proof of external funds transfer.
+            Blocked or unverified refunds cannot initiate a
+            new payout. Existing attempts must use recovery.
           </p>
         </div>
       )}
@@ -776,6 +1022,29 @@ export default function ReturnsPanel({
             {selected && summary && summary.returns.length > 0 && (
         <div className="panel">
           <h3>Record refund payment</h3>
+
+          <button
+            type="button"
+            disabled={summaryLoading || payoutBusy || !!payoutKey}
+            onClick={() => {
+              resetPayout();
+              setHistoryRevision(value => value + 1);
+            }}
+          >
+            Refresh refund positions
+          </button>
+
+          {!summary.returns.some(ret =>
+            ret.financialPosition &&
+            !ret.financialPosition.refundExecutionBlocked &&
+            !ret.financialPosition.requiresReconciliation &&
+            Number(ret.refundOutstanding) > 0
+          ) && (
+            <p className="hint">
+              No verified outstanding refund is currently
+              eligible for a new payout.
+            </p>
+          )}
           <p className="hint">
             Manager-only operation. Prepare the refund before
             handing over cash or completing the external refund.
@@ -802,6 +1071,9 @@ export default function ReturnsPanel({
               <option value="">Select return to settle</option>
               {summary.returns
                 .filter(ret =>
+                  !!ret.financialPosition &&
+                  !ret.financialPosition.refundExecutionBlocked &&
+                  !ret.financialPosition.requiresReconciliation &&
                   Number(ret.refundOutstanding) > 0
                 )
                 .map(ret => (
@@ -889,6 +1161,9 @@ export default function ReturnsPanel({
               <button
                 disabled={
                   payoutBusy ||
+                  !selectedPayoutReturn.financialPosition ||
+                  selectedPayoutReturn.financialPosition.refundExecutionBlocked ||
+                  selectedPayoutReturn.financialPosition.requiresReconciliation ||
                   !payoutAmount ||
                   !!payoutKey || !shiftId || !deviceId ||
                   (payoutMethod !== 'CASH' &&

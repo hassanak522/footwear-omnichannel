@@ -4,6 +4,7 @@ import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { PosTenderType, Prisma } from '@prisma/client';
 import { Db } from './db';
+import { refundCorrectionEntitlement, authoritativeRefundPosition } from './refund-entitlement';
 import { assertLocation, CurrentUser, JwtAuthGuard, Principal, Roles, RolesGuard } from './auth';
 
 export async function withPosTransactionRetry<T>(
@@ -278,6 +279,51 @@ const pointsPer100=()=>{const raw=process.env.LOYALTY_POINTS_PER_100_PKR??'0';re
 @Injectable()
 export class PosService {
  constructor(private db:Db){}
+
+ // R10_3D24_48D3G4D4I2_REFUND_POSITION_API
+
+ async refundPosition(
+  returnId:string,
+  u:Principal
+ ){
+  if(
+   !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    .test(returnId)
+  ){
+   throw new BadRequestException(
+    'Valid return UUID required'
+   );
+  }
+
+  return this.db.$transaction(async tx=>{
+   const ret=await tx.posReturn.findUnique({
+    where:{id:returnId.toLowerCase()},
+    select:{
+     id:true,
+     locationId:true
+    }
+   });
+
+   if(!ret){
+    throw new NotFoundException(
+     'Return not found'
+    );
+   }
+
+   this.branchAccess(u,ret.locationId);
+
+   return authoritativeRefundPosition(
+    tx,
+    ret.id
+   );
+
+  },{
+   isolationLevel:
+    Prisma.TransactionIsolationLevel.RepeatableRead,
+   timeout:15000
+  });
+ }
+
 
  // R10_3D23B_SERVICE_TENDER_GUARD
  private assertPhysicalTender(type:PosTenderType){
@@ -3067,6 +3113,30 @@ await tx.auditLog.create({data:{actorId:u.id,action:'POS_RETURN_APPROVED',entity
      };
     }
 
+    // R10_3D24_48D_REFUND_CORRECTION_EXCLUSIVITY
+    const relatedRefundAttempts=
+     await tx.posRefundAttempt.findMany({
+      where:{returnId:dto.returnId},
+      select:{id:true}
+     });
+
+    const activeFinancialCorrection=
+     await tx.posFinancialCorrection.findFirst({
+      where:{
+       refundAttemptId:{
+        in:relatedRefundAttempts.map(a=>a.id)
+       },
+       status:{in:['PENDING','APPROVED']}
+      },
+      select:{id:true}
+     });
+
+    if(activeFinancialCorrection){
+     throw new ConflictException(
+      'Return has an active financial correction. Additional refund execution is blocked.'
+     );
+    }
+
     const settled=await tx.posRefundSettlement.findUnique({
      where:{idempotencyKey:dto.idempotencyKey}
     });
@@ -5180,6 +5250,29 @@ const ret=await tx.posReturn.findUnique({
      );
     }
 
+    // R10_3D24_48D3G4D4_ELIGIBILITY
+    const correctionEntitlement =
+     await refundCorrectionEntitlement(tx,ret.id);
+
+    const historicalCents =
+     correctionEntitlement.historicalCents;
+
+    if(correctionEntitlement.correctionHold){
+     throw new ConflictException(
+      'Financial correction hold blocks additional refund execution'
+     );
+    }
+
+    if(
+     correctionEntitlement.unresolvedAttemptIds.some(
+      id=>id!==dto.idempotencyKey
+     )
+    ){
+     throw new ConflictException(
+      'Another unresolved refund attempt reserves this return'
+     );
+    }
+
     const dueCents=originalReturnCents-exchangeCreditCents;
 
     const settledCents=ret.settlements.reduce(
@@ -5190,7 +5283,7 @@ const ret=await tx.posReturn.findUnique({
 
     if(
      dueCents<=0||
-     settledCents+amountCents>dueCents
+     settledCents+historicalCents+amountCents>dueCents
     ){
      throw new ConflictException(
       'Settlement exceeds the outstanding refund amount'
@@ -5203,6 +5296,7 @@ const ret=await tx.posReturn.findUnique({
    !Number.isSafeInteger(exchangeCreditCents)||
    !Number.isSafeInteger(settledCents)||
    !Number.isSafeInteger(dueCents)||
+   !Number.isSafeInteger(settledCents+historicalCents)||
    settledCents<0||
    dueCents<0
   ){
@@ -5216,7 +5310,11 @@ const ret=await tx.posReturn.findUnique({
    originalReturnCents,
    exchangeCreditCents,
    dueCents,
-   settledCents
+   settledCents,
+   historicalCents,
+   outstandingCents:Math.max(
+    0,dueCents-settledCents-historicalCents
+   )
   };
  }
 
@@ -5330,7 +5428,37 @@ const existing=await tx.posRefundSettlement.findUnique({
       );
      }
 
+     if(registered&&(
+      registered.status!=='ACCEPTED'||
+      registered.paymentState!=='CONFIRMED'||
+      registered.settlementId!==existing.id||
+      registered.returnId!==existing.returnId||
+      registered.locationId!==previousReturn.locationId||
+      registered.method!==existing.method||
+      !registered.amount.eq(existing.amount)
+     )){
+      throw new ConflictException(
+       'Existing refund settlement requires financial integrity review'
+      );
+     }
+
      return {...existing,duplicate:true};
+    }
+
+    // R10_3D24_48B_SETTLEMENT_LOCK_INTEGRITY
+    // A newly visible registration must not bypass the shift lock.
+    if(registered&&(
+     !initialAttempt||
+     initialAttempt.id!==registered.id||
+     initialAttempt.shiftId!==registered.shiftId||
+     initialAttempt.locationId!==registered.locationId||
+     initialAttempt.deviceId!==registered.deviceId||
+     initialAttempt.returnId!==registered.returnId||
+     initialAttempt.payloadHash!==registered.payloadHash
+    )){
+     throw new ConflictException(
+      'Refund registration changed during settlement. Retry using the original refund identity.'
+     );
     }
 
     // R10_3D24C_REQUIRED_RESERVATION
@@ -11936,6 +12064,16 @@ async saleReturnHistory(saleId:string,u:Principal){
 }
 @Controller('pos') @UseGuards(JwtAuthGuard,RolesGuard)
 export class PosController {
+
+ @Get('returns/:returnId/refund-position')
+ @Roles('SUPER_ADMIN','BRANCH_MANAGER')
+ refundPosition(
+  @Param('returnId') returnId:string,
+  @CurrentUser() u:Principal
+ ){
+  return this.pos.refundPosition(returnId,u);
+ }
+
  constructor(private pos:PosService){}
 
  // R10_3D7_HQ_OVERSIGHT_ROUTE

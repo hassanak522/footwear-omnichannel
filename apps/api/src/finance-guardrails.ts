@@ -58,6 +58,13 @@ export class FinanceGuardrailsController {
     try{
       return await this.db.$transaction(async tx=>{
         // PostgreSQL advisory lock scoped to the location prevents concurrent overlapping inserts here.
+                // R10_3D24_48D3F_PERIOD_LOCK_ORDER
+
+        await tx.$executeRaw`
+          LOCK TABLE "FinancePeriodLock"
+          IN SHARE ROW EXCLUSIVE MODE
+        `;
+
         await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${body.locationId}))`;
         const overlap=await tx.financePeriodLock.findFirst({where:{
           locationId:body.locationId,periodStart:{lt:end},periodEnd:{gt:start}

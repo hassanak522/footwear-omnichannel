@@ -1556,3 +1556,150 @@ model PosPaymentReconciliation {
   @@index([shiftId, status])
   @@index([submittedAt])
 }
+
+// R10_3D24_48C_FINANCIAL_HISTORY_SEAL
+model PosFinancialHistorySeal {
+  entityType String
+  entityId   String   @db.Uuid
+  sealedAt   DateTime @default(now())
+
+  @@id([entityType, entityId])
+}
+
+// R10_3D24_48D_FINANCIAL_CORRECTION_REGISTER
+model PosFinancialCorrection {
+  id                String   @id @db.Uuid
+  investigationId   String   @db.Uuid
+  refundAttemptId   String?  @db.Uuid
+  exchangeAttemptId String?  @db.Uuid
+  locationId        String   @db.Uuid
+  originalShiftId   String   @db.Uuid
+  originalDeviceId  String   @db.Uuid
+  payloadHash       String
+  correctionType    String   @db.VarChar(40)
+  amount            Decimal  @db.Decimal(12, 2)
+  evidenceReference String   @db.VarChar(200)
+  reason            String   @db.VarChar(1000)
+  status            String   @default("PENDING")
+  submittedById     String   @db.Uuid
+  submittedAt       DateTime @default(now())
+  reviewedById      String?  @db.Uuid
+  reviewedAt        DateTime?
+  reviewNote        String?  @db.VarChar(1000)
+  updatedAt         DateTime @updatedAt
+
+  @@index([investigationId, status])
+  @@index([locationId, status, submittedAt])
+  @@index([refundAttemptId, status])
+  @@index([exchangeAttemptId, status])
+}
+
+model PosFinancialCorrectionExecution {
+  id                   String   @id @db.Uuid
+  correctionId         String   @unique @db.Uuid
+  locationId           String   @db.Uuid
+  amount               Decimal  @db.Decimal(12, 2)
+  executionType        String   @db.VarChar(40)
+  evidenceReference    String   @db.VarChar(200)
+  evidenceNote         String   @db.VarChar(1000)
+  debitAccountCode     String   @db.VarChar(32)
+  creditAccountCode    String   @db.VarChar(32)
+  postingBatchId       String   @unique @db.Uuid
+  recordedById         String   @db.Uuid
+  recordedAt           DateTime @default(now())
+
+  @@index([locationId, recordedAt])
+}
+
+model PosFinancialCorrectionPosting {
+  id             String   @id @db.Uuid
+  correctionId   String   @unique @db.Uuid
+  executionId    String   @unique @db.Uuid
+  postingBatchId String   @unique @db.Uuid
+  journalId      String   @unique @db.Uuid
+  locationId     String   @db.Uuid
+  amount         Decimal  @db.Decimal(12,2)
+  postedById     String   @db.Uuid
+  postedAt       DateTime @default(now())
+  postingNote    String   @db.VarChar(1000)
+
+  @@index([locationId,postedAt])
+}
+
+model PosFinancialCorrectionClosure {
+  id             String   @id @db.Uuid
+  correctionId   String   @unique @db.Uuid
+  executionId    String   @unique @db.Uuid
+  postingId      String   @unique @db.Uuid
+  locationId     String   @db.Uuid
+  amount         Decimal  @db.Decimal(12,2)
+  authorizedById String   @db.Uuid
+  authorizedAt   DateTime @default(now())
+  closureNote    String   @db.VarChar(1000)
+
+  @@index([locationId,authorizedAt])
+}
+
+model PosFinancialCorrectionRelease {
+  id             String   @id @db.Uuid
+  correctionId   String   @unique @db.Uuid
+  closureId      String   @unique @db.Uuid
+  locationId     String   @db.Uuid
+  amount         Decimal  @db.Decimal(12,2)
+  releasedById   String   @db.Uuid
+  releasedAt     DateTime @default(now())
+  releaseNote    String   @db.VarChar(1000)
+
+  @@index([locationId,releasedAt])
+}
+
+// R10_3D24_48D3G4D2_ECONOMIC_EVENT
+model PosFinancialCorrectionEconomicEvent {
+  id                String   @id @db.Uuid
+  correctionId      String   @unique @db.Uuid
+  executionId       String   @unique @db.Uuid
+  locationId        String   @db.Uuid
+  originalShiftId   String   @db.Uuid
+  economicEventAt   DateTime
+  direction         String   @db.VarChar(16)
+  amount            Decimal  @db.Decimal(12,2)
+  cashAmount        Decimal  @db.Decimal(12,2)
+  cardAmount        Decimal  @db.Decimal(12,2)
+  otherAmount       Decimal  @db.Decimal(12,2)
+  evidenceReference String   @db.VarChar(200)
+  evidenceNote      String   @db.VarChar(1000)
+  recordedById      String   @db.Uuid
+  recordedAt        DateTime @default(now())
+
+  @@index([locationId,economicEventAt])
+  @@index([originalShiftId])
+}
+
+
+model PosCashDenominationCount {
+  id           String   @id @default(uuid()) @db.Uuid
+  shiftId      String   @unique @db.Uuid
+  locationId   String   @db.Uuid
+  denominations Json
+  total        Decimal  @db.Decimal(12, 2)
+  recordedById String   @db.Uuid
+  recordedAt   DateTime @default(now())
+
+  @@index([locationId, recordedAt])
+}
+
+model PosCashHandover {
+  id               String   @id @default(uuid()) @db.Uuid
+  shiftId          String   @unique @db.Uuid
+  locationId       String   @db.Uuid
+  amount           Decimal  @db.Decimal(12, 2)
+  submittedById    String   @db.Uuid
+  submittedAt      DateTime @default(now())
+  submissionNote   String   @db.VarChar(1000)
+  status           String   @default("SUBMITTED") @db.VarChar(24)
+  acknowledgedById String?  @db.Uuid
+  acknowledgedAt   DateTime?
+  acknowledgementNote String? @db.VarChar(1000)
+
+  @@index([locationId, status, submittedAt])
+}

@@ -102,21 +102,70 @@ export class FinanceControlsV2Controller {
   }
 
   @Post('payment-requests/:id/decision')
-  async decide(@Param('id') id:string,@Body() body:{decision:string;note:string},
-    @CurrentUser() user:Principal) {
-    if(!['APPROVED','REJECTED'].includes(body.decision)||!body.note?.trim())
-      throw new BadRequestException('APPROVED or REJECTED and a reason required');
-    const req=await this.db.supplierPaymentRequest.findUnique({where:{id}});
-    if(!req)throw new BadRequestException('Payment request not found');
-    assertLocation(user,req.warehouseId);
-    if(req.requestedById===user.id)throw new BadRequestException('Self-approval is prohibited');
-    const updated=await this.db.supplierPaymentRequest.updateMany({
-      where:{id,status:'PENDING'},data:{status:body.decision,note:body.note.trim(),reviewedById:user.id,reviewedAt:new Date()}
-    });
-    if(updated.count!==1)throw new ConflictException('Payment request already decided');
-    return this.db.supplierPaymentRequest.findUniqueOrThrow({where:{id}});
-  }
+  async decide(
+    @Param('id') id:string,
+    @Body() body:{decision:string;note:string},
+    @CurrentUser() user:Principal
+  ) {
+    if(!['APPROVED','REJECTED'].includes(body.decision)||
+       !body.note?.trim())
+      throw new BadRequestException(
+        'APPROVED or REJECTED and a reason required'
+      );
 
+    return this.db.$transaction(async tx=>{
+
+      await tx.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtext(${`supplier-payment-decision:${id}`})
+        )
+      `;
+
+      const req=await tx.supplierPaymentRequest.findUnique({
+        where:{id}
+      });
+
+      if(!req)
+        throw new BadRequestException(
+          'Payment request not found'
+        );
+
+      assertLocation(user,req.warehouseId);
+
+      if(req.requestedById===user.id)
+        throw new BadRequestException(
+          'Self-approval is prohibited'
+        );
+
+      if(req.status!=='PENDING')
+        throw new ConflictException(
+          'Payment request already decided'
+        );
+
+      const updated=await tx.supplierPaymentRequest.updateMany({
+        where:{
+          id,
+          status:'PENDING'
+        },
+        data:{
+          status:body.decision,
+          note:body.note.trim(),
+          reviewedById:user.id,
+          reviewedAt:new Date()
+        }
+      });
+
+      if(updated.count!==1)
+        throw new ConflictException(
+          'Payment request already decided'
+        );
+
+      return tx.supplierPaymentRequest.findUniqueOrThrow({
+        where:{id}
+      });
+
+    });
+  }
   // M50: location-level HQ summaries of recorded snapshots and pending approvals.
   // This is NOT automated cross-location financial consolidation.
   @Get('hq-summary')

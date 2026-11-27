@@ -1,3 +1,4 @@
+import CashOperations from './cash-operations';
 import ReturnsPanel from './returns-panel';
 import {synchronizeFinancialJournal} from './financial-journal-sync';
 import React,{useEffect,useMemo,useRef,useState} from 'react';import{createRoot}from'react-dom/client';import{ShoppingCart,Search,RefreshCw,Wifi,WifiOff,Package,Receipt,Settings,LogOut,Plus,Minus,Trash2}from'lucide-react';import type{Variant,SalePayload}from'./global';import './style.css';
@@ -1671,6 +1672,13 @@ UNKNOWN and PREPARED attempts must be reconciled.
 </table>
 </div>
 </section>}
+{/* D24_FINAL_CASH_INTERFACE */}
+{tab==='history'&&token&&(
+ <CashOperations
+  key={token+location+device}
+  request={request}
+ />
+)}
 {tab==='history'&&<ReturnsPanel request={request} location={location} token={token} shiftId={shift} deviceId={device}/>}{tab==='history'&&<section className="panel"><div className="carthead"><h2>Local sales history</h2><span>{pending} waiting for sync</span></div><div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:12}}>
   <div className="hint">
     Total recorded: <strong>{history.length}</strong>
