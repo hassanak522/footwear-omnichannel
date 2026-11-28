@@ -388,6 +388,9 @@ export class ReplenishmentController {
     destinationId:r.destinationId,
     variantId:r.variantId,
     requestedQty:r.quantity,
+    unmetDemandQty:r.status==='REJECTED'
+     ?0
+     :Math.max(0,r.quantity-receivedQty),
     status:r.status,
     transferId:r.transferId,
     transferStatus:transfer?.status??null,
@@ -410,8 +413,16 @@ export class ReplenishmentController {
     fulfilled:rows.filter(r=>r.fulfilled).length,
     requiringAction:rows.filter(r=>r.requiresAction).length,
     awaitingFulfillment:rows.filter(
-     r=>!r.fulfilled&&!r.requiresAction
-    ).length
+     r=>r.status!=='REJECTED' &&
+        !r.fulfilled &&
+        !r.requiresAction
+    ).length,
+    rejected:rows.filter(
+     r=>r.status==='REJECTED'
+    ).length,
+    unmetDemandUnits:rows.reduce(
+     (sum,r)=>sum+r.unmetDemandQty,0
+    )
    },
    rows,
    note:'Operational status only. Results are limited to 500 recent requests.'
@@ -421,6 +432,18 @@ export class ReplenishmentController {
   assertLocation(u,d.destinationId);if(d.sourceId===d.destinationId)throw new BadRequestException('Choose another source');
   const [src,dst]=await Promise.all([this.db.location.findUniqueOrThrow({where:{id:d.sourceId}}),this.db.location.findUniqueOrThrow({where:{id:d.destinationId}})]);
   if(!src.active||!dst.active||dst.type!=='BRANCH'||!['BRANCH','WAREHOUSE'].includes(src.type))throw new BadRequestException('Invalid locations');
+  // R10_3D30_ACTIVE_VARIANT_GATE
+  const variant=await this.db.productVariant.findUnique({
+   where:{id:d.variantId},
+   select:{active:true}
+  });
+
+  if(!variant?.active){
+   throw new BadRequestException(
+    'Unknown or inactive replenishment variant'
+   );
+  }
+
   return this.db.replenishmentRequest.create({data:{...d,requestedById:u.id}});
  }
  // Atomic conversion: exactly one linked transfer for each approved request.
@@ -432,6 +455,17 @@ export class ReplenishmentController {
    assertLocation(u,r.sourceId);
    if(r.status==='FULFILLED' || r.transferId)throw new ConflictException('Transfer already linked to request');
    if(r.status!=='APPROVED')throw new ConflictException('Request must be approved');
+
+   const variant=await tx.productVariant.findUnique({
+    where:{id:r.variantId},
+    select:{active:true}
+   });
+
+   if(!variant?.active){
+    throw new ConflictException(
+     'Replenishment variant is no longer active'
+    );
+   }
    const locations=await tx.location.findMany({
     where:{
      id:{in:[r.sourceId,r.destinationId]},
@@ -572,6 +606,7 @@ export class ReplenishmentController {
     transferStatus:t.status,
     outcome,
     requestedQty:r.quantity,
+    unmetDemandQty:Math.max(0,r.quantity-received),
     dispatchedQty:line.dispatchedQty,
     receivedQty:received,
     damagedQty:damaged,
@@ -636,8 +671,28 @@ export class ReplenishmentController {
     where:{id:r.destinationId}
    });
 
-   if(!source?.active||!destination?.active)
-    throw new ConflictException('Replenishment location inactive');
+   if(
+    !source?.active ||
+    !destination?.active ||
+    !['WAREHOUSE','BRANCH'].includes(source.type) ||
+    destination.type!=='BRANCH' ||
+    source.id===destination.id
+   ){
+    throw new ConflictException(
+     'Replenishment locations are inactive or invalid'
+    );
+   }
+
+   const variant=await tx.productVariant.findUnique({
+    where:{id:r.variantId},
+    select:{active:true}
+   });
+
+   if(!variant?.active){
+    throw new ConflictException(
+     'Replenishment variant is no longer active'
+    );
+   }
 
    const result=await tx.replenishmentRequest.updateMany({
     where:{id,status:'REQUESTED'},

@@ -316,12 +316,75 @@ export default function PurchasingManagement() {
       return;
     }
 
+    // R10_3D27_PERSISTENT_RECEIPT_IDENTIFIER
+    const receiptLinesToPost = selected
+      .filter(l => l.quantity + l.damaged > 0)
+      .map(l => ({
+        variantId:l.variantId,
+        quantity:l.quantity,
+        damaged:l.damaged
+      }))
+      .sort((a,b)=>a.variantId.localeCompare(b.variantId));
+
+    const receiptStorageKey =
+      `royalstep:purchase-receipt:${order.id}`;
+
+    const receiptPayload =
+      JSON.stringify(receiptLinesToPost);
+
+    let receiptId:string;
+
+    try {
+      const existing =
+        localStorage.getItem(receiptStorageKey);
+
+      if(existing){
+        const pending=JSON.parse(existing);
+
+        if(pending.payload!==receiptPayload){
+          setError(
+            'An unresolved receipt submission exists. '+
+            'Review receipt history before changing quantities.'
+          );
+          return;
+        }
+
+        receiptId=pending.receiptId;
+      }else{
+        receiptId=crypto.randomUUID();
+
+        localStorage.setItem(
+          receiptStorageKey,
+          JSON.stringify({
+            receiptId,
+            payload:receiptPayload
+          })
+        );
+      }
+    }catch{
+      setError(
+        'Unable to preserve receipt retry information. '+
+        'No receipt was submitted.'
+      );
+      return;
+    }
+
     const saved = await execute(
       () => request(`/purchasing/orders/${order.id}/receive`, 'POST', {
-        lines: selected.filter(l => l.quantity + l.damaged > 0),
+        receiptId,
+        lines:receiptLinesToPost,
       }),
       'Goods receipt posted to warehouse inventory.',
     );
+
+    if(saved){
+      try{
+        localStorage.removeItem(receiptStorageKey);
+      }catch{
+        // Preserve the identifier if local cleanup fails.
+        // The server will safely recognize a matching replay.
+      }
+    }
 
     if (saved) {
       setReceipts(current => {
@@ -331,6 +394,127 @@ export default function PurchasingManagement() {
       });
     }
   };
+
+  // R10_3D27_RECEIPT_RECOVERY
+  async function recoverPendingReceipt(order: Item) {
+    setError('');
+
+    const storageKey =
+      `royalstep:purchase-receipt:${order.id}`;
+
+    try {
+      const stored=localStorage.getItem(storageKey);
+
+      if(!stored){
+        setError('No unresolved local receipt exists.');
+        return;
+      }
+
+      const pending=JSON.parse(stored);
+
+      if(
+        typeof pending.receiptId!=='string' ||
+        typeof pending.payload!=='string'
+      ){
+        throw new Error(
+          'Invalid local receipt recovery record.'
+        );
+      }
+
+      const history=await request(
+        `/purchasing/orders/${order.id}/receipts`
+      );
+
+      const recorded=(history.receipts || []).find(
+        (entry:any)=>
+          entry.receiptId===pending.receiptId
+      );
+
+      if(recorded){
+        const expected=JSON.parse(pending.payload);
+
+        const matches=
+          Array.isArray(expected) &&
+          Array.isArray(recorded.lines) &&
+          recorded.lines.length===expected.length &&
+          expected.every((line:any)=>
+            recorded.lines.some((entry:any)=>
+              entry.variantId===line.variantId &&
+              Number(entry.goodQty)===line.quantity &&
+              Number(entry.damagedQty)===line.damaged
+            )
+          );
+
+        if(!matches){
+          throw new Error(
+            'Recorded receipt differs from local submission. '+
+            'Contact HQ before proceeding.'
+          );
+        }
+
+        localStorage.removeItem(storageKey);
+
+        setReceipts(current=>{
+          const next={...current};
+          delete next[order.id];
+          return next;
+        });
+
+        await load();
+
+        window.alert(
+          'Receipt confirmed in warehouse records. '+
+          'Local recovery completed. Do not repost it.'
+        );
+
+        return;
+      }
+
+      if(order.status!=='SUBMITTED'){
+        throw new Error(
+          'Purchase order is no longer open. '+
+          'Contact HQ to resolve the pending receipt.'
+        );
+      }
+
+      if(!window.confirm(
+        'No matching receipt was found in the server history. '+
+        'Retry the original receipt using its existing identifier?'
+      )){
+        return;
+      }
+
+      const lines=JSON.parse(pending.payload);
+
+      const saved=await execute(
+        ()=>request(
+          `/purchasing/orders/${order.id}/receive`,
+          'POST',
+          {
+            receiptId:pending.receiptId,
+            lines
+          }
+        ),
+        'Pending goods receipt recovered successfully.'
+      );
+
+      if(saved){
+        localStorage.removeItem(storageKey);
+
+        setReceipts(current=>{
+          const next={...current};
+          delete next[order.id];
+          return next;
+        });
+      }
+    }catch(e){
+      setError(
+        e instanceof Error
+          ? e.message
+          : 'Receipt recovery failed.'
+      );
+    }
+  }
 
   async function toggleReceiptHistory(order: Item) {
     if (historyOpen[order.id]) {
@@ -665,6 +849,13 @@ export default function PurchasingManagement() {
                     : historyOpen[order.id]
                       ? 'Hide receipt history'
                       : 'View receipt history'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void recoverPendingReceipt(order)}
+                >
+                  Recover pending receipt
                 </button>
 
                 {historyOpen[order.id] && receiptHistory[order.id] && (

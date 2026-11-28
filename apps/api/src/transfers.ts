@@ -75,8 +75,38 @@ export class TransfersService {
     line.damagedQty===0&&
     line.shortageQty===0;
 
-   if(!fulfilled)
+   // R10_3D30_REPLENISHMENT_EXCEPTION_EVIDENCE
+   if(!fulfilled){
+    if(
+     transfer.status==='CANCELLED' ||
+     transfer.status==='SHORTAGE_CLOSED' ||
+     transfer.status==='RECEIVED'
+    ){
+     await tx.auditLog.create({
+      data:{
+       actorId:u.id,
+       action:'REPLENISHMENT_TRANSFER_EXCEPTION',
+       entityType:'ReplenishmentRequest',
+       entityId:request.id,
+       before:{status:request.status},
+       after:{
+        status:request.status,
+        transferId,
+        transferStatus:transfer.status,
+        requestedQty:request.quantity,
+        receivedQty:line.receivedQty,
+        damagedQty:line.damagedQty,
+        shortageQty:line.shortageQty,
+        outstandingQty:Math.max(
+         0,request.quantity-line.receivedQty
+        )
+       }
+      }
+     });
+    }
+
     continue;
+   }
 
    const changed=await tx.replenishmentRequest.updateMany({
     where:{
@@ -129,6 +159,43 @@ export class TransfersService {
   if(!transfer)throw new BadRequestException('Transfer not found');
   return transfer;
  }
+ // R10_3D29_TRANSFER_LOCATION_GATE
+ private async validateTransferLocations(
+  tx:Prisma.TransactionClient,
+  sourceId:string,
+  destinationId:string,
+  receivingOnly=false
+ ){
+  const locations=await tx.location.findMany({
+   where:{
+    id:{in:[sourceId,destinationId]}
+   }
+  });
+
+  const source=locations.find(l=>l.id===sourceId);
+  const destination=locations.find(
+   l=>l.id===destinationId
+  );
+
+  if(!receivingOnly && (
+   !source?.active ||
+   !['WAREHOUSE','BRANCH'].includes(source.type)
+  )){
+   throw new ConflictException(
+    'Transfer source is no longer active or eligible'
+   );
+  }
+
+  if(
+   !destination?.active ||
+   !['BRANCH','ONLINE'].includes(destination.type)
+  ){
+   throw new ConflictException(
+    'Transfer destination is no longer active or eligible'
+   );
+  }
+ }
+
  private async lockBalance(tx:Prisma.TransactionClient,locationId:string,variantId:string){
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${locationId+':'+variantId}))`;
   return tx.stockBalance.upsert({where:{locationId_variantId:{locationId,variantId}},create:{locationId,variantId},update:{}});
@@ -167,6 +234,23 @@ export class TransfersService {
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
    if(await this.once(tx,dto.idempotencyKey,'APPROVE',id,{}))return t;
    if(t.status!=='REQUESTED')throw new ConflictException('Transfer must be requested');
+
+   await this.validateTransferLocations(
+    tx,t.sourceId,t.destinationId
+   );
+
+   const activeVariants=await tx.productVariant.count({
+    where:{
+     id:{in:t.items.map(item=>item.variantId)},
+     active:true
+    }
+   });
+
+   if(activeVariants!==t.items.length){
+    throw new ConflictException(
+     'Transfer contains an inactive product variant'
+    );
+   }
    for(const item of [...t.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     const b=await this.lockBalance(tx,t.sourceId,item.variantId);
     if(b.onHand-b.reservedOnline-b.reservedReplenish-b.quarantined-b.safetyBuffer<item.requestedQty)throw new ConflictException(`Insufficient stock for ${item.variantId}`);
@@ -182,9 +266,26 @@ export class TransfersService {
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
    if(await this.once(tx,dto.idempotencyKey,'DISPATCH',id,{}))return t;
    if(t.status!=='APPROVED')throw new ConflictException('Transfer must be approved');
+
+   await this.validateTransferLocations(
+    tx,t.sourceId,t.destinationId
+   );
    for(const item of [...t.items].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     const b=await this.lockBalance(tx,t.sourceId,item.variantId);
-    if(b.onHand<item.requestedQty||b.reservedReplenish<item.requestedQty)throw new ConflictException('Reserved stock mismatch');
+    // R10_3D29_PROTECTED_DISPATCH
+    if(
+     b.onHand<item.requestedQty ||
+     b.reservedReplenish<item.requestedQty ||
+     b.onHand<
+      b.reservedOnline+
+      b.reservedReplenish+
+      b.quarantined+
+      b.safetyBuffer
+    ){
+     throw new ConflictException(
+      'Reserved or protected stock mismatch; dispatch stopped'
+     );
+    }
     await tx.stockBalance.update({where:{id:b.id},data:{onHand:{decrement:item.requestedQty},reservedReplenish:{decrement:item.requestedQty},version:{increment:1}}});
     await tx.stockTransferItem.update({where:{id:item.id},data:{dispatchedQty:item.requestedQty}});
     await tx.stockMovement.create({data:{locationId:t.sourceId,variantId:item.variantId,type:'TRANSFER_DISPATCH',quantityDelta:-item.requestedQty,referenceType:'STOCK_TRANSFER',referenceId:id,idempotencyKey:`transfer:${id}:dispatch:${item.variantId}`,actorId:u.id}});
@@ -199,6 +300,10 @@ export class TransfersService {
    const t=await this.lockedTransfer(tx,id);this.access(u,t.destinationId);
    if(await this.once(tx,dto.idempotencyKey,'RECEIVE',id,dto.items))return t;
    if(t.status!=='DISPATCHED'&&t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Transfer is not open for receipt');
+
+   await this.validateTransferLocations(
+    tx,t.sourceId,t.destinationId,true
+   );
    if(dto.items.length!==t.items.length||new Set(dto.items.map(i=>i.variantId)).size!==dto.items.length)throw new BadRequestException('Provide one receipt line for each dispatched variant');
    const expected=new Map(t.items.map(i=>[i.variantId,i]));
    let receivedThisTime=0;
@@ -297,7 +402,14 @@ export class TransfersService {
   return this.retrySerializable(()=>this.db.$transaction(async tx=>{
    const t=await this.lockedTransfer(tx,id);this.access(u,t.sourceId);
    if(await this.once(tx,dto.idempotencyKey,'SHORTAGE_CLOSE',id,{reason}))return t;
-   if(t.status!=='PARTIALLY_RECEIVED')throw new ConflictException('Only partially received transfers can be shortage-closed');
+   if(
+    t.status!=='PARTIALLY_RECEIVED' &&
+    t.status!=='DISPATCHED'
+   ){
+    throw new ConflictException(
+     'Only dispatched or partially received transfers can be shortage-closed'
+    );
+   }
    let outstanding=0;
    for(const item of t.items){
     const missing=item.dispatchedQty-item.receivedQty-item.damagedQty-item.shortageQty;
@@ -334,8 +446,8 @@ return { ...t, audit };
 export class TransfersController {
  constructor(private svc:TransfersService){}
  @Post() @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') create(@Body() dto:CreateTransferDto,@CurrentUser() u:Principal){return this.svc.create(dto,u);}
- @Get() list(@CurrentUser() u:Principal){return this.svc.list(u);}
- @Get(':id') get(@Param('id') id:string,@CurrentUser() u:Principal){return this.svc.get(id,u);}
+ @Get() @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') list(@CurrentUser() u:Principal){return this.svc.list(u);}
+ @Get(':id') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER','BRANCH_MANAGER') get(@Param('id') id:string,@CurrentUser() u:Principal){return this.svc.get(id,u);}
  @Post(':id/approve') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') approve(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.approve(id,dto,u);}
  @Post(':id/dispatch') @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER') dispatch(@Param('id') id:string,@Body() dto:ActionDto,@CurrentUser() u:Principal){return this.svc.dispatch(id,dto,u);}
  @Post(':id/receive') @Roles('SUPER_ADMIN','BRANCH_MANAGER','WAREHOUSE_MANAGER') receive(@Param('id') id:string,@Body() dto:ReceiveDto,@CurrentUser() u:Principal){return this.svc.receive(id,dto,u);}

@@ -589,8 +589,8 @@ export default function TransferManagement() {
   function closeShortage() {
     if (!selectedId || !details || busy) return;
 
-    if (details.status !== 'PARTIALLY_RECEIVED') {
-      setError('Shortage closure requires a partially received transfer.');
+    if (!['DISPATCHED','PARTIALLY_RECEIVED'].includes(String(details.status))) {
+      setError('Shortage closure requires a dispatched or partially received transfer.');
       return;
     }
 
@@ -1452,7 +1452,7 @@ export default function TransferManagement() {
             </div>
           )}
 
-          {details.status === 'PARTIALLY_RECEIVED' && (
+          {['DISPATCHED','PARTIALLY_RECEIVED'].includes(String(details.status)) && (
             <div style={panel}>
               <h4>Close outstanding shortage</h4>
 

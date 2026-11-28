@@ -219,7 +219,7 @@ export default function TransferExceptions() {
   }
 
   async function closeShortage() {
-    if (!selected || selected.status !== 'PARTIALLY_RECEIVED' ||
+    if (!selected || !['DISPATCHED','PARTIALLY_RECEIVED'].includes(String(selected.status)) ||
         busy) return;
 
     const cleanReason = reason.trim();
@@ -456,7 +456,7 @@ export default function TransferExceptions() {
             </table>
           </div>
 
-          {selected.status === 'PARTIALLY_RECEIVED' &&
+          {['DISPATCHED','PARTIALLY_RECEIVED'].includes(String(selected.status)) &&
             selected.items.some(i => outstanding(i) > 0) && (
             <>
               <p className="muted">

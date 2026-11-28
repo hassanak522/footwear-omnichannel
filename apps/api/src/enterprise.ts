@@ -17,7 +17,7 @@ class UpdateSupplierDto {
 class PoLine { @IsUUID() variantId!:string; @IsInt() @Min(1) quantity!:number; @IsNumber({maxDecimalPlaces:2}) @Min(0) unitCost!:number; }
 class PoDto { @IsUUID() supplierId!:string; @IsUUID() warehouseId!:string; @IsString() @MinLength(5) reference!:string; @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>PoLine) lines!:PoLine[]; }
 class ReceiveLine { @IsUUID() variantId!:string; @IsInt() @Min(0) quantity!:number; @IsInt() @Min(0) damaged!:number; }
-class ReceiveDto { @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReceiveLine) lines!:ReceiveLine[]; }
+class ReceiveDto { @IsOptional() @IsUUID() receiptId?:string; @IsArray() @ArrayMinSize(1) @ValidateNested({each:true}) @Type(()=>ReceiveLine) lines!:ReceiveLine[]; }
 @Controller('purchasing') @UseGuards(...guards) @Roles('SUPER_ADMIN','WAREHOUSE_MANAGER')
 export class PurchasingController {
  constructor(private db:Db){}
@@ -228,7 +228,61 @@ export class PurchasingController {
    if(!warehouse?.active||warehouse.type!=='WAREHOUSE')
     throw new ConflictException('Receiving warehouse is inactive');
 
-   if(order.status==='RECEIVED')throw new ConflictException('Already received');
+   // R10_3D27_PURCHASE_RECEIPT_IDEMPOTENCY
+    const priorReceipt=dto.receiptId ? await tx.stockMovement.findMany({
+     where:{
+      locationId:order.warehouseId,
+      referenceType:'PURCHASE_ORDER',
+      referenceId:id,
+      type:'SUPPLIER_RECEIPT',
+      idempotencyKey:{
+       startsWith:`purchase:${id}:${dto.receiptId}:`
+      }
+     }
+    }):[];
+
+    if(priorReceipt.length){
+     const requested=dto.lines.filter(
+      line=>line.quantity+line.damaged>0
+     );
+
+     const matches=
+      priorReceipt.length===requested.length &&
+      requested.every(line=>{
+       const previous=priorReceipt.find(
+        movement=>movement.variantId===line.variantId
+       );
+
+       if(!previous)return false;
+
+       const metadata=previous.metadata as
+        Record<string,unknown>|null;
+
+       return previous.quantityDelta===
+        line.quantity+line.damaged &&
+        Number(metadata?.goodQty)===line.quantity &&
+        Number(metadata?.damagedQty)===line.damaged;
+      });
+
+     if(!matches){
+      throw new ConflictException(
+       'Receipt identifier already used with different quantities'
+      );
+     }
+
+     return {
+      id,
+      receiptId:dto.receiptId,
+      status:order.status,
+      replayed:true,
+      remaining:order.lines.map(line=>({
+       variantId:line.variantId,
+       remainingQty:line.orderedQty-line.receivedQty
+      }))
+     };
+    }
+
+    if(order.status==='RECEIVED')throw new ConflictException('Already received');
    if(order.status!=='SUBMITTED')throw new ConflictException('Purchase order not submitted');
    if(dto.lines.length===0)throw new BadRequestException('No receipt lines');
    const byVariant=new Map(order.lines.map(l=>[l.variantId,l]));
@@ -240,7 +294,7 @@ export class PurchasingController {
     receivedTotal+=r.quantity+r.damaged;
    }
    if(receivedTotal===0)throw new BadRequestException('Receipt must contain at least one unit');
-   const receiptId=randomUUID();
+   const receiptId=dto.receiptId??randomUUID();
    for(const r of [...dto.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     const line=byVariant.get(r.variantId)!;
     const qty=r.quantity+r.damaged;
@@ -248,7 +302,7 @@ export class PurchasingController {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${order.warehouseId+':'+line.variantId}))`;
     await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:order.warehouseId,variantId:line.variantId}},create:{locationId:order.warehouseId,variantId:line.variantId,onHand:qty,quarantined:r.damaged},update:{onHand:{increment:qty},quarantined:{increment:r.damaged},version:{increment:1}}});
     await tx.purchaseOrderLine.update({where:{id:line.id},data:{receivedQty:{increment:qty}}});
-    await tx.stockMovement.create({data:{locationId:order.warehouseId,variantId:line.variantId,type:'SUPPLIER_RECEIPT',quantityDelta:qty,referenceType:'PURCHASE_ORDER',referenceId:id,idempotencyKey:`purchase:${id}:${receiptId}:${line.variantId}`,actorId:u.id,metadata:{receiptId,goodQty:r.quantity,damagedQty:r.damaged}}});
+    await tx.stockMovement.create({data:{locationId:order.warehouseId,variantId:line.variantId,type:'SUPPLIER_RECEIPT',quantityDelta:qty,referenceType:'PURCHASE_ORDER',referenceId:id,idempotencyKey:`purchase:${id}:${receiptId}:${line.variantId}`,actorId:u.id,metadata:{receiptId,goodQty:r.quantity,damagedQty:r.damaged,unitCost:line.unitCost.toString(),purchaseOrderLineId:line.id,supplierId:order.supplierId}}});
    }
    const complete=order.lines.every(l=>l.receivedQty+(dto.lines.find(r=>r.variantId===l.variantId)?.quantity??0)+(dto.lines.find(r=>r.variantId===l.variantId)?.damaged??0)===l.orderedQty);
    if(complete)await tx.purchaseOrder.update({where:{id},data:{status:'RECEIVED',receivedAt:new Date()}});
@@ -341,9 +395,37 @@ export class StockCountsController {
    const count=await tx.stockCount.findUniqueOrThrow({where:{id},include:{lines:true}});
    assertLocation(u,count.locationId);
    if(count.status!=='OPEN')throw new ConflictException('Count already finalized');
+
+    const countLocation=await tx.location.findUnique({
+     where:{id:count.locationId}
+    });
+
+    if(!countLocation?.active ||
+       !['WAREHOUSE','BRANCH'].includes(countLocation.type)){
+     throw new ConflictException(
+      'Stock count location is no longer active'
+     );
+    }
    for(const line of [...count.lines].sort((a,b)=>a.variantId.localeCompare(b.variantId))){
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${count.locationId+':'+line.variantId}))`;
     const b=await tx.stockBalance.upsert({where:{locationId_variantId:{locationId:count.locationId,variantId:line.variantId}},create:{locationId:count.locationId,variantId:line.variantId},update:{}});
+    // R10_3D28_STOCK_COUNT_MOVEMENT_FENCE
+    const interveningMovement=await tx.stockMovement.findFirst({
+     where:{
+      locationId:count.locationId,
+      variantId:line.variantId,
+      createdAt:{gte:count.createdAt},
+      quantityDelta:{not:0}
+     },
+     select:{id:true}
+    });
+
+    if(interveningMovement){
+     throw new ConflictException(
+      'Inventory moved since count creation; cancel and recount'
+     );
+    }
+
     if(b.onHand!==line.expectedQty)throw new ConflictException('Stock changed since count was created; recount required');
     if(line.countedQty<b.quarantined+b.reservedOnline+b.reservedReplenish+b.safetyBuffer)throw new ConflictException('Count below protected inventory');
     const delta=line.countedQty-b.onHand;
