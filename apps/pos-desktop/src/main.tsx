@@ -984,11 +984,8 @@ async function checkProductAvailability(v:Variant){
 
 async function validateRetailCheckout(){
  if(!navigator.onLine){
-  return window.confirm(
-   'OFFLINE CHECKOUT\n\n'+
-   'Central price and stock cannot be verified.\n'+
-   'This sale will remain provisional until synchronized.\n\n'+
-   'Continue under the existing offline sales policy?'
+  throw new Error(
+   'Offline checkout requires a valid server-issued offline authorization. Reconnect before collecting payment.'
   );
  }
 
@@ -1037,6 +1034,12 @@ async function validateRetailCheckout(){
 
 async function complete(){
  if(checkoutLockRef.current||busy)return;
+
+ // R10_3D25_OFFLINE_AUTHORIZATION_GATE
+ if(!navigator.onLine){
+  setStatus('Offline checkout is not authorized. Reconnect before collecting payment.');
+  return;
+ }
 
  if(!token||authBlockedRef.current){
   setStatus('Sign in again before recording a sale.');

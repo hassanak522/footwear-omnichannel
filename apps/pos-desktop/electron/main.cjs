@@ -1,4 +1,40 @@
 const {app,BrowserWindow,ipcMain,session}=require('electron');
+
+// R10_3D26_PRODUCTION_RUNTIME
+// Production builds must not inherit QA runtime switches.
+if (app.isPackaged) {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('POS_QA_')) {
+      delete process.env[key];
+    }
+  }
+  delete process.env.POS_USE_BUILT_UI;
+}
+
+// Prevent concurrent instances from opening the same
+// local transaction database.
+const productionInstanceLock =
+  app.requestSingleInstanceLock();
+
+if (!productionInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  const windows = BrowserWindow.getAllWindows();
+  const mainWindow = windows.find(w => w.isVisible())
+    || windows[0];
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
 const path=require('node:path');const fs=require('node:fs');const crypto=require('node:crypto');
 // M114-E: Isolate Electron QA data from operational POS data.
 if (process.env.POS_QA_MODE === '1') {
@@ -244,7 +280,7 @@ if (process.env.POS_QA_MODE === '1') {
     }
   );
 }
-session.defaultSession.webRequest.onHeadersReceived((details,callback)=>{if(details.resourceType==='mainFrame'){callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[`default-src 'self'; script-src 'self'${process.env.POS_QA_MODE === '1' ? " 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://royal-step-api-production.up.railway.app http://127.0.0.1:3001 http://localhost:3001${process.env.POS_QA_MODE === '1' ? ' http://127.0.0.1:3002 http://localhost:3002' : ''}; object-src 'none'; base-uri 'none'; form-action 'none'`]}});}else callback({responseHeaders:details.responseHeaders});});await init();ipcMain.handle('config:get',(_,k)=>readConfig(k));ipcMain.handle('config:set',(_,k,v)=>{if(!['apiUrl','deviceId','locationId','shiftId','session'].includes(k))throw Error('Invalid setting');saveConfig(k,v);return true;});ipcMain.handle('catalog:list',()=>rows('SELECT * FROM catalog ORDER BY title,size,color'));ipcMain.handle('catalog:replace',(_,items)=>{if(!Array.isArray(items)||items.length>100000)throw Error('Invalid catalog');db.run('BEGIN');try{db.run('DELETE FROM catalog');for(const i of items){if(!i.id||!i.barcode||!Number.isFinite(Number(i.price)))throw Error('Invalid product variant');db.run('INSERT INTO catalog VALUES (?,?,?,?,?,?,?)',[i.id,i.barcode,i.sku,i.title,i.size,i.color,Number(i.price)]);}db.run('COMMIT');persist();return items.length;}catch(e){db.run('ROLLBACK');throw e;}});/* R10_1_STANDARD_SALE_INTEGRITY */
+session.defaultSession.webRequest.onHeadersReceived((details,callback)=>{if(details.resourceType==='mainFrame'){callback({responseHeaders:{...details.responseHeaders,'Content-Security-Policy':[`default-src 'self'; script-src 'self'${process.env.POS_QA_MODE === '1' ? " 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='" : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://royal-step-api-production.up.railway.app${app.isPackaged ? '' : ' http://127.0.0.1:3001 http://localhost:3001'}${process.env.POS_QA_MODE === '1' ? ' http://127.0.0.1:3002 http://localhost:3002' : ''}; object-src 'none'; base-uri 'none'; form-action 'none'`]}});}else callback({responseHeaders:details.responseHeaders});});await init();ipcMain.handle('config:get',(_,k)=>readConfig(k));ipcMain.handle('config:set',(_,k,v)=>{if(!['apiUrl','deviceId','locationId','shiftId','session'].includes(k))throw Error('Invalid setting');saveConfig(k,v);return true;});ipcMain.handle('catalog:list',()=>rows('SELECT * FROM catalog ORDER BY title,size,color'));ipcMain.handle('catalog:replace',(_,items)=>{if(!Array.isArray(items)||items.length>100000)throw Error('Invalid catalog');db.run('BEGIN');try{db.run('DELETE FROM catalog');for(const i of items){if(!i.id||!i.barcode||!Number.isFinite(Number(i.price)))throw Error('Invalid product variant');db.run('INSERT INTO catalog VALUES (?,?,?,?,?,?,?)',[i.id,i.barcode,i.sku,i.title,i.size,i.color,Number(i.price)]);}db.run('COMMIT');persist();return items.length;}catch(e){db.run('ROLLBACK');throw e;}});/* R10_1_STANDARD_SALE_INTEGRITY */
 ipcMain.handle('sales:save',(_,payload)=>{
  if(!payload||typeof payload!=='object')
   throw Error('Invalid sale payload');
